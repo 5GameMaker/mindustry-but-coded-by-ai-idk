@@ -9987,6 +9987,48 @@ fn opengl_backend_placeholder_text_line_width(line: &str, pixel: f32) -> f32 {
     }
 }
 
+fn opengl_backend_markup_plain_text(text: &str) -> String {
+    let mut plain = String::with_capacity(text.len());
+    let mut chars = text.char_indices().peekable();
+
+    while let Some((_, ch)) = chars.next() {
+        if ch != '[' {
+            plain.push(ch);
+            continue;
+        }
+
+        if matches!(chars.peek(), Some((_, '['))) {
+            chars.next();
+            plain.push('[');
+            continue;
+        }
+
+        let mut tag = String::new();
+        let mut end_found = false;
+        while let Some((_, next)) = chars.next() {
+            if next == ']' {
+                end_found = true;
+                break;
+            }
+            tag.push(next);
+        }
+
+        let tag_like = tag.is_empty()
+            || tag
+                .chars()
+                .all(|tag_ch| tag_ch.is_ascii_alphanumeric() || matches!(tag_ch, '_' | '-' | '#'));
+        if !end_found || !tag_like {
+            plain.push('[');
+            plain.push_str(&tag);
+            if end_found {
+                plain.push(']');
+            }
+        }
+    }
+
+    plain
+}
+
 fn opengl_backend_icon_placeholder_name(character: char) -> Option<&'static str> {
     UPSTREAM_UI_ICON_GLYPHS
         .iter()
@@ -10383,6 +10425,16 @@ fn opengl_backend_text_placeholder_quads_without_outline(
     clip: Option<RenderRect>,
 ) -> Vec<DesktopGraphicsOpenGlBackendSpriteQuad> {
     if text.is_empty() || size <= f32::EPSILON || color[3] <= f32::EPSILON {
+        return Vec::new();
+    }
+    let plain_text;
+    let text = if style.markup {
+        plain_text = opengl_backend_markup_plain_text(text);
+        plain_text.as_str()
+    } else {
+        text
+    };
+    if text.is_empty() {
         return Vec::new();
     }
 
@@ -54499,6 +54551,76 @@ mod tests {
                 && color[2] == 0.0
                 && color[3] > 0.0
         }));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_placeholder_text_strips_mindustry_markup() {
+        assert_eq!(
+            super::opengl_backend_markup_plain_text("[accent]Play[] [lightgray]v158"),
+            "Play v158"
+        );
+        assert_eq!(
+            super::opengl_backend_markup_plain_text("[[not-a-tag] [bad tag]"),
+            "[not-a-tag] [bad tag]"
+        );
+
+        let style = RenderTextStyle::new(RenderTextAlign::Center)
+            .with_vertical_align(RenderTextVerticalAlign::Center)
+            .with_markup(true)
+            .with_integer_position(true);
+        let plain_quads = super::opengl_backend_text_placeholder_quads(
+            "Play v158",
+            RenderPoint::new(80.0, 42.0),
+            [0.88, 0.96, 1.0, 1.0],
+            18.0,
+            0.0,
+            RenderTextAlign::Center,
+            style,
+            Layer::OVERLAY_UI,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+        );
+        let markup_quads = super::opengl_backend_text_placeholder_quads(
+            "[accent]Play[] [lightgray]v158",
+            RenderPoint::new(80.0, 42.0),
+            [0.88, 0.96, 1.0, 1.0],
+            18.0,
+            0.0,
+            RenderTextAlign::Center,
+            style,
+            Layer::OVERLAY_UI,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+        );
+        let raw_quads = super::opengl_backend_text_placeholder_quads(
+            "[accent]Play[] [lightgray]v158",
+            RenderPoint::new(80.0, 42.0),
+            [0.88, 0.96, 1.0, 1.0],
+            18.0,
+            0.0,
+            RenderTextAlign::Center,
+            style.with_markup(false),
+            Layer::OVERLAY_UI,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+        );
+
+        assert!(!plain_quads.is_empty());
+        assert_eq!(
+            markup_quads.len(),
+            plain_quads.len(),
+            "Mindustry color tags should affect styling, not the visible placeholder glyph stream"
+        );
+        assert!(
+            raw_quads.len() > markup_quads.len(),
+            "without markup parsing the native fallback would visibly draw bracket tag glyphs"
+        );
     }
 
     #[test]

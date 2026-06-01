@@ -90,6 +90,7 @@ pub const MENU_FLAT_TOGGLE_MENU_STYLE: MenuFlatToggleMenuStyle = MenuFlatToggleM
     disabled_text_color: [0.5, 0.5, 0.5, 1.0],
     text_style: RenderTextStyle::new(RenderTextAlign::Center)
         .with_vertical_align(RenderTextVerticalAlign::Center)
+        .with_markup(true)
         .with_integer_position(true),
     fill_layer: 101.0,
     drawable_layer: 101.05,
@@ -851,6 +852,7 @@ impl MenuUiPlan {
                     ),
                     RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_markup(true)
                         .with_integer_position(true),
                 )
             } else {
@@ -3364,6 +3366,7 @@ mod tests {
             style.text_style,
             RenderTextStyle::new(RenderTextAlign::Center)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_markup(true)
                 .with_integer_position(true)
         );
     }
@@ -3504,6 +3507,7 @@ mod tests {
                             .abs()
                             < f32::EPSILON
                         && style.horizontal_align == RenderTextAlign::Start
+                        && style.markup
                         && !style.outline
             )
         }));
@@ -3752,6 +3756,7 @@ mod tests {
                     if text == "Custom Game"
                         && (position.y - (rect.center().y + MENU_MOBILE_BUTTON_LABEL_OFFSET_Y)).abs() < f32::EPSILON
                         && style.horizontal_align == RenderTextAlign::Center
+                        && style.markup
                         && (*layer
                             - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
                                 + MENU_BUTTON_LABEL_LAYER_OFFSET))
@@ -3946,6 +3951,34 @@ mod tests {
             custom_label_layer
                 > MENU_FLAT_TOGGLE_MENU_STYLE.text_layer + MENU_BUTTON_ICON_LAYER_OFFSET
         );
+    }
+
+    #[test]
+    fn menu_ui_plan_desktop_text_labels_keep_markup_enabled_for_literal_color_tags() {
+        let rect = RenderRect::new(10.0, 20.0, 230.0, 70.0);
+        let plan = MenuUiPlan {
+            mobile: false,
+            submenu_alpha: 1.0,
+            buttons: vec![MenuButtonPlan {
+                role: MenuButtonRole::Custom(0),
+                label: "[accent]SERVER[] BROWSER".to_string(),
+                icon_name: None,
+                rect,
+                selected: false,
+                hovered: false,
+                pressed: false,
+                submenu: false,
+            }],
+        };
+
+        let commands = plan.to_render_commands();
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, style, .. }
+                    if text == "[accent]SERVER[] BROWSER" && style.markup
+            )
+        }));
     }
 
     #[test]
