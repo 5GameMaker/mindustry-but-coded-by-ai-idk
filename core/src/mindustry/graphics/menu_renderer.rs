@@ -15,6 +15,8 @@ use crate::mindustry::ui::{
 
 pub const MENU_DARKNESS: f32 = 0.3;
 pub const MENU_DARKNESS_LAYER: f32 = 90.0;
+pub const MENU_SHADOW_TEXTURE_LAYER: f32 = 0.5;
+pub const MENU_SHADOW_TEXTURE_ALPHA: f32 = 1.0;
 pub const MENU_TILE_SIZE: f32 = 8.0;
 pub const MENU_SUBMENU_FADE_IN_SECONDS: f32 = 0.15;
 pub const MENU_SUBMENU_FADE_OUT_SECONDS: f32 = 0.2;
@@ -325,6 +327,17 @@ fn menu_push_desktop_panel_backgrounds(
 fn menu_color_with_alpha(mut color: [f32; 4], alpha_scale: f32) -> [f32; 4] {
     color[3] = (color[3] * alpha_scale.clamp(0.0, 1.0)).clamp(0.0, 1.0);
     color
+}
+
+fn menu_shadow_texture_rect(x: f32, y: f32, width: f32, height: f32) -> RenderRect {
+    let draw_width = width.abs();
+    let draw_height = height.abs();
+    RenderRect::new(
+        x - draw_width * 0.5,
+        y - draw_height * 0.5,
+        draw_width,
+        draw_height,
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1274,36 +1287,24 @@ impl MenuRenderCommand {
                 height,
             } => {
                 let mut commands = Vec::with_capacity(world.tiles.len());
+                let texture_rect = menu_shadow_texture_rect(x, y, width, height);
                 for tile in &world.tiles {
                     if tile.wall != MenuBlockKind::Air {
                         let tile_rect = menu_tile_rect(tile, tile_size);
-                        let shadow_offset = tile_size * 0.24;
                         commands.push(RenderCommand::fill_rect(
                             menu_transform_rect(
                                 RenderRect::new(
-                                    tile_rect.x - shadow_offset,
-                                    tile_rect.y - shadow_offset,
+                                    texture_rect.x + tile_rect.x,
+                                    texture_rect.y + tile_rect.y,
                                     tile_rect.width,
                                     tile_rect.height,
                                 ),
                                 transform,
                             ),
-                            [0.0, 0.0, 0.0, 0.35],
-                            0.5,
+                            [0.0, 0.0, 0.0, MENU_SHADOW_TEXTURE_ALPHA],
+                            MENU_SHADOW_TEXTURE_LAYER,
                         ));
                     }
-                }
-                if commands.is_empty() {
-                    let shadow_rect = if height.is_sign_negative() {
-                        RenderRect::new(x, y + height, width, -height)
-                    } else {
-                        RenderRect::new(x, y, width, height)
-                    };
-                    commands.push(RenderCommand::fill_rect(
-                        menu_transform_rect(shadow_rect, transform),
-                        [0.0, 0.0, 0.0, 0.35],
-                        0.5,
-                    ));
                 }
                 commands
             }
@@ -2527,7 +2528,15 @@ mod tests {
         ));
         assert!(matches!(
             plan.commands[1],
-            MenuRenderCommand::DrawShadowTexture { .. }
+            MenuRenderCommand::DrawShadowTexture {
+                x,
+                y,
+                width,
+                height,
+            } if (x - 396.0).abs() < f32::EPSILON
+                && (y - 196.0).abs() < f32::EPSILON
+                && (width - 800.0).abs() < f32::EPSILON
+                && (height + 400.0).abs() < f32::EPSILON
         ));
         assert!(matches!(
             plan.commands[2],
@@ -2682,24 +2691,54 @@ mod tests {
             cache_wall_id: 2,
         };
         let commands = MenuRenderCommand::DrawShadowTexture {
-            x: 0.0,
-            y: 0.0,
+            x: 4.0,
+            y: 4.0,
             width: 16.0,
             height: -16.0,
         }
         .to_render_commands(&world, MENU_TILE_SIZE);
 
-        let expected_offset = MENU_TILE_SIZE * 0.24;
         assert!(commands.iter().any(|command| matches!(
             command,
             RenderCommand::FillRect { rect, color, layer }
-                if (rect.x - (MENU_TILE_SIZE - expected_offset)).abs() < f32::EPSILON
-                    && (rect.y - (MENU_TILE_SIZE - expected_offset)).abs() < f32::EPSILON
+                if (rect.x - 4.0).abs() < f32::EPSILON
+                    && (rect.y - 4.0).abs() < f32::EPSILON
                     && (rect.width - MENU_TILE_SIZE).abs() < f32::EPSILON
                     && (rect.height - MENU_TILE_SIZE).abs() < f32::EPSILON
-                    && *color == [0.0, 0.0, 0.0, 0.35]
-                    && (*layer - 0.5).abs() < f32::EPSILON
+                    && *color == [0.0, 0.0, 0.0, MENU_SHADOW_TEXTURE_ALPHA]
+                    && (*layer - MENU_SHADOW_TEXTURE_LAYER).abs() < f32::EPSILON
         )));
+    }
+
+    #[test]
+    fn menu_shadow_texture_without_wall_tiles_stays_transparent_like_java_framebuffer() {
+        let world = MenuWorldPlan {
+            width: 2,
+            height: 2,
+            seed: 1,
+            tiles: vec![MenuTile {
+                x: 0,
+                y: 0,
+                floor: MenuBlockKind::Sand,
+                wall: MenuBlockKind::Air,
+                ore: MenuBlockKind::Air,
+            }],
+            cache_floor_id: 1,
+            cache_wall_id: 2,
+        };
+
+        let commands = MenuRenderCommand::DrawShadowTexture {
+            x: 4.0,
+            y: 4.0,
+            width: 16.0,
+            height: -16.0,
+        }
+        .to_render_commands(&world, MENU_TILE_SIZE);
+
+        assert!(
+            commands.is_empty(),
+            "Java shadow framebuffer starts clear; without wall pixels, drawing it must not add a black fallback rectangle"
+        );
     }
 
     #[test]
