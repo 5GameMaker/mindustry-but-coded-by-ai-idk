@@ -44,7 +44,8 @@ use mindustry_core::mindustry::game::{
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
 #[cfg(test)]
-use mindustry_core::mindustry::graphics::menu_renderer::{MENU_DARKNESS, MENU_DARKNESS_LAYER};
+use mindustry_core::mindustry::graphics::menu_renderer::MENU_DARKNESS;
+use mindustry_core::mindustry::graphics::menu_renderer::MENU_DARKNESS_LAYER;
 #[cfg(test)]
 use mindustry_core::mindustry::graphics::MenuCustomButton;
 use mindustry_core::mindustry::graphics::{
@@ -41721,15 +41722,6 @@ impl DesktopLauncher {
         let rect = viewport.as_rect();
         let time = self.menu_renderer_state.time;
         let mut commands = Vec::with_capacity(80);
-        commands.push(RenderCommand::custom(
-            "menu-background-approximation",
-            vec![
-                RenderProperty::new("java", "Renderer.drawBackground/LoadRenderer.draw"),
-                RenderProperty::new("width", width.to_string()),
-                RenderProperty::new("height", height.to_string()),
-                RenderProperty::new("time", format!("{time:.3}")),
-            ],
-        ));
         commands.push(RenderCommand::fill_rect(
             rect,
             [0.010, 0.015, 0.030, 1.0],
@@ -41849,13 +41841,43 @@ impl DesktopLauncher {
         commands
     }
 
+    fn render_command_layer(command: &RenderCommand) -> Option<f32> {
+        match command {
+            RenderCommand::FillRect { layer, .. }
+            | RenderCommand::StrokeRect { layer, .. }
+            | RenderCommand::DrawSprite { layer, .. }
+            | RenderCommand::DrawLine { layer, .. }
+            | RenderCommand::DrawCircle { layer, .. }
+            | RenderCommand::DrawPolygon { layer, .. }
+            | RenderCommand::DrawTriangle { layer, .. }
+            | RenderCommand::DrawPixel { layer, .. }
+            | RenderCommand::DrawText { layer, .. } => Some(*layer),
+            RenderCommand::Clear { .. }
+            | RenderCommand::SetBlend { .. }
+            | RenderCommand::SetClip { .. }
+            | RenderCommand::ClearClip
+            | RenderCommand::Custom { .. } => None,
+        }
+    }
+
+    fn menu_pass_has_java_world_background(pass: &RenderPass) -> bool {
+        pass.commands.iter().any(|command| {
+            Self::render_command_layer(command)
+                .is_some_and(|layer| (-5.0..=MENU_DARKNESS_LAYER).contains(&layer))
+        })
+    }
+
+    fn menu_pass_has_synthetic_background(pass: &RenderPass) -> bool {
+        pass.commands.iter().any(|command| {
+            Self::render_command_layer(command)
+                .is_some_and(|layer| (-130.0..=-80.0).contains(&layer))
+        })
+    }
+
     fn insert_menu_background_layers(&self, pass: &mut RenderPass, viewport: RenderViewport) {
-        if pass.commands.iter().any(|command| {
-            matches!(
-                command,
-                RenderCommand::Custom { name, .. } if name == "menu-background-approximation"
-            )
-        }) {
+        if Self::menu_pass_has_java_world_background(pass)
+            || Self::menu_pass_has_synthetic_background(pass)
+        {
             return;
         }
         let commands = self.menu_background_layer_commands(viewport);
@@ -59564,8 +59586,8 @@ version: "2.0.0"
         assert!(menu_pass.commands.iter().any(
             |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "Play")
         ));
-        assert!(menu_pass.commands.iter().any(
-            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "Campaign")
+        assert!(menu_pass.commands.iter().all(
+            |command| !matches!(command, RenderCommand::DrawText { text, .. } if text == "Campaign")
         ));
         assert!(
             menu_pass
@@ -59581,6 +59603,38 @@ version: "2.0.0"
             .sprite_quads
             .iter()
             .any(|quad| quad.symbol == "primitive:DrawText"));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_frame_prefers_java_menu_world_over_synthetic_space_background() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let pass = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain a render frame")
+            .passes
+            .iter()
+            .find(|pass| pass.kind == RenderPassKind::Custom("menu".to_string()))
+            .expect("menu frame should contain the Java menu pass");
+
+        assert!(
+            DesktopLauncher::menu_pass_has_java_world_background(pass),
+            "normal menu rendering should already contain the Java MenuRenderer floor/shadow/wall/flyer/darkness layers"
+        );
+        assert!(
+            !DesktopLauncher::menu_pass_has_synthetic_background(pass),
+            "the old space/planet approximation should not be layered behind a valid Java menu world"
+        );
+        assert!(pass.commands.iter().all(|command| {
+            !matches!(
+                command,
+                RenderCommand::Custom { name, .. } if name == "menu-background-approximation"
+            )
+        }));
     }
 
     #[test]
