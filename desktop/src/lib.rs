@@ -39478,9 +39478,9 @@ impl DesktopLauncher {
                 "modal: @mods.browser search={} sort={}",
                 self.mods_browser_search,
                 if self.mods_browser_sort_date {
-                    "@mods.sort.date"
+                    "@mods.browser.sortdate"
                 } else {
-                    "@mods.sort.name"
+                    "@mods.browser.sortstars"
                 }
             ));
         } else {
@@ -39576,19 +39576,22 @@ impl DesktopLauncher {
         let mut summary_parts = Vec::new();
         let repo = self.mods_route_mod_repo_at_index(index);
         if let Some(repo) = repo {
-            summary_parts.push(format!("repo: {repo}"));
+            summary_parts.push(format!(
+                "{} {repo}",
+                self.localize_bundle_markup_text("@mods.github.open")
+            ));
         }
         if let Some(root) = self.mods_route_mod_root_label_at_index(index) {
-            summary_parts.push(format!("root: {root}"));
+            summary_parts.push(format!(
+                "{}: {root}",
+                self.localize_bundle_markup_text("@mods.openfolder")
+            ));
         }
-        summary_parts.push(format!(
-            "status: {}",
-            if repo.is_some() {
-                "repo-linked"
-            } else {
-                "local"
-            }
-        ));
+        summary_parts.push(self.localize_bundle_markup_text(if repo.is_some() {
+            "@mods.browser.reinstall"
+        } else {
+            "@mods.browser.add"
+        }));
         summary_parts.join(" | ")
     }
 
@@ -39596,13 +39599,17 @@ impl DesktopLauncher {
         let search = self.mods_browser_search.trim();
         if search.is_empty() {
             (
-                "@mods.none".to_string(),
-                "@mod.import / @mods.browser".to_string(),
+                self.localize_bundle_markup_text("@mods.none"),
+                format!(
+                    "{} / {}",
+                    self.localize_bundle_markup_text("@mod.import"),
+                    self.localize_bundle_markup_text("@mods.browser")
+                ),
             )
         } else {
             (
-                format!("@none.found: {search}"),
-                format!("search: {search}"),
+                self.localize_bundle_markup_text(format!("@none.found: {search}")),
+                format!("{} {search}", self.localize_bundle_markup_text("@search")),
             )
         }
     }
@@ -39849,7 +39856,10 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.072,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            format!("[mods] {mod_name}"),
+            format!(
+                "{} {mod_name}",
+                self.localize_bundle_markup_text("@mods.name")
+            ),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
             [0.94, 0.98, 1.0, 1.0],
             15.0,
@@ -39862,7 +39872,10 @@ impl DesktopLauncher {
         ));
         if let Some(root) = self.mods_route_mod_root_at_index(index) {
             pass.push(RenderCommand::draw_text_styled(
-                format!("mod path: {root}"),
+                format!(
+                    "{}: {root}",
+                    self.localize_bundle_markup_text("@mods.openfolder")
+                ),
                 RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 58.0),
                 [0.62, 0.72, 0.8, 1.0],
                 10.0,
@@ -39880,27 +39893,38 @@ impl DesktopLauncher {
             .map(ModMetadata::author_or_unknown)
             .unwrap_or("@unknown");
         let mut details = vec![
-            format!("@editor.name: {mod_name}"),
-            format!("@editor.author: {author}"),
-            format!("@mod.version: {version}"),
+            format!(
+                "{} {mod_name}",
+                self.localize_bundle_markup_text("@editor.name")
+            ),
+            format!(
+                "{} {}",
+                self.localize_bundle_markup_text("@editor.author"),
+                self.localize_bundle_markup_text(author)
+            ),
+            format!(
+                "{} {}",
+                self.localize_bundle_markup_text("@mod.version"),
+                self.localize_bundle_markup_text(version)
+            ),
         ];
         if let Some(description) = meta
             .and_then(|meta| meta.description.as_deref())
             .filter(|description| !description.trim().is_empty())
         {
-            details.push(format!("@editor.description: {description}"));
+            details.push(format!(
+                "{} {description}",
+                self.localize_bundle_markup_text("@editor.description")
+            ));
         }
         if let Some(repo) = meta
             .and_then(|meta| meta.repo.as_deref())
             .filter(|repo| !repo.trim().is_empty())
         {
-            details.push(format!("repo: {repo}"));
-        }
-        if let Some(source_path) = meta
-            .and_then(|meta| meta.source_path.as_deref())
-            .filter(|source_path| !source_path.trim().is_empty())
-        {
-            details.push(format!("metadata: {source_path}"));
+            details.push(format!(
+                "{} {repo}",
+                self.localize_bundle_markup_text("@mods.github.open")
+            ));
         }
         for (row, detail) in details.iter().enumerate() {
             pass.push(RenderCommand::draw_text_styled(
@@ -39921,7 +39945,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             Layer::END_PIXELED + 0.083,
         );
@@ -39929,7 +39953,7 @@ impl DesktopLauncher {
             self.push_settings_text_button(
                 pass,
                 Self::schematic_info_button_rect(dialog, 1),
-                "@mods.openfolder",
+                self.localize_bundle_markup_text("@mods.openfolder"),
                 Some("link"),
                 Layer::END_PIXELED + 0.083,
             );
@@ -39937,7 +39961,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 2),
-            "@mods.viewcontent",
+            self.localize_bundle_markup_text("@mods.viewcontent"),
             Some("book"),
             Layer::END_PIXELED + 0.083,
         );
@@ -39971,7 +39995,10 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.088,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            format!("@mods.viewcontent: {mod_name}"),
+            format!(
+                "{}: {mod_name}",
+                self.localize_bundle_markup_text("@mods.viewcontent")
+            ),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
             [0.94, 0.98, 1.0, 1.0],
             14.0,
@@ -39985,8 +40012,13 @@ impl DesktopLauncher {
         pass.push(RenderCommand::draw_text_styled(
             meta.and_then(|meta| meta.description.as_deref())
                 .filter(|description| !description.trim().is_empty())
-                .map(|description| format!("content preview: {description}"))
-                .unwrap_or_else(|| "content preview unavailable".to_string()),
+                .map(|description| {
+                    format!(
+                        "{} {description}",
+                        self.localize_bundle_markup_text("@editor.description")
+                    )
+                })
+                .unwrap_or_else(|| self.localize_bundle_markup_text("@none")),
             RenderPoint::new(dialog.center().x, dialog.center().y + 24.0),
             [0.70, 0.78, 0.84, 1.0],
             12.0,
@@ -40002,24 +40034,39 @@ impl DesktopLauncher {
         let repo = meta
             .and_then(|meta| meta.repo.as_deref())
             .filter(|repo| !repo.trim().is_empty());
-        let source_path = meta
-            .and_then(|meta| meta.source_path.as_deref())
-            .filter(|source_path| !source_path.trim().is_empty());
         for (row, detail) in [
-            Some(format!("@editor.name: {mod_name}")),
             Some(format!(
-                "@editor.author: {}",
-                meta.map(ModMetadata::author_or_unknown)
-                    .unwrap_or("@unknown")
+                "{} {mod_name}",
+                self.localize_bundle_markup_text("@editor.name")
             )),
             Some(format!(
-                "@mod.version: {}",
-                meta.map(ModMetadata::version_or_unknown)
-                    .unwrap_or("@unknown")
+                "{} {}",
+                self.localize_bundle_markup_text("@editor.author"),
+                self.localize_bundle_markup_text(
+                    meta.map(ModMetadata::author_or_unknown)
+                        .unwrap_or("@unknown")
+                )
             )),
-            description.map(|description| format!("@editor.description: {description}")),
-            repo.map(|repo| format!("repo: {repo}")),
-            source_path.map(|source_path| format!("metadata: {source_path}")),
+            Some(format!(
+                "{} {}",
+                self.localize_bundle_markup_text("@mod.version"),
+                self.localize_bundle_markup_text(
+                    meta.map(ModMetadata::version_or_unknown)
+                        .unwrap_or("@unknown")
+                )
+            )),
+            description.map(|description| {
+                format!(
+                    "{} {description}",
+                    self.localize_bundle_markup_text("@editor.description")
+                )
+            }),
+            repo.map(|repo| {
+                format!(
+                    "{} {repo}",
+                    self.localize_bundle_markup_text("@mods.github.open")
+                )
+            }),
         ]
         .into_iter()
         .flatten()
@@ -40043,7 +40090,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             Layer::END_PIXELED + 0.092,
         );
@@ -40073,7 +40120,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.092,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@mod.import",
+            self.localize_bundle_markup_text("@mod.import"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 36.0),
             [0.94, 0.98, 1.0, 1.0],
             15.0,
@@ -40094,7 +40141,7 @@ impl DesktopLauncher {
             self.push_settings_text_button(
                 pass,
                 Self::schematic_modal_option_button_rect(dialog, index),
-                label,
+                self.localize_bundle_markup_text(label),
                 Some(icon),
                 Layer::END_PIXELED + 0.099 + index as f32 * 0.001,
             );
@@ -40102,7 +40149,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             Layer::END_PIXELED + 0.103,
         );
@@ -40135,7 +40182,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.090,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@mods.browser",
+            self.localize_bundle_markup_text("@mods.browser"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 34.0),
             [0.94, 0.98, 1.0, 1.0],
             15.0,
@@ -40168,7 +40215,7 @@ impl DesktopLauncher {
         ));
         pass.push(RenderCommand::draw_text_styled(
             if self.mods_browser_search.is_empty() {
-                "@mods.search".to_string()
+                self.localize_bundle_markup_text("@mods.search")
             } else {
                 self.mods_browser_search.clone()
             },
@@ -40189,9 +40236,9 @@ impl DesktopLauncher {
             pass,
             sort,
             if self.mods_browser_sort_date {
-                "@mods.sort.date"
+                self.localize_bundle_markup_text("@mods.browser.sortdate")
             } else {
-                "@mods.sort.name"
+                self.localize_bundle_markup_text("@mods.browser.sortstars")
             },
             Some(if self.mods_browser_sort_date {
                 "list"
@@ -40317,7 +40364,13 @@ impl DesktopLauncher {
                     .and_then(|meta| meta.version.as_deref())
                     .unwrap_or("@unknown");
                 pass.push(RenderCommand::draw_text_styled(
-                    format!("@editor.author: {author}  @mod.version: {version}"),
+                    format!(
+                        "{} {}  {} {}",
+                        self.localize_bundle_markup_text("@editor.author"),
+                        self.localize_bundle_markup_text(author),
+                        self.localize_bundle_markup_text("@mod.version"),
+                        self.localize_bundle_markup_text(version)
+                    ),
                     RenderPoint::new(text_x, rect.y + rect.height - 37.0),
                     [0.66, 0.76, 0.84, 1.0],
                     8.5,
@@ -40358,7 +40411,7 @@ impl DesktopLauncher {
                         Layer::END_PIXELED + 0.101 + visible_index as f32 * 0.001,
                     ));
                     pass.push(RenderCommand::draw_text_styled(
-                        action,
+                        self.localize_bundle_markup_text(action),
                         button.center(),
                         [0.78, 0.88, 0.96, 1.0],
                         7.5,
@@ -40374,7 +40427,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             Layer::END_PIXELED + 0.108,
         );
@@ -40384,13 +40437,13 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::route_back_button_rect_for_panel(panel),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             Layer::END_PIXELED + 0.024,
         );
 
         pass.push(RenderCommand::draw_text_styled(
-            "@mods",
+            self.localize_bundle_markup_text("@mods"),
             RenderPoint::new(panel.x + 28.0, panel.y + panel.height - 58.0),
             [0.72, 0.82, 0.9, 1.0],
             13.0,
@@ -40413,7 +40466,7 @@ impl DesktopLauncher {
             self.push_settings_text_button(
                 pass,
                 Self::mods_route_action_button_rect_for_panel(panel, index),
-                label,
+                self.localize_bundle_markup_text(label),
                 Some(icon),
                 Layer::END_PIXELED + 0.026 + index as f32 * 0.001,
             );
@@ -40446,7 +40499,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.026,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                "@mods.none",
+                self.localize_bundle_markup_text("@mods.none"),
                 RenderPoint::new(panel.center().x, empty.center().y + 10.0),
                 [0.78, 0.86, 0.92, 1.0],
                 12.0,
@@ -40457,7 +40510,11 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.027,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                "@mod.import / @mods.browser",
+                format!(
+                    "{} / {}",
+                    self.localize_bundle_markup_text("@mod.import"),
+                    self.localize_bundle_markup_text("@mods.browser")
+                ),
                 RenderPoint::new(panel.center().x, empty.center().y - 14.0),
                 [0.58, 0.70, 0.80, 1.0],
                 10.0,
@@ -56419,17 +56476,19 @@ repo: "Beta/Override"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@mods"));
+        assert!(texts.contains(&"Mods"));
         assert!(texts.contains(&"Alpha Pack"));
         assert!(texts.contains(&"Beta Override"));
         assert!(texts.contains(&"gamma"));
-        assert!(texts.iter().any(|text| text.contains("root: alpha pack")));
-        assert!(texts.iter().any(
-            |text| text.contains("repo: Beta/Override") && text.contains("status: repo-linked")
-        ));
-        assert!(texts.iter().any(|text| text.contains("status: local")));
-        assert!(texts.contains(&"@back"));
-        assert!(texts.contains(&"@mod.import"));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("Open Folder: alpha pack")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("Repo Beta/Override") && text.contains("Reinstall")));
+        assert!(texts.iter().any(|text| text.contains("Install")));
+        assert!(texts.contains(&"Back"));
+        assert!(texts.contains(&"Import Mod"));
         assert!(!texts.contains(&"browser search: Icon.zoom + Icon.list"));
         let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Mods);
         assert!(lines.contains(&"browser: BaseDialog @mods.browser".to_string()));
@@ -56526,19 +56585,19 @@ version: "3.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@mods.browser"));
+        assert!(texts.contains(&"Mod Browser"));
         assert!(texts.contains(&"beta"));
-        assert!(texts.contains(&"@mods.sort.name"));
+        assert!(texts.contains(&"Sort by stars"));
         assert!(texts.contains(&"Beta Override"));
         assert!(texts
             .iter()
-            .any(|text| text.contains("@editor.author: Beta Author")));
-        assert!(texts.iter().any(
-            |text| text.contains("repo: Beta/Override") && text.contains("status: repo-linked")
-        ));
-        assert!(texts.contains(&"@mods.browser.reinstall"));
-        assert!(texts.contains(&"@mods.github.open"));
-        assert!(texts.contains(&"@mods.browser.view-releases"));
+            .any(|text| text.contains("Author: Beta Author")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("Repo Beta/Override") && text.contains("Reinstall")));
+        assert!(texts.contains(&"Reinstall"));
+        assert!(texts.contains(&"Repo"));
+        assert!(texts.contains(&"View Releases"));
         assert_eq!(launcher.filtered_mods_browser_indices(), vec![1]);
         assert!(!texts.contains(&"browser search: Icon.zoom + Icon.list"));
 
@@ -56557,8 +56616,8 @@ version: "3.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(empty_texts.contains(&"@none.found: missing"));
-        assert!(empty_texts.contains(&"search: missing"));
+        assert!(empty_texts.contains(&"[lightgray]<none found>: missing"));
+        assert!(empty_texts.contains(&"Search: missing"));
         launcher.mods_browser_search = "beta".into();
 
         let list = DesktopLauncher::mods_browser_list_rect_for_dialog(dialog);
@@ -56668,7 +56727,8 @@ version: "3.0.0"
         let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Mods);
         assert!(lines
             .iter()
-            .any(|line| line.contains("modal: @mods.browser") && line.contains("@mods.sort.date")));
+            .any(|line| line.contains("modal: @mods.browser")
+                && line.contains("@mods.browser.sortdate")));
 
         let entry = DesktopLauncher::mods_browser_entry_rect_for_list(list, 0).center();
         assert_eq!(
@@ -56722,9 +56782,9 @@ version: "3.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@mod.import"));
-        assert!(texts.contains(&"@mod.import.file"));
-        assert!(texts.contains(&"@mod.import.github"));
+        assert!(texts.contains(&"Import Mod"));
+        assert!(texts.contains(&"Import File"));
+        assert!(texts.contains(&"Import From GitHub"));
 
         let dialog = DesktopLauncher::mods_import_dialog_rect_for_panel(panel);
         let file = DesktopLauncher::schematic_modal_option_button_rect(dialog, 0).center();
@@ -56832,15 +56892,15 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"[mods] Alpha Pack"));
-        assert!(texts.contains(&"mod path: C:/mods/alpha pack"));
-        assert!(texts.contains(&"@mods.openfolder"));
-        assert!(texts.contains(&"@editor.name: Alpha Pack"));
-        assert!(texts.contains(&"@mod.version: 1.0.0"));
-        assert!(texts.contains(&"@editor.author: Alpha Author"));
-        assert!(texts.contains(&"@editor.description: Alpha fixture mod."));
-        assert!(texts.contains(&"metadata: mod.hjson"));
-        assert!(texts.contains(&"@mods.viewcontent"));
+        assert!(texts.contains(&"Mod: Alpha Pack"));
+        assert!(texts.contains(&"Open Folder: C:/mods/alpha pack"));
+        assert!(texts.contains(&"Open Folder"));
+        assert!(texts.contains(&"Name: Alpha Pack"));
+        assert!(texts.contains(&"Version: 1.0.0"));
+        assert!(texts.contains(&"Author: Alpha Author"));
+        assert!(texts.contains(&"Description: Alpha fixture mod."));
+        assert!(!texts.iter().any(|text| text.starts_with("metadata:")));
+        assert!(texts.contains(&"View Content"));
         assert!(!texts.iter().any(|text| text.starts_with("mods scanned:")));
         assert!(!texts.contains(&"@mods.viewcontent: 0"));
         assert!(!texts.contains(&"state: loaded"));
@@ -56900,12 +56960,11 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(content_texts.contains(&"@mods.viewcontent: Alpha Pack"));
-        assert!(content_texts.contains(&"content preview: Alpha fixture mod."));
-        assert!(content_texts.contains(&"@editor.name: Alpha Pack"));
-        assert!(content_texts.contains(&"@editor.author: Alpha Author"));
-        assert!(content_texts.contains(&"@mod.version: 1.0.0"));
-        assert!(content_texts.contains(&"@editor.description: Alpha fixture mod."));
+        assert!(content_texts.contains(&"View Content: Alpha Pack"));
+        assert!(content_texts.contains(&"Description: Alpha fixture mod."));
+        assert!(content_texts.contains(&"Name: Alpha Pack"));
+        assert!(content_texts.contains(&"Author: Alpha Author"));
+        assert!(content_texts.contains(&"Version: 1.0.0"));
         assert!(!content_texts.contains(&"@none"));
         assert!(!content_texts.contains(&"@mods.contents.none"));
         assert!(!content_texts.contains(&"content entries: 0"));

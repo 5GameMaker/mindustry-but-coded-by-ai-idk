@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 682. ModsDialog 浏览器与详情页文案接入 bundle locale
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **79.5%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是让 Mods 顶层页、导入弹窗、浏览器弹窗与详情/内容弹窗减少 raw `@mods.*`、`@mod.*` 和调试式状态文案。
+- Java 对照依据：
+  - `ModsDialog` 使用 `mods.browser`、`mods.browser.add`、`mods.browser.reinstall`、`mods.browser.view-releases`、`mods.github.open`、`mods.browser.sortdate`、`mods.browser.sortstars`；
+  - 已安装 mod 详情使用 `mods.name`、`editor.name`、`editor.author`、`editor.description`、`mod.version`、`mods.openfolder`、`mods.viewcontent`；
+  - `bundle.properties` / 简中 / 繁中 bundle 提供上述核心 key。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 补 Mods/browser/import/detail 相关 key 的 EN/简中/繁中 fallback；
+  - `desktop/src/lib.rs`
+    - Mods 顶层标题、按钮、空态、浏览器标题/搜索/排序/动作按钮、导入弹窗、详情/内容弹窗按 `settings_locale` 解析；
+    - 将卡片摘要从 `status: repo-linked/local`、`root:` 等调试式文本收紧为用户态的 Repo/Open Folder/Install/Reinstall 信息；
+    - 详情/内容弹窗不再显示 `metadata:`，减少内部实现暴露；
+    - 同步更新 Mods 回归测试，避免继续锁定 raw key。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle --lib`
+  - `cargo test -p mindustry-desktop mods --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - Mods 浏览器还没有真正接入 GitHub release 列表、下载/安装链路与 Java 的完整状态机；
+  - 已安装 mod 详情还缺 Java `getStateText/getStateDetails` 的禁用、依赖、不兼容、错误内容等状态细分；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 681. AboutDialog 链接与贡献者文案接入 bundle locale
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
