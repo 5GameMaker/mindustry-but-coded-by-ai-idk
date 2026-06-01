@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 673. 菜单 Database 子项文案对齐上游 bundle
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **78.5%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是减少主菜单文案与 Java `bundle.properties` 的可见偏差。
+- Java 对照依据：
+  - `core/assets/bundles/bundle.properties` 中 `database.button = Database`；
+  - 同文件中 `database = Core Database`；
+  - `MenuFragment.buildDesktop()` 的根按钮使用 `@database.button`，子菜单内容按钮使用 `@database`。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - `UPSTREAM_MENU_BUNDLE_ENTRIES` 中 `database` 从 `Database` 修正为 `Core Database`；
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuButtonRole::ContentDatabase` fallback label 区分为 `Core Database`，避免 bundle 缺失时仍退回错误文案；
+    - 扩展菜单 role 回归断言。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle_entries_cover_menu_fragment_buttons --lib`
+  - `cargo test -p mindustry-core menu_button_roles_expose_upstream_menu_fragment_icons --lib`
+  - `cargo test -p mindustry-core menu_ui_plan_desktop_matches_upstream_main_and_submenu_geometry --lib`
+- 仍未完成：
+  - locale-aware 完整 bundle 加载还没接入；当前只是修正已内置英文表的可见错误；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 672. 菜单 logo 使用 atlas region 与 scale
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -583,7 +583,8 @@ impl MenuButtonRole {
             Self::Join => "Join Game",
             Self::CustomGame => "Custom Game",
             Self::LoadGame => "Load Game",
-            Self::Database | Self::ContentDatabase => "Database",
+            Self::Database => "Database",
+            Self::ContentDatabase => "Core Database",
             Self::Schematics => "Schematics",
             Self::TechTree => "Tech Tree",
             Self::About => "About",
@@ -3548,6 +3549,7 @@ mod tests {
         assert_eq!(MenuButtonRole::Custom(0).bundle_key(), None);
         assert_eq!(MenuButtonRole::Join.label(), "Join Game");
         assert_eq!(MenuButtonRole::CustomGame.label(), "Custom Game");
+        assert_eq!(MenuButtonRole::ContentDatabase.label(), "Core Database");
         assert_eq!(MenuButtonRole::Settings.label(), "Settings");
 
         for icon in [
