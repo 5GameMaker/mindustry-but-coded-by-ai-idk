@@ -15,6 +15,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 666. 主菜单 flatToggleMenut 文字皮肤对齐 Java
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **77.8%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是提升首屏主菜单还原度，减少 Rust 菜单按钮相对 Java `MenuFragment` 的描边/偏色差异。
+- Java 对照依据：
+  - `MenuFragment.buttons(...)` 使用 `Styles.flatToggleMenut`；
+  - `Styles.flatToggleMenut` 的 `font = Fonts.def`、`fontColor = Color.white`、`up = clear`、`down/checked = flatDown`、`over = flatOver`。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MENU_FLAT_TOGGLE_MENU_STYLE.text_color` 改为纯白，贴近 Java `Color.white`；
+    - 移除主菜单按钮 label/icon 的 outline 绘制，避免把 Java `Fonts.def` 菜单误渲成 outline 风格；
+    - 保持 `flatDown/flatOver/clear` drawable 映射不变，只收紧文字皮肤和图标文字 fallback。
+- 已验证：
+  - `cargo test -p mindustry-core menu_flat_toggle_menu_style_keeps_upstream_state_names_and_current_fallback_fills --lib`
+  - `cargo test -p mindustry-core menu_ui_plan_selected_buttons_emit_java_flat_down_drawable --lib`
+- 仍未完成：
+  - 首屏背景、native OpenGL 黑屏像素级回归、route shell 细节和完整 UI 页面仍需继续对照 Java；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 665. DatabaseDialog 打开时按当前星球选中 tab
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

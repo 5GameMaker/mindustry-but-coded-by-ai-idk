@@ -86,12 +86,11 @@ pub const MENU_FLAT_TOGGLE_MENU_STYLE: MenuFlatToggleMenuStyle = MenuFlatToggleM
     checked_drawable: "flat-down-base.9",
     over_drawable: "",
     disabled_drawable: "",
-    text_color: [0.88, 0.96, 1.0, 1.0],
+    text_color: [1.0, 1.0, 1.0, 1.0],
     disabled_text_color: [0.5, 0.5, 0.5, 1.0],
     text_style: RenderTextStyle::new(RenderTextAlign::Center)
         .with_vertical_align(RenderTextVerticalAlign::Center)
-        .with_integer_position(true)
-        .with_outline(true),
+        .with_integer_position(true),
     fill_layer: 101.0,
     drawable_layer: 101.05,
     text_layer: 101.1,
@@ -843,8 +842,7 @@ impl MenuUiPlan {
                     ),
                     RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true)
-                        .with_outline(true),
+                        .with_integer_position(true),
                 )
             } else {
                 (button.rect.center(), style.text_style)
@@ -882,8 +880,7 @@ fn menu_push_icon_render_commands(
             RenderTextStyle::new(RenderTextAlign::Center)
                 .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true)
-                .with_outline(true),
+                .with_integer_position(true),
             layer,
         ));
         return;
@@ -1136,8 +1133,7 @@ fn menu_push_icon_render_commands(
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true)
-                    .with_outline(true),
+                    .with_integer_position(true),
                 layer,
             ));
         }
@@ -3216,7 +3212,11 @@ mod tests {
         assert_eq!(style.checked_drawable, "flat-down-base.9");
         assert_eq!(style.over_drawable, "");
         assert_eq!(style.disabled_drawable, "");
-        assert_eq!(style.text_color, [0.88, 0.96, 1.0, 1.0]);
+        assert_eq!(
+            style.text_color,
+            [1.0, 1.0, 1.0, 1.0],
+            "Java Styles.flatToggleMenut uses Fonts.def with Color.white"
+        );
         assert_eq!(style.disabled_text_color, [0.5, 0.5, 0.5, 1.0]);
         assert_eq!(
             style.fill_for(MenuFlatToggleMenuState::Down),
@@ -3253,7 +3253,6 @@ mod tests {
             RenderTextStyle::new(RenderTextAlign::Center)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
-                .with_outline(true)
         );
     }
 
@@ -3354,6 +3353,7 @@ mod tests {
                 RenderCommand::DrawText { text, position, style, layer, .. }
                     if *text == upstream_ui_icon_glyph_string("play").unwrap()
                         && style.font == RenderFontId::Icon
+                        && !style.outline
                         && (position.x
                             - (rect.x
                                 + MENU_DESKTOP_BUTTON_MARGIN_LEFT
@@ -3392,6 +3392,7 @@ mod tests {
                             .abs()
                             < f32::EPSILON
                         && style.horizontal_align == RenderTextAlign::Start
+                        && !style.outline
             )
         }));
     }
