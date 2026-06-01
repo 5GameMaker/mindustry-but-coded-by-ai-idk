@@ -842,20 +842,39 @@ impl DesktopMenuRoute {
 
     pub const fn title(self) -> &'static str {
         match self {
-            Self::Campaign => "CAMPAIGN",
-            Self::Join => "JOIN GAME",
+            Self::Campaign => "Campaign",
+            Self::Join => "Join Game",
             Self::Host => "@hostserver",
-            Self::CustomGame => "CUSTOM GAME",
+            Self::CustomGame => "Custom Game",
             Self::SaveGame => "@savegame",
             Self::LoadGame => "@loadgame",
-            Self::Schematics => "SCHEMATICS",
-            Self::Database => "DATABASE",
-            Self::TechTree => "TECH TREE",
-            Self::About => "ABOUT",
-            Self::Discord => "DISCORD",
-            Self::Editor => "EDITOR",
-            Self::Mods => "MODS",
-            Self::Settings => "SETTINGS",
+            Self::Schematics => "Schematics",
+            Self::Database => "Core Database",
+            Self::TechTree => "",
+            Self::About => "About",
+            Self::Discord => "",
+            Self::Editor => "Editor",
+            Self::Mods => "Mods",
+            Self::Settings => "Settings",
+        }
+    }
+
+    pub const fn title_bundle_key(self) -> Option<&'static str> {
+        match self {
+            Self::Campaign => Some("campaign"),
+            Self::Join => Some("joingame"),
+            Self::Host => Some("hostserver"),
+            Self::CustomGame => Some("customgame"),
+            Self::SaveGame => Some("savegame"),
+            Self::LoadGame => Some("loadgame"),
+            Self::Schematics => Some("schematics"),
+            Self::Database => Some("database"),
+            Self::TechTree => None,
+            Self::About => Some("about.button"),
+            Self::Discord => None,
+            Self::Editor => Some("maps"),
+            Self::Mods => Some("mods"),
+            Self::Settings => Some("settings"),
         }
     }
 
@@ -18705,6 +18724,52 @@ impl DesktopLauncher {
         }
     }
 
+    fn localized_menu_route_title(&self, route: DesktopMenuRoute) -> String {
+        route
+            .title_bundle_key()
+            .and_then(|key| upstream_menu_bundle_value_for_locale(&self.settings_locale, key))
+            .unwrap_or_else(|| route.title())
+            .to_string()
+    }
+
+    fn localize_bundle_markup_text(&self, text: impl AsRef<str>) -> String {
+        let text = text.as_ref();
+        if !text.contains('@') {
+            return text.to_string();
+        }
+
+        let mut localized = String::with_capacity(text.len());
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch != '@' {
+                localized.push(ch);
+                continue;
+            }
+
+            let mut key = String::new();
+            while let Some(next) = chars.peek().copied() {
+                if next.is_ascii_alphanumeric() || matches!(next, '.' | '_' | '-') {
+                    key.push(next);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+
+            if key.is_empty() {
+                localized.push('@');
+            } else if let Some(value) =
+                upstream_menu_bundle_value_for_locale(&self.settings_locale, &key)
+            {
+                localized.push_str(value);
+            } else {
+                localized.push('@');
+                localized.push_str(&key);
+            }
+        }
+        localized
+    }
+
     fn block_renderer_world_snapshot(
         &self,
         visible_tiles: &[TileCoord],
@@ -23530,7 +23595,7 @@ impl DesktopLauncher {
         enabled: bool,
         style_name: &'static str,
     ) {
-        let label = label.into();
+        let label = self.localize_bundle_markup_text(label.into());
         let hovered = enabled
             && self
                 .last_menu_cursor
@@ -32927,11 +32992,11 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.082,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            if self.join_add_server_edit_index.is_some() {
+            self.localize_bundle_markup_text(if self.join_add_server_edit_index.is_some() {
                 "@server.edit"
             } else {
                 "@server.add"
-            },
+            }),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 32.0),
             [0.94, 0.98, 1.0, 1.0],
             15.0,
@@ -32945,7 +33010,7 @@ impl DesktopLauncher {
 
         let field = Self::join_add_dialog_text_rect(dialog);
         pass.push(RenderCommand::draw_text_styled(
-            "@joingame.ip",
+            self.localize_bundle_markup_text("@joingame.ip"),
             RenderPoint::new(dialog.x + 34.0, field.center().y),
             [0.78, 0.86, 0.94, 1.0],
             12.0,
@@ -33031,7 +33096,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.092,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@confirm",
+            self.localize_bundle_markup_text("@confirm"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
             [1.0, 0.92, 0.88, 1.0],
             14.0,
@@ -33048,7 +33113,7 @@ impl DesktopLauncher {
             .map(desktop_connect_target_display_ip)
             .unwrap_or_else(|| "?".into());
         pass.push(RenderCommand::draw_text_styled(
-            format!("@server.delete | {server}"),
+            self.localize_bundle_markup_text(format!("@server.delete | {server}")),
             RenderPoint::new(dialog.center().x, dialog.center().y + 10.0),
             [0.88, 0.90, 0.92, 1.0],
             11.0,
@@ -33098,7 +33163,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.098,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@warning",
+            self.localize_bundle_markup_text("@warning"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
             [1.0, 0.92, 0.76, 1.0],
             14.0,
@@ -33110,10 +33175,10 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.099,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            format!(
+            self.localize_bundle_markup_text(format!(
                 "@servers.disclaimer | {}",
                 desktop_connect_target_display_ip(target)
-            ),
+            )),
             RenderPoint::new(dialog.x + 28.0, dialog.center().y + 14.0),
             [0.88, 0.90, 0.84, 1.0],
             11.0,
@@ -33481,7 +33546,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.028,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@name",
+            self.localize_bundle_markup_text("@name"),
             RenderPoint::new(name_row.x + 16.0, name_row.center().y),
             [0.72, 0.82, 0.90, 1.0],
             11.0,
@@ -33541,7 +33606,8 @@ impl DesktopLauncher {
         .into_iter()
         .enumerate()
         {
-            let label = self.join_route_section_label(section);
+            let label = self.localize_bundle_markup_text(self.join_route_section_label(section));
+            let detail = self.localize_bundle_markup_text(detail);
             let collapsed = self.join_route_section_collapsed(section);
             let y = Self::join_route_section_header_y_for_panel(panel, section);
             pass.push(RenderCommand::draw_text_styled(
@@ -33632,7 +33698,7 @@ impl DesktopLauncher {
                 layer + 0.002,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                format!("{}   @server.version: {}", host.name, host.version),
+                format!("{}   v{}", host.name, host.version),
                 RenderPoint::new(card.x + 14.0, header.center().y),
                 [0.94, 0.99, 1.0, 1.0],
                 12.0,
@@ -33648,7 +33714,7 @@ impl DesktopLauncher {
                     "{}:{}  {}",
                     host.address,
                     host.port,
-                    self.join_route_local_section_label()
+                    self.localize_bundle_markup_text(self.join_route_local_section_label())
                 ),
                 RenderPoint::new(card.x + 14.0, card.y + card.height - 58.0),
                 [0.66, 0.78, 0.86, 1.0],
@@ -33664,7 +33730,9 @@ impl DesktopLauncher {
                 format!(
                     "save.map: {} / {}",
                     host.mapname,
-                    host.mode_name.as_deref().unwrap_or("@unknown")
+                    self.localize_bundle_markup_text(
+                        host.mode_name.as_deref().unwrap_or("@unknown")
+                    )
                 ),
                 format!("ping: {}ms", host.ping),
             ]
@@ -33672,7 +33740,7 @@ impl DesktopLauncher {
             .enumerate()
             {
                 pass.push(RenderCommand::draw_text_styled(
-                    line,
+                    self.localize_bundle_markup_text(line),
                     RenderPoint::new(
                         card.x + 14.0,
                         card.y + card.height - 82.0 - index as f32 * 18.0,
@@ -33716,7 +33784,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.032,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                "@none.found",
+                self.localize_bundle_markup_text("@none.found"),
                 RenderPoint::new(card.center().x, card.center().y + 10.0),
                 [0.86, 0.74, 0.72, 1.0],
                 13.0,
@@ -33728,14 +33796,14 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.034,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                format!(
+                self.localize_bundle_markup_text(format!(
                     "search: {}",
                     if self.join_search.is_empty() {
                         "@search"
                     } else {
                         self.join_search.as_str()
                     }
-                ),
+                )),
                 RenderPoint::new(card.center().x, card.center().y - 14.0),
                 [0.62, 0.72, 0.82, 1.0],
                 11.0,
@@ -33773,10 +33841,7 @@ impl DesktopLauncher {
                     layer + 0.002,
                 ));
                 pass.push(RenderCommand::draw_text_styled(
-                    format!(
-                        "{}   @server.version: {}",
-                        snapshot.address, snapshot.version
-                    ),
+                    format!("{}   v{}", snapshot.address, snapshot.version),
                     RenderPoint::new(card.x + 14.0, header.center().y),
                     [0.90, 0.96, 1.0, 1.0],
                     12.0,
@@ -33827,7 +33892,7 @@ impl DesktopLauncher {
                 .enumerate()
                 {
                     pass.push(RenderCommand::draw_text_styled(
-                        line,
+                        self.localize_bundle_markup_text(line),
                         RenderPoint::new(
                             card.x + 14.0,
                             card.y + card.height - 82.0 - index as f32 * 18.0,
@@ -33858,7 +33923,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.032,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                "@host.invalid",
+                self.localize_bundle_markup_text("@host.invalid"),
                 RenderPoint::new(card.x + 14.0, card.y + card.height - 28.0),
                 [0.86, 0.74, 0.72, 1.0],
                 13.0,
@@ -33890,7 +33955,7 @@ impl DesktopLauncher {
             let global_y = global_card.y - 30.0;
             let global_collapsed = self.join_route_section_collapsed(DesktopJoinSection::Global);
             pass.push(RenderCommand::draw_text_styled(
-                "@servers.global",
+                self.localize_bundle_markup_text("@servers.global"),
                 RenderPoint::new(panel.x + 36.0, global_y),
                 [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
                 12.0,
@@ -33940,7 +34005,7 @@ impl DesktopLauncher {
                 return;
             }
             pass.push(RenderCommand::draw_text_styled(
-                "@servers.community",
+                self.localize_bundle_markup_text("@servers.community"),
                 RenderPoint::new(panel.x + 36.0, global_y - 18.0),
                 [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
                 12.0,
@@ -33978,11 +34043,11 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.037,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                if self.join_search.is_empty() {
+                self.localize_bundle_markup_text(if self.join_search.is_empty() {
                     "@search".into()
                 } else {
                     self.join_search.clone()
-                },
+                }),
                 RenderPoint::new(search.x + 34.0, search.center().y),
                 [0.60, 0.70, 0.78, 1.0],
                 10.0,
@@ -34006,7 +34071,7 @@ impl DesktopLauncher {
             let visible_community_groups = self.visible_join_community_groups();
             if visible_community_groups.is_empty() {
                 pass.push(RenderCommand::draw_text_styled(
-                    "@hosts.none",
+                    self.localize_bundle_markup_text("@hosts.none"),
                     RenderPoint::new(panel.x + 36.0, search.y - 22.0),
                     [0.58, 0.68, 0.76, 1.0],
                     10.0,
@@ -34040,7 +34105,7 @@ impl DesktopLauncher {
                         .map(|host| format!("{}:{}", host.address, host.port))
                         .or_else(|| target.as_ref().map(desktop_connect_target_display_ip))
                         .or_else(|| group.addresses.first().cloned())
-                        .unwrap_or_else(|| "@unknown".into());
+                        .unwrap_or_else(|| self.localize_bundle_markup_text("@unknown"));
 
                     pass.push(RenderCommand::draw_sprite(
                         Self::settings_drawable_symbol("pane"),
@@ -34135,7 +34200,7 @@ impl DesktopLauncher {
                             format!("{} {}", host.version, host.version_type)
                         };
                         pass.push(RenderCommand::draw_text_styled(
-                            format!("{}   @server.version: {}", host.name, version),
+                            format!("{}   v{}", host.name, version),
                             RenderPoint::new(card.x + 12.0, header.y - 14.0),
                             [0.92, 0.98, 1.0, if hidden { 0.68 } else { 1.0 }],
                             11.0,
@@ -34173,7 +34238,9 @@ impl DesktopLauncher {
                             format!(
                                 "save.map: {} / {}",
                                 host.mapname,
-                                host.mode_name.as_deref().unwrap_or("@unknown")
+                                self.localize_bundle_markup_text(
+                                    host.mode_name.as_deref().unwrap_or("@unknown")
+                                )
                             ),
                             format!(
                                 "{} {}ms",
@@ -34185,7 +34252,7 @@ impl DesktopLauncher {
                         .enumerate()
                         {
                             pass.push(RenderCommand::draw_text_styled(
-                                line,
+                                self.localize_bundle_markup_text(line),
                                 RenderPoint::new(
                                     card.x + 12.0,
                                     card.y + 14.0 + (2 - index) as f32 * 14.0,
@@ -34213,7 +34280,7 @@ impl DesktopLauncher {
                             layer + 0.003,
                         ));
                         pass.push(RenderCommand::draw_text_styled(
-                            "@server.waiting",
+                            self.localize_bundle_markup_text("@server.waiting"),
                             RenderPoint::new(card.x + 12.0, card.center().y - 30.0),
                             [0.58, 0.68, 0.76, if hidden { 0.54 } else { 1.0 }],
                             9.5,
@@ -40422,7 +40489,7 @@ impl DesktopLauncher {
         };
 
         let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
-        let dialog = BaseDialog::new(route.title());
+        let dialog = BaseDialog::new(self.localized_menu_route_title(route));
         let stage_rect = RenderRect::new(viewport.x, viewport.y, viewport.width, viewport.height);
         for command in
             dialog.shell_render_commands(DialogShellLayout::from_stage_and_panel(stage_rect, panel))
@@ -40488,7 +40555,7 @@ impl DesktopLauncher {
                     continue;
                 }
                 pass.push(RenderCommand::draw_text_styled(
-                    line.clone(),
+                    self.localize_bundle_markup_text(line),
                     RenderPoint::new(
                         panel.x + panel.width * 0.5,
                         panel.y + panel.height - 118.0 - index as f32 * 20.0,
@@ -43574,8 +43641,8 @@ mod tests {
         DesktopGraphicsOpenGlBackendStepSink, DesktopGraphicsOpenGlBackendStepSource,
         DesktopGraphicsRenderer, DesktopGraphicsResolvedSpriteTrace,
         DesktopGraphicsShaderApplyExecutionTrace, DesktopGraphicsTextureSamplerTrace,
-        DesktopInputTickEvent, DesktopLauncher, DesktopSurfaceConfig, DesktopSurfaceSize,
-        HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
+        DesktopInputTickEvent, DesktopLauncher, DesktopMenuRoute, DesktopSurfaceConfig,
+        DesktopSurfaceSize, HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
         HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
         DESKTOP_FONT_GLYPH_ATLAS_PLACEHOLDER_HEIGHT, DESKTOP_FONT_GLYPH_ATLAS_PLACEHOLDER_WIDTH,
         DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_KEY, DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME,
@@ -63487,6 +63554,89 @@ version: "2.0.0"
         assert!(labels.contains(&"Database"));
         assert!(labels.contains(&"Core Database"));
         assert!(labels.contains(&"Schematics"));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_route_titles_use_settings_locale_bundle_like_java_dialogs() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "zh_CN".into();
+
+        assert_eq!(
+            launcher.localized_menu_route_title(DesktopMenuRoute::Join),
+            "加入游戏"
+        );
+        assert_eq!(
+            launcher.localized_menu_route_title(DesktopMenuRoute::Host),
+            "创建联机游戏"
+        );
+        assert_eq!(
+            launcher.localized_menu_route_title(DesktopMenuRoute::SaveGame),
+            "保存游戏"
+        );
+        assert_eq!(
+            launcher.localized_menu_route_title(DesktopMenuRoute::Database),
+            "核心数据库"
+        );
+        assert_eq!(
+            launcher.localized_menu_route_title(DesktopMenuRoute::TechTree),
+            "",
+            "Java ResearchDialog calls super(\"\"); @techtree is the menu-entry text, not the dialog title"
+        );
+        assert_eq!(
+            launcher.localized_menu_route_title(DesktopMenuRoute::Discord),
+            "",
+            "Java DiscordDialog calls super(\"\") and renders @discord inside the dialog content"
+        );
+        assert_eq!(
+            launcher.localized_menu_route_title(DesktopMenuRoute::Editor),
+            "地图",
+            "Java EditorMapsDialog uses @maps as its dialog title; @editor is only the menu-entry label"
+        );
+
+        launcher.active_menu_route = Some(DesktopMenuRoute::Join);
+        let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu route frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(texts.contains(&"加入游戏"));
+        assert!(texts.contains(&"名称："));
+        assert!(texts.contains(&"添加服务器"));
+        assert!(texts.contains(&"刷新"));
+        assert!(texts.contains(&"本地服务器"));
+        assert!(texts.contains(&"已保存的服务器"));
+        assert!(
+            !texts.contains(&"JOIN GAME"),
+            "route shell title should not bypass Core.bundle with hard-coded all-caps text"
+        );
+        for raw_key in ["@name", "@server.add", "@refresh", "@servers.local"] {
+            assert!(
+                !texts.contains(&raw_key),
+                "JoinDialog chrome should resolve visible bundle key {raw_key} before rendering"
+            );
+        }
+
+        let mut fallback_launcher = DesktopLauncher::new(Vec::new());
+        fallback_launcher.settings_locale = "unknown".into();
+        assert_eq!(
+            fallback_launcher.localized_menu_route_title(DesktopMenuRoute::Join),
+            "Join Game"
+        );
+        assert_eq!(
+            fallback_launcher.localized_menu_route_title(DesktopMenuRoute::Host),
+            "Host Multiplayer Game"
+        );
     }
 
     #[test]

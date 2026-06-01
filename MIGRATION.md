@@ -15,6 +15,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 675. route/dialog 标题与 JoinDialog 可见文案接入 bundle locale
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **78.8%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是降低 route shell 与 JoinDialog 中明显的全大写英文、`@key` 裸显和调试壳观感。
+- Java 对照依据：
+  - `JoinDialog` 标题使用 `@joingame`，`HostDialog` 使用 `@hostserver`，`SaveDialog/LoadDialog` 使用 `@savegame/@loadgame`；
+  - `DiscordDialog` 构造 `super("")`，`@discord` 是正文/tooltip，不是标题；
+  - `ResearchDialog` 构造 `super("")`，`@techtree` 是菜单入口文案，不是标题；
+  - `EditorMapsDialog` 标题使用 `@maps`，`@editor` 只用于主菜单入口；
+  - `JoinDialog` 可见控件使用 `@name`、`@server.add`、`@hosts.none`、`@servers.local`、`@servers.remote`、`@joingame.ip`、`@warning` 等 bundle key。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 扩展当前内置 bundle 子表，补 route 标题、JoinDialog 常见控件、确认/返回/取消、服务器分组与简繁中 fallback；
+  - `desktop/src/lib.rs`
+    - `DesktopMenuRoute` 增加 `title_bundle_key()`，route shell 标题改为按 `settings_locale` 解析；
+    - 对齐 Java 的空标题特例：`DiscordDialog` 与 `ResearchDialog` 不再强制显示 `DISCORD/TECH TREE`；
+    - `Editor` route 标题改用 `maps` bundle key；
+    - 新增 `localize_bundle_markup_text(...)`，Join route 顶部控件、分组标题、添加/刷新/返回/确定等按钮和若干弹窗文案不再直接裸显 `@key`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_route_titles_use_settings_locale_bundle_like_java_dialogs --lib`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `core/src/mindustry/ui/mod.rs` 仍只是增量内置 bundle 子集，还没有完整加载/解析全部 `bundle*.properties`；
+  - Join/Settings/Schematics/Mods/About/Database 页面仍有大量 debug 风格行、raw key 与非 Scene2D 专用壳，需要继续按 Java dialog 逐块还原；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 674. 菜单文案接入 settings locale 简繁中 fallback
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
