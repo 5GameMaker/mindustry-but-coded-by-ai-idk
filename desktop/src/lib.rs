@@ -27115,7 +27115,7 @@ impl DesktopLauncher {
                     .filter(|description| !description.trim().is_empty())
             })
             .cloned()
-            .unwrap_or_else(|| "saved favorite server; click card or CONNECT".into());
+            .unwrap_or_else(|| "@server.refreshing".into());
         let players = if world.and_then(|world| world.player.as_ref()).is_some()
             || state.connected
             || state.connect_confirm_sent
@@ -33089,7 +33089,6 @@ impl DesktopLauncher {
                     host.mode_name.as_deref().unwrap_or("@unknown")
                 ),
                 format!("ping: {}ms", host.ping),
-                "tap to connect".to_string(),
             ]
             .into_iter()
             .enumerate()
@@ -33239,7 +33238,6 @@ impl DesktopLauncher {
                     layer + 0.003,
                 ));
                 for (index, line) in [
-                    format!("status: {}", snapshot.status),
                     format!("players: {}", snapshot.players),
                     format!("save.map: {} / {}", snapshot.map, snapshot.mode),
                     format!("ping: {}", snapshot.ping),
@@ -68516,7 +68514,7 @@ version: "2.0.0"
         assert!(texts
             .iter()
             .any(|text| text.contains("example.org") && text.contains("@server.version")));
-        assert!(texts.contains(&"saved favorite server; click card or CONNECT"));
+        assert!(texts.contains(&"@server.refreshing"));
         assert!(texts.contains(&"players: 0"));
         assert!(texts.contains(&"save.map: @unknown / @mode.survival.name"));
         assert!(texts.contains(&"ping: --ms"));
@@ -68765,7 +68763,7 @@ version: "2.0.0"
         assert!(texts.contains(&"players: 2/8"));
         assert!(texts.contains(&"save.map: local map / @mode.survival.name"));
         assert!(texts.contains(&"ping: 42ms"));
-        assert!(texts.contains(&"tap to connect"));
+        assert!(!texts.contains(&"tap to connect"));
 
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::ConnectJoinLocalHost(0),

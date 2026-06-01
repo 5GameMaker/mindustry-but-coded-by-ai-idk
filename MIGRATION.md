@@ -15,6 +15,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 653. JoinDialog server card 文案去调试化
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **76.5%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是减少 JoinDialog server card 上一眼可见的调试味文案。
+- Java 对照依据：
+  - `JoinDialog.refreshServer(...)` 在保存服务器 ping 期间显示 `@server.refreshing`；
+  - `JoinDialog.buildServer(...)` 本地/远端 host card 展示 name/version、description、players、map/mode、ping，不额外显示 `tap to connect`、`source/status` 这类调试文字。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 保存服务器无真实 host/world 数据时，description fallback 从 `saved favorite server; click card or CONNECT` 改为 `@server.refreshing`；
+    - 本地服务器卡片移除 `tap to connect` 文案；
+    - 保存服务器可视卡片正文移除 `status: ...` 调试行，保留 players、map/mode、ping；
+    - 回归测试同步断言新文案并防止旧调试文案回归。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+- 仍未完成：
+  - 保存服务器卡仍缺真实 `net.pingHost` 回填的 `Host` 信息；
+  - 本地/保存服务器多列密度、滚动、搜索作用域和命中顺序仍待继续按 Java `JoinDialog` 拆分对齐。
+
 ## 652. JoinDialog add/edit 弹窗状态对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
