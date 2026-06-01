@@ -17149,6 +17149,11 @@ fn default_desktop_texture_atlas(
             .chain(std::iter::once(
                 "sprites/schematic-background.png".to_string(),
             ))
+            .chain(
+                ["sprites/planets/serpulo.png", "sprites/planets/erekir.png"]
+                    .into_iter()
+                    .map(str::to_string),
+            )
             .chain(upstream_ui_skin_sprite_source_paths().map(str::to_string))
             .chain(content_icon_candidate_virtual_source_paths(content_loader))
             .into_iter()
@@ -63464,6 +63469,8 @@ version: "2.0.0"
     fn desktop_launcher_menu_renders_logo_and_version_overlay() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         assert!(launcher.texture_atlas.lookup("logo").is_ok());
+        assert!(launcher.texture_atlas.lookup("serpulo").is_ok());
+        assert!(launcher.texture_atlas.lookup("erekir").is_ok());
         assert!(launcher.texture_atlas.lookup("discord-banner").is_ok());
         assert!(launcher.texture_atlas.lookup("info-banner").is_ok());
         assert!(launcher.texture_atlas.lookup("flat-down-base.9").is_ok());

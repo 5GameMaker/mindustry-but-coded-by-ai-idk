@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 683. 加载页默认星球贴图接入桌面图集
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **79.6%**，仍未达到完整可玩；继续优先前端/UI 与黑屏兜底，当前闭环目标是降低启动加载页“近黑屏/缺中心视觉元素”的风险。
+- Java 对照依据：
+  - 上游资源存在 `core/assets/sprites/planets/serpulo.png` 与 `core/assets/sprites/planets/erekir.png`；
+  - Rust `LoadTheme::default()` 默认 `planet_name = "serpulo"` 且 `show_planet = true`；
+  - `LoadRenderCommand::Planet` 会转换为 `draw_sprite(name, ...)`，因此默认 atlas 必须能解析 `serpulo`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `default_desktop_texture_atlas(...)` 明确加入 `sprites/planets/serpulo.png` 与 `sprites/planets/erekir.png`；
+    - 菜单/默认 atlas 回归测试增加 `lookup("serpulo")`、`lookup("erekir")` 断言，防止加载页默认星球贴图再次缺失。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - `load-background-grid` 仍只是 load renderer 的 custom 标记，desktop 侧尚未实现真正网格绘制；
+  - 仍需继续用实际启动截图/窗口观察验证黑屏是否完全消除；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 682. ModsDialog 浏览器与详情页文案接入 bundle locale
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
