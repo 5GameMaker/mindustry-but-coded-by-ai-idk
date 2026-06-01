@@ -895,6 +895,75 @@ impl DesktopCustomRulesNumber {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopWeatherNumber {
+    MinDuration,
+    MaxDuration,
+    MinFrequency,
+    MaxFrequency,
+}
+
+impl DesktopWeatherNumber {
+    const ALL: [Self; 4] = [
+        Self::MinDuration,
+        Self::MaxDuration,
+        Self::MinFrequency,
+        Self::MaxFrequency,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::MinDuration => "d-",
+            Self::MaxDuration => "d+",
+            Self::MinFrequency => "f-",
+            Self::MaxFrequency => "f+",
+        }
+    }
+
+    fn value_text(self, entry: &WeatherEntry) -> String {
+        let value = match self {
+            Self::MinDuration => entry.min_duration,
+            Self::MaxDuration => entry.max_duration,
+            Self::MinFrequency => entry.min_frequency,
+            Self::MaxFrequency => entry.max_frequency,
+        };
+        format_custom_rules_number(value / 60.0)
+    }
+
+    fn adjust(self, entry: &mut WeatherEntry, direction: i32) {
+        if direction == 0 || entry.always {
+            return;
+        }
+        let delta = direction.signum() as f32 * 60.0;
+        match self {
+            Self::MinDuration => {
+                entry.min_duration = (entry.min_duration + delta).max(0.0);
+                if entry.max_duration < entry.min_duration {
+                    entry.max_duration = entry.min_duration;
+                }
+            }
+            Self::MaxDuration => {
+                entry.max_duration = (entry.max_duration + delta).max(0.0);
+                if entry.min_duration > entry.max_duration {
+                    entry.min_duration = entry.max_duration;
+                }
+            }
+            Self::MinFrequency => {
+                entry.min_frequency = (entry.min_frequency + delta).max(0.0);
+                if entry.max_frequency < entry.min_frequency {
+                    entry.max_frequency = entry.min_frequency;
+                }
+            }
+            Self::MaxFrequency => {
+                entry.max_frequency = (entry.max_frequency + delta).max(0.0);
+                if entry.min_frequency > entry.max_frequency {
+                    entry.min_frequency = entry.max_frequency;
+                }
+            }
+        }
+    }
+}
+
 fn format_custom_rules_number(value: f32) -> String {
     if (value - value.round()).abs() < 0.01 {
         format!("{}", value.round() as i32)
@@ -1038,6 +1107,7 @@ pub enum DesktopMapCardActionKind {
     AddWeather(usize),
     RemoveWeather(usize),
     ToggleWeatherAlways(usize),
+    AdjustWeatherNumber(usize, DesktopWeatherNumber, i32),
     OpenInEditor,
     Delete,
     ViewWorkshop,
@@ -30477,6 +30547,18 @@ impl DesktopLauncher {
         RenderRect::new(row.right() - 126.0, row.y + 8.0, 84.0, 26.0)
     }
 
+    fn map_play_weather_entry_number_rect(row: RenderRect, index: usize) -> RenderRect {
+        RenderRect::new(row.x + 10.0 + index as f32 * 76.0, row.y + 6.0, 70.0, 20.0)
+    }
+
+    fn map_play_weather_entry_number_button_rect(field: RenderRect, increase: bool) -> RenderRect {
+        if increase {
+            RenderRect::new(field.right() - 18.0, field.y, 18.0, field.height)
+        } else {
+            RenderRect::new(field.x, field.y, 18.0, field.height)
+        }
+    }
+
     fn map_play_weather_add_button_rect(dialog: RenderRect) -> RenderRect {
         RenderRect::new(dialog.right() - 148.0, dialog.y + 16.0, 126.0, 36.0)
     }
@@ -30627,6 +30709,27 @@ impl DesktopLauncher {
             .unwrap_or_else(|| Self::map_play_rules_for_mode(map, self.map_play_selected_mode));
         if let Some(entry) = rules.weather.get_mut(weather_index) {
             entry.always = !entry.always;
+            self.map_play_rules = Some(rules);
+            self.map_play_rules_error = None;
+        }
+    }
+
+    fn adjust_map_play_weather_number(
+        &mut self,
+        index: usize,
+        weather_index: usize,
+        number: DesktopWeatherNumber,
+        direction: i32,
+    ) {
+        let Some(map) = self.map_list_cards.get(index) else {
+            return;
+        };
+        let mut rules = self
+            .map_play_rules
+            .clone()
+            .unwrap_or_else(|| Self::map_play_rules_for_mode(map, self.map_play_selected_mode));
+        if let Some(entry) = rules.weather.get_mut(weather_index) {
+            number.adjust(entry, direction);
             self.map_play_rules = Some(rules);
             self.map_play_rules_error = None;
         }
@@ -32552,6 +32655,36 @@ impl DesktopLauncher {
                                             ),
                                         ),
                                     ));
+                                }
+                                if !rules.weather[weather_index].always {
+                                    for (field_index, number) in
+                                        DesktopWeatherNumber::ALL.into_iter().enumerate()
+                                    {
+                                        let field = Self::map_play_weather_entry_number_rect(
+                                            row,
+                                            field_index,
+                                        );
+                                        for (increase, direction) in [(false, -1), (true, 1)] {
+                                            if Self::map_play_weather_entry_number_button_rect(
+                                                field, increase,
+                                            )
+                                            .contains_point(point)
+                                            {
+                                                return Some(
+                                                    DesktopMenuRouteShellAction::MapCard(
+                                                        DesktopMapCardAction::new(
+                                                            index,
+                                                            DesktopMapCardActionKind::AdjustWeatherNumber(
+                                                                weather_index,
+                                                                number,
+                                                                direction,
+                                                            ),
+                                                        ),
+                                                    ),
+                                                );
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             if Self::map_play_weather_add_button_rect(weather_dialog)
@@ -34490,6 +34623,23 @@ impl DesktopLauncher {
                         }
                         DesktopMapCardActionKind::ToggleWeatherAlways(weather_index) => {
                             self.toggle_map_play_weather_always(action.index, weather_index);
+                            self.map_play_weather_dialog_open = true;
+                            self.map_play_weather_add_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::AdjustWeatherNumber(
+                            weather_index,
+                            number,
+                            direction,
+                        ) => {
+                            self.adjust_map_play_weather_number(
+                                action.index,
+                                weather_index,
+                                number,
+                                direction,
+                            );
                             self.map_play_weather_dialog_open = true;
                             self.map_play_weather_add_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
@@ -40209,8 +40359,13 @@ impl DesktopLauncher {
                 0.0,
                 layer + 0.010 + weather_index as f32 * 0.001,
             ));
+            let display_name = self
+                .content_loader
+                .weather_by_name(&entry.weather)
+                .map(|weather| weather.weather().localized_name().to_string())
+                .unwrap_or_else(|| entry.weather.clone());
             pass.push(RenderCommand::draw_text_styled(
-                entry.weather.clone(),
+                display_name,
                 RenderPoint::new(row.x + 10.0, row.y + row.height - 14.0),
                 [0.90, 0.96, 1.0, 1.0],
                 10.5,
@@ -40221,23 +40376,42 @@ impl DesktopLauncher {
                     .with_outline(true),
                 layer + 0.011 + weather_index as f32 * 0.001,
             ));
-            pass.push(RenderCommand::draw_text_styled(
-                format!(
-                    "duration {}-{}  frequency {}-{}",
-                    format_custom_rules_number(entry.min_duration / 60.0),
-                    format_custom_rules_number(entry.max_duration / 60.0),
-                    format_custom_rules_number(entry.min_frequency / 60.0),
-                    format_custom_rules_number(entry.max_frequency / 60.0)
-                ),
-                RenderPoint::new(row.x + 10.0, row.y + 12.0),
-                [0.62, 0.72, 0.80, 0.92],
-                8.5,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Start)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
-                layer + 0.012 + weather_index as f32 * 0.001,
-            ));
+            for (field_index, number) in DesktopWeatherNumber::ALL.into_iter().enumerate() {
+                let field = Self::map_play_weather_entry_number_rect(row, field_index);
+                let button_layer =
+                    layer + 0.012 + weather_index as f32 * 0.001 + field_index as f32 * 0.0001;
+                self.push_settings_text_button_enabled(
+                    pass,
+                    Self::map_play_weather_entry_number_button_rect(field, false),
+                    "-",
+                    None,
+                    button_layer,
+                    !entry.always,
+                );
+                self.push_settings_text_button_enabled(
+                    pass,
+                    Self::map_play_weather_entry_number_button_rect(field, true),
+                    "+",
+                    None,
+                    button_layer + 0.00002,
+                    !entry.always,
+                );
+                pass.push(RenderCommand::draw_text_styled(
+                    format!("{} {}", number.label(), number.value_text(entry)),
+                    RenderPoint::new(field.center().x, field.center().y),
+                    if entry.always {
+                        [0.46, 0.52, 0.58, 0.78]
+                    } else {
+                        [0.72, 0.84, 0.92, 0.96]
+                    },
+                    8.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    button_layer + 0.00004,
+                ));
+            }
             self.push_settings_text_button(
                 pass,
                 Self::map_play_weather_entry_always_rect(row),
@@ -66455,6 +66629,43 @@ version: "2.0.0"
             Some(weather_candidate.as_str())
         );
         let weather_entry_row = DesktopLauncher::map_play_weather_entry_rect(weather_dialog, 0);
+        let min_duration_before = launcher
+            .map_play_rules
+            .as_ref()
+            .and_then(|rules| rules.weather.first())
+            .map(|entry| entry.min_duration)
+            .unwrap_or_default();
+        let min_duration_field =
+            DesktopLauncher::map_play_weather_entry_number_rect(weather_entry_row, 0);
+        let increase_weather_min_duration_center =
+            DesktopLauncher::map_play_weather_entry_number_button_rect(min_duration_field, true)
+                .center();
+        let increase_weather_min_duration =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::AdjustWeatherNumber(
+                    0,
+                    super::DesktopWeatherNumber::MinDuration,
+                    1,
+                ),
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                increase_weather_min_duration_center.x,
+                increase_weather_min_duration_center.y
+            ),
+            Some(increase_weather_min_duration)
+        );
+        launcher.dispatch_menu_route_shell_action(increase_weather_min_duration);
+        assert_eq!(
+            launcher
+                .map_play_rules
+                .as_ref()
+                .and_then(|rules| rules.weather.first())
+                .map(|entry| entry.min_duration),
+            Some(min_duration_before + 60.0)
+        );
         let always_center =
             DesktopLauncher::map_play_weather_entry_always_rect(weather_entry_row).center();
         let toggle_weather_always =
@@ -66477,6 +66688,15 @@ version: "2.0.0"
             .and_then(|rules| rules.weather.first())
             .map(|entry| entry.always)
             .unwrap_or(false));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                increase_weather_min_duration_center.x,
+                increase_weather_min_duration_center.y
+            ),
+            None,
+            "CustomRulesDialog disables duration/frequency controls while always is enabled"
+        );
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
             super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::CloseWeather),
         ));

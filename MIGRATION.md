@@ -17,6 +17,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 714. CustomRulesDialog 天气时长/频率编辑闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **84.5%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - 原版 `CustomRulesDialog.weatherDialog()` 对每个 `WeatherEntry` 提供 `minDuration/maxDuration/minFrequency/maxFrequency` 四个可编辑字段；
+  - `@rules.weather.always` 开启后，这四个字段会被禁用；
+  - 条目标题使用 `entry.weather.localizedName`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopWeatherNumber` 与 `AdjustWeatherNumber` 动作；
+    - 天气条目行从纯摘要文本推进到四个可操作字段：`d- / d+ / f- / f+`，以分钟口径显示并用 `+/-` 调整；
+    - 调整逻辑会 clamp 到非负，并保持 min/max 顺序一致；
+    - `always` 为 true 时，字段按钮在命中检测和渲染层同时禁用；
+    - 条目标题优先使用 weather 的 localized name；
+    - 扩展现有 CustomRules 回归，验证时长调整、`always` 后禁用命中和天气 add 子弹窗链路。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore -- --nocapture`
+  - `git diff --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 目前仍是按钮式数值调整，不是 Java 同款文本输入框；
+  - 天气候选列表仍有显示上限，后续应补滚动或全量分页；
+  - CustomRulesDialog 的 team rules、allow edit rules 与更多环境/规则子项仍需继续补齐；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 713. CustomRulesDialog 天气添加子弹窗还原
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
