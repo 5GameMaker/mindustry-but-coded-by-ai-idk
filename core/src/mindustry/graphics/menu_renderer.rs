@@ -1450,6 +1450,8 @@ pub struct MenuRendererState {
     submenu_root: Option<MenuButtonRole>,
     pub submenu_alpha: f32,
     pub submenu_target_alpha: f32,
+    submenu_animation_from_alpha: f32,
+    submenu_animation_elapsed: f32,
     pub custom_buttons: Vec<MenuCustomButton>,
 }
 
@@ -1468,6 +1470,8 @@ impl MenuRendererState {
             submenu_root: None,
             submenu_alpha: 0.0,
             submenu_target_alpha: 0.0,
+            submenu_animation_from_alpha: 0.0,
+            submenu_animation_elapsed: 0.0,
             custom_buttons: Vec::new(),
         }
     }
@@ -1611,33 +1615,47 @@ impl MenuRendererState {
         }
         if self.active_root == Some(role) {
             self.active_root = None;
-            self.submenu_target_alpha = 0.0;
+            self.start_submenu_alpha_animation(0.0, Some(1.0));
             return true;
         }
         self.active_root = Some(role);
         self.selected_root = role;
         self.submenu_root = Some(role);
-        self.submenu_target_alpha = 1.0;
+        self.start_submenu_alpha_animation(1.0, None);
         true
+    }
+
+    fn start_submenu_alpha_animation(&mut self, target_alpha: f32, from_alpha: Option<f32>) {
+        let from_alpha = from_alpha.unwrap_or(self.submenu_alpha).clamp(0.0, 1.0);
+        self.submenu_alpha = from_alpha;
+        self.submenu_target_alpha = target_alpha.clamp(0.0, 1.0);
+        self.submenu_animation_from_alpha = from_alpha;
+        self.submenu_animation_elapsed = 0.0;
     }
 
     pub fn tick_submenu_alpha(&mut self, delta: f32) {
         let delta = delta.max(0.0);
-        if (self.submenu_alpha - self.submenu_target_alpha).abs() <= f32::EPSILON {
+        if (self.submenu_animation_from_alpha - self.submenu_target_alpha).abs() <= f32::EPSILON {
             self.submenu_alpha = self.submenu_target_alpha;
+            self.submenu_animation_elapsed = 0.0;
+            self.submenu_animation_from_alpha = self.submenu_target_alpha;
             return;
         }
-        let duration = if self.submenu_target_alpha > self.submenu_alpha {
+        let duration = if self.submenu_target_alpha > self.submenu_animation_from_alpha {
             MENU_SUBMENU_FADE_IN_SECONDS
         } else {
             MENU_SUBMENU_FADE_OUT_SECONDS
         }
         .max(f32::EPSILON);
-        let step = delta / duration;
-        if self.submenu_target_alpha > self.submenu_alpha {
-            self.submenu_alpha = (self.submenu_alpha + step).min(self.submenu_target_alpha);
-        } else {
-            self.submenu_alpha = (self.submenu_alpha - step).max(self.submenu_target_alpha);
+        self.submenu_animation_elapsed = (self.submenu_animation_elapsed + delta).min(duration);
+        let progress = (self.submenu_animation_elapsed / duration).clamp(0.0, 1.0);
+        let eased = menu_interp_fade(progress);
+        self.submenu_alpha = self.submenu_animation_from_alpha
+            + (self.submenu_target_alpha - self.submenu_animation_from_alpha) * eased;
+        if progress >= 1.0 {
+            self.submenu_alpha = self.submenu_target_alpha;
+            self.submenu_animation_from_alpha = self.submenu_target_alpha;
+            self.submenu_animation_elapsed = 0.0;
         }
     }
 
@@ -1685,7 +1703,14 @@ impl MenuRendererState {
         self.submenu_root = None;
         self.submenu_alpha = 0.0;
         self.submenu_target_alpha = 0.0;
+        self.submenu_animation_from_alpha = 0.0;
+        self.submenu_animation_elapsed = 0.0;
     }
+}
+
+fn menu_interp_fade(progress: f32) -> f32 {
+    let progress = progress.clamp(0.0, 1.0);
+    progress * progress * progress * (progress * (progress * 6.0 - 15.0) + 10.0)
 }
 
 pub fn generate_menu_world(config: MenuRendererConfig) -> MenuWorldPlan {
@@ -2855,10 +2880,15 @@ mod tests {
         assert!(state.select_desktop_root(MenuButtonRole::Play));
         assert_eq!(state.active_root, None);
         assert_eq!(state.submenu_target_alpha, 0.0);
+        assert_eq!(
+            state.submenu_alpha, 1.0,
+            "Java fadeOutMenu() runs Actions.alpha(1f) before fading to 0"
+        );
 
         let fading_out = state.render_plan(input(MENU_SUBMENU_FADE_OUT_SECONDS * 0.25));
-        assert!((state.submenu_alpha - 0.25).abs() < 0.0001);
-        assert!((fading_out.ui.submenu_alpha - 0.25).abs() < 0.0001);
+        let expected_fade_out_alpha = 1.0 - menu_interp_fade(0.25);
+        assert!((state.submenu_alpha - expected_fade_out_alpha).abs() < 0.0001);
+        assert!((fading_out.ui.submenu_alpha - expected_fade_out_alpha).abs() < 0.0001);
         assert!(fading_out
             .ui
             .buttons
@@ -2884,6 +2914,15 @@ mod tests {
             .buttons
             .iter()
             .any(|button| button.role == MenuButtonRole::Campaign));
+    }
+
+    #[test]
+    fn menu_submenu_alpha_uses_java_interp_fade_curve() {
+        assert_eq!(menu_interp_fade(0.0), 0.0);
+        assert_eq!(menu_interp_fade(1.0), 1.0);
+        assert!((menu_interp_fade(0.5) - 0.5).abs() < 0.0001);
+        assert!((menu_interp_fade(0.25) - 0.103515625).abs() < 0.0001);
+        assert!((menu_interp_fade(0.75) - 0.8964844).abs() < 0.0001);
     }
 
     #[test]

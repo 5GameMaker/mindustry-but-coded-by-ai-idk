@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 668. 主菜单 submenu 动画对齐 Interp.fade
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **78.0%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是让桌面主菜单右侧 submenu 展开/收起节奏更贴近 Java `MenuFragment.fadeInMenu()/fadeOutMenu()`。
+- Java 对照依据：
+  - `fadeInMenu()`：`submenu.actions(Actions.alpha(1f, 0.15f, Interp.fade))`；
+  - `fadeOutMenu()`：`submenu.actions(Actions.alpha(1f), Actions.alpha(0f, 0.2f, Interp.fade), Actions.run(() -> submenu.clearChildren()))`。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuRendererState` 增加 submenu alpha 动画起点与 elapsed 状态；
+    - `tick_submenu_alpha(...)` 使用 Java/LibGDX 风格 smootherstep `Interp.fade` 曲线；
+    - 关闭当前 submenu 时先把 alpha 拉回 `1.0` 再按 `0.2s` fade out，对齐 Java `Actions.alpha(1f)`；
+    - 保持 fade in `0.15s`、fade out `0.2s` 和现有按钮/面板布局不变。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_renderer_state_fades_out_and_in_current_desktop_submenu_like_java_actions --lib`
+  - `cargo test -p mindustry-core menu_submenu_alpha_uses_java_interp_fade_curve --lib`
+- 仍未完成：
+  - 仍需继续还原首屏背景、logo 细节、chrome 细节和 native 黑屏 fallback；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 667. Native DPI/ScaleFactorChanged 事件接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
