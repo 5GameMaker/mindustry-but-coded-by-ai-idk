@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 713. CustomRulesDialog 天气添加子弹窗还原
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **84.4%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - 原版 `CustomRulesDialog.weatherDialog()` 的 `@add` 会打开独立 `BaseDialog("@add")`；
+  - add 子弹窗以按钮网格列出 `ContentType.weather` 中所有非 hidden 天气，点击后添加 `new WeatherEntry(weather)` 并关闭 add 弹窗。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_play_weather_add_dialog_open` 状态与 `OpenWeatherAdd / CloseWeatherAdd` 动作；
+    - `@rules.weather` 弹窗底部 `@add` 现在打开独立 add 子弹窗，不再把候选天气混在主天气编辑面板顶部；
+    - add 子弹窗用双列按钮网格展示可添加天气，点击候选后写入 `Rules.weather` 并返回主天气弹窗；
+    - 扩展现有 MapPlay/CustomRules 回归，验证 `@add` 命中、add 弹窗渲染、候选天气添加与关闭后的状态回收。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore -- --nocapture`
+  - `git diff --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - duration/frequency 仍未做 Java 同款文本输入框；
+  - `always` 打开时禁用 duration/frequency 输入的前端表现还需补齐；
+  - CustomRulesDialog 的 team rules 与更多环境/规则子项仍需继续补齐；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 712. CustomRulesDialog 天气规则编辑入口最小闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -1033,6 +1033,8 @@ pub enum DesktopMapCardActionKind {
     ToggleBannedContent(DesktopBannedContentKind, usize),
     OpenWeather,
     CloseWeather,
+    OpenWeatherAdd,
+    CloseWeatherAdd,
     AddWeather(usize),
     RemoveWeather(usize),
     ToggleWeatherAlways(usize),
@@ -17309,6 +17311,7 @@ pub struct DesktopLauncher {
     pub map_play_rules_edit_dialog_open: bool,
     pub map_play_banned_content_dialog: Option<DesktopBannedContentKind>,
     pub map_play_weather_dialog_open: bool,
+    pub map_play_weather_add_dialog_open: bool,
     pub map_play_rules: Option<Rules>,
     pub last_map_play_rules_clipboard_text: Option<String>,
     pub map_play_rules_error: Option<String>,
@@ -18468,6 +18471,7 @@ impl DesktopLauncher {
             map_play_rules_edit_dialog_open: false,
             map_play_banned_content_dialog: None,
             map_play_weather_dialog_open: false,
+            map_play_weather_add_dialog_open: false,
             map_play_rules: None,
             last_map_play_rules_clipboard_text: None,
             map_play_rules_error: None,
@@ -30473,12 +30477,35 @@ impl DesktopLauncher {
         RenderRect::new(row.right() - 126.0, row.y + 8.0, 84.0, 26.0)
     }
 
-    fn map_play_weather_candidate_rect(dialog: RenderRect, index: usize) -> RenderRect {
+    fn map_play_weather_add_button_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.right() - 148.0, dialog.y + 16.0, 126.0, 36.0)
+    }
+
+    fn map_play_weather_add_dialog_rect(dialog: RenderRect) -> RenderRect {
+        let width = (dialog.width - 80.0).clamp(320.0, 460.0);
+        let height = (dialog.height - 64.0).clamp(220.0, 320.0);
         RenderRect::new(
-            dialog.x + 150.0 + index as f32 * 118.0,
-            dialog.y + 18.0,
-            108.0,
-            34.0,
+            dialog.center().x - width * 0.5,
+            dialog.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn map_play_weather_add_close_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.x + 18.0, dialog.y + 14.0, 112.0, 34.0)
+    }
+
+    fn map_play_weather_candidate_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let gap = 14.0;
+        let width = ((dialog.width - 48.0 - gap) * 0.5).max(118.0);
+        let col = index % 2;
+        let row = index / 2;
+        RenderRect::new(
+            dialog.x + 24.0 + col as f32 * (width + gap),
+            dialog.y + dialog.height - 78.0 - row as f32 * 48.0,
+            width,
+            38.0,
         )
     }
 
@@ -30489,7 +30516,7 @@ impl DesktopLauncher {
             .filter(|weather| !weather.weather().hidden)
             .map(|weather| weather.name().to_string())
             .filter(|name| !rules.weather.iter().any(|entry| entry.weather == *name))
-            .take(4)
+            .take(8)
             .collect()
     }
 
@@ -32429,6 +32456,54 @@ impl DesktopLauncher {
                         }
                         if self.map_play_weather_dialog_open {
                             let weather_dialog = Self::map_play_weather_dialog_rect(child);
+                            if self.map_play_weather_add_dialog_open {
+                                let add_dialog =
+                                    Self::map_play_weather_add_dialog_rect(weather_dialog);
+                                if Self::map_play_weather_add_close_rect(add_dialog)
+                                    .contains_point(point)
+                                {
+                                    return Some(DesktopMenuRouteShellAction::MapCard(
+                                        DesktopMapCardAction::new(
+                                            index,
+                                            DesktopMapCardActionKind::CloseWeatherAdd,
+                                        ),
+                                    ));
+                                }
+                                let rules = self
+                                    .map_play_rules
+                                    .clone()
+                                    .or_else(|| {
+                                        self.map_list_cards.get(index).map(|map| {
+                                            Self::map_play_rules_for_mode(
+                                                map,
+                                                self.map_play_selected_mode,
+                                            )
+                                        })
+                                    })
+                                    .unwrap_or_default();
+                                for (candidate_index, _) in self
+                                    .map_play_weather_candidate_names(&rules)
+                                    .into_iter()
+                                    .enumerate()
+                                {
+                                    if Self::map_play_weather_candidate_rect(
+                                        add_dialog,
+                                        candidate_index,
+                                    )
+                                    .contains_point(point)
+                                    {
+                                        return Some(DesktopMenuRouteShellAction::MapCard(
+                                            DesktopMapCardAction::new(
+                                                index,
+                                                DesktopMapCardActionKind::AddWeather(
+                                                    candidate_index,
+                                                ),
+                                            ),
+                                        ));
+                                    }
+                                }
+                                return None;
+                            }
                             if Self::map_play_weather_close_rect(weather_dialog)
                                 .contains_point(point)
                             {
@@ -32479,24 +32554,15 @@ impl DesktopLauncher {
                                     ));
                                 }
                             }
-                            for (candidate_index, _) in self
-                                .map_play_weather_candidate_names(&rules)
-                                .into_iter()
-                                .enumerate()
-                            {
-                                if Self::map_play_weather_candidate_rect(
-                                    weather_dialog,
-                                    candidate_index,
-                                )
+                            if Self::map_play_weather_add_button_rect(weather_dialog)
                                 .contains_point(point)
-                                {
-                                    return Some(DesktopMenuRouteShellAction::MapCard(
-                                        DesktopMapCardAction::new(
-                                            index,
-                                            DesktopMapCardActionKind::AddWeather(candidate_index),
-                                        ),
-                                    ));
-                                }
+                            {
+                                return Some(DesktopMenuRouteShellAction::MapCard(
+                                    DesktopMapCardAction::new(
+                                        index,
+                                        DesktopMapCardActionKind::OpenWeatherAdd,
+                                    ),
+                                ));
                             }
                             return None;
                         }
@@ -34383,6 +34449,7 @@ impl DesktopLauncher {
                         }
                         DesktopMapCardActionKind::OpenWeather => {
                             self.map_play_weather_dialog_open = true;
+                            self.map_play_weather_add_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
                             self.map_play_rules_edit_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
@@ -34391,10 +34458,24 @@ impl DesktopLauncher {
                         }
                         DesktopMapCardActionKind::CloseWeather => {
                             self.map_play_weather_dialog_open = false;
+                            self.map_play_weather_add_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::OpenWeatherAdd => {
+                            self.map_play_weather_dialog_open = true;
+                            self.map_play_weather_add_dialog_open = true;
+                            self.map_play_banned_content_dialog = None;
+                            self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                            self.map_play_rules_error = None;
+                        }
+                        DesktopMapCardActionKind::CloseWeatherAdd => {
+                            self.map_play_weather_add_dialog_open = false;
                         }
                         DesktopMapCardActionKind::AddWeather(candidate_index) => {
                             self.add_map_play_weather(action.index, candidate_index);
                             self.map_play_weather_dialog_open = true;
+                            self.map_play_weather_add_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
@@ -34402,6 +34483,7 @@ impl DesktopLauncher {
                         DesktopMapCardActionKind::RemoveWeather(weather_index) => {
                             self.remove_map_play_weather(action.index, weather_index);
                             self.map_play_weather_dialog_open = true;
+                            self.map_play_weather_add_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
@@ -34409,6 +34491,7 @@ impl DesktopLauncher {
                         DesktopMapCardActionKind::ToggleWeatherAlways(weather_index) => {
                             self.toggle_map_play_weather_always(action.index, weather_index);
                             self.map_play_weather_dialog_open = true;
+                            self.map_play_weather_add_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
@@ -40074,7 +40157,6 @@ impl DesktopLauncher {
     ) {
         let layer = Layer::END_PIXELED + 0.146;
         let dialog = Self::map_play_weather_dialog_rect(child);
-        let candidates = self.map_play_weather_candidate_names(rules);
         pass.push(RenderCommand::fill_rect(
             child,
             [0.0, 0.0, 0.0, 0.52],
@@ -40175,30 +40257,89 @@ impl DesktopLauncher {
                 layer + 0.014 + weather_index as f32 * 0.001,
             );
         }
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_weather_add_button_rect(dialog),
+            self.localize_bundle_markup_text("@add"),
+            Some("add"),
+            layer + 0.049,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_weather_close_rect(dialog),
+            self.localize_bundle_markup_text("@back"),
+            Some("left"),
+            layer + 0.050,
+        );
+        if self.map_play_weather_add_dialog_open {
+            self.push_map_play_weather_add_dialog(pass, dialog, rules);
+        }
+    }
+
+    fn push_map_play_weather_add_dialog(
+        &self,
+        pass: &mut RenderPass,
+        parent: RenderRect,
+        rules: &Rules,
+    ) {
+        let layer = Layer::END_PIXELED + 0.168;
+        let dialog = Self::map_play_weather_add_dialog_rect(parent);
+        let candidates = self.map_play_weather_candidate_names(rules);
+        pass.push(RenderCommand::fill_rect(
+            parent,
+            [0.0, 0.0, 0.0, 0.38],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.99],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
         pass.push(RenderCommand::draw_text_styled(
             self.localize_bundle_markup_text("@add"),
-            RenderPoint::new(dialog.x + 24.0, dialog.y + 62.0),
-            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
-            10.0,
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 26.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
             0.0,
-            RenderTextStyle::new(RenderTextAlign::Start)
+            RenderTextStyle::new(RenderTextAlign::Center)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
                 .with_outline(true),
-            layer + 0.030,
+            layer + 0.004,
         ));
+        if candidates.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                "@empty",
+                dialog.center(),
+                [0.62, 0.70, 0.76, 0.82],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.006,
+            ));
+        }
         for (candidate_index, name) in candidates.into_iter().enumerate() {
             self.push_settings_text_button(
                 pass,
                 Self::map_play_weather_candidate_rect(dialog, candidate_index),
                 name,
-                Some("add"),
-                layer + 0.031 + candidate_index as f32 * 0.001,
+                None,
+                layer + 0.010 + candidate_index as f32 * 0.001,
             );
         }
         self.push_settings_text_button(
             pass,
-            Self::map_play_weather_close_rect(dialog),
+            Self::map_play_weather_add_close_rect(dialog),
             self.localize_bundle_markup_text("@back"),
             Some("left"),
             layer + 0.050,
@@ -66258,10 +66399,40 @@ version: "2.0.0"
         assert!(weather_texts
             .iter()
             .any(|text| text.contains("Add") || text.contains("@add")));
-        assert!(weather_texts.contains(&weather_candidate.as_str()));
         let weather_dialog = DesktopLauncher::map_play_weather_dialog_rect(child);
+        let open_weather_add_center =
+            DesktopLauncher::map_play_weather_add_button_rect(weather_dialog).center();
+        let open_weather_add = super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenWeatherAdd),
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                open_weather_add_center.x,
+                open_weather_add_center.y
+            ),
+            Some(open_weather_add)
+        );
+        launcher.dispatch_menu_route_shell_action(open_weather_add);
+        assert!(launcher.map_play_weather_add_dialog_open);
+        let weather_add_frame = launcher.menu_graphics_frame_for_surface(5, render_viewport);
+        let weather_add_texts = weather_add_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("weather add dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(weather_add_texts.contains(&weather_candidate.as_str()));
+        let weather_add_dialog = DesktopLauncher::map_play_weather_add_dialog_rect(weather_dialog);
         let add_weather_center =
-            DesktopLauncher::map_play_weather_candidate_rect(weather_dialog, 0).center();
+            DesktopLauncher::map_play_weather_candidate_rect(weather_add_dialog, 0).center();
         let add_weather = super::DesktopMenuRouteShellAction::MapCard(
             super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::AddWeather(0)),
         );
@@ -66274,6 +66445,7 @@ version: "2.0.0"
             Some(add_weather)
         );
         launcher.dispatch_menu_route_shell_action(add_weather);
+        assert!(!launcher.map_play_weather_add_dialog_open);
         assert_eq!(
             launcher
                 .map_play_rules
