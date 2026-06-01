@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 662. Native OpenGL MSAA config 选择对齐 Java antialias 开关
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **77.4%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是减少老 GPU/驱动上因为默认选择高采样 OpenGL config 导致的黑屏/花屏风险。
+- Java 对照依据：
+  - `DesktopLauncher.java` 的 `SdlConfig` 默认不强制高采样；
+  - 只有传入 `-antialias` 时才设置 `samples = 16`；
+  - Rust 之前无条件 `max_by_key(|config| config.num_samples())`，默认就偏向最高 MSAA config，和 Java 默认策略不一致。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - 新增 `desktop_native_antialias_enabled_from_args(...)`；
+    - native DisplayBuilder 选择 config 时默认使用最低 `num_samples()`；
+    - 仅当命令行包含 `-antialias` / `--antialias` 时才选择最高 `num_samples()`；
+    - trace summary 输出 `selected_config_samples` 与 `antialias_enabled`，便于定位驱动问题。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop native_opengl --bin mindustry-desktop`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - 还未对 glutin config 做更细粒度的 color/depth/stencil/transparency 兼容评分；
+  - 真实 Windows/Intel 机器仍需运行验证；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 661. Native OpenGL 上下文多版本回退
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

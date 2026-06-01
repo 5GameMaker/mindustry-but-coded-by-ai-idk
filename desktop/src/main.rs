@@ -722,6 +722,16 @@ where
 }
 
 #[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_antialias_enabled_from_args<I, S>(args: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    args.into_iter()
+        .any(|arg| matches!(arg.as_ref(), "-antialias" | "--antialias"))
+}
+
+#[cfg(feature = "opengl-native-runtime")]
 fn desktop_native_context_attributes_for_candidate(
     candidate: DesktopNativeOpenGlContextCandidate,
     raw_window_handle: RawWindowHandle,
@@ -903,16 +913,28 @@ impl DesktopNativeOpenGlRuntime {
     ) -> Result<Self, String> {
         desktop_native_trace("runtime.new: begin");
         let template = ConfigTemplateBuilder::new();
+        let antialias_enabled =
+            desktop_native_antialias_enabled_from_args(std::env::args().collect::<Vec<_>>());
         let (window, gl_config) = DisplayBuilder::new()
             .with_window_attributes(Some(native_config.window_attributes()))
             .build(event_loop, template, |configs| {
-                configs
-                    .max_by_key(|config| config.num_samples())
-                    .expect("no compatible OpenGL config was returned by glutin")
+                if antialias_enabled {
+                    configs
+                        .max_by_key(|config| config.num_samples())
+                        .expect("no compatible OpenGL config was returned by glutin")
+                } else {
+                    configs
+                        .min_by_key(|config| config.num_samples())
+                        .expect("no compatible OpenGL config was returned by glutin")
+                }
             })
             .map_err(|error| format!("failed to build native OpenGL display/window: {error}"))?;
         let window =
             window.ok_or_else(|| "glutin display builder did not return a window".to_string())?;
+        desktop_native_trace_summary(format!(
+            "runtime.new: selected_config_samples={} antialias_enabled={antialias_enabled}",
+            gl_config.num_samples()
+        ));
         desktop_native_trace("runtime.new: window created");
         let raw_window_handle = window
             .window_handle()
@@ -3109,6 +3131,23 @@ mod tests {
                 DesktopNativeOpenGlContextProfile::Core
             ))
         );
+    }
+
+    #[test]
+    fn native_opengl_antialias_flag_matches_java_opt_in_samples() {
+        assert!(!desktop_native_antialias_enabled_from_args([
+            "mindustry-desktop",
+            "-gl",
+            "3.3"
+        ]));
+        assert!(desktop_native_antialias_enabled_from_args([
+            "mindustry-desktop",
+            "-antialias"
+        ]));
+        assert!(desktop_native_antialias_enabled_from_args([
+            "mindustry-desktop",
+            "--antialias"
+        ]));
     }
 
     #[test]
