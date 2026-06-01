@@ -70424,6 +70424,186 @@ version: "2.0.0"
     }
 
     #[test]
+    fn desktop_launcher_map_list_filter_dialog_toggles_modded_search_and_priority() {
+        fn map_card(name: &str, custom: bool, mod_name: Option<&str>) -> MapDescriptor {
+            let mut tags = BTreeMap::new();
+            tags.insert("name".to_string(), name.to_string());
+            tags.insert("author".to_string(), "Mapper".to_string());
+            tags.insert("description".to_string(), format!("{name} desc"));
+            let mut map =
+                MapDescriptor::new(format!("maps/{name}.msav"), 128, 128, tags, custom, 1, 158);
+            map.spawns = 1;
+            map.teams = vec![1, 2];
+            map.mod_name = mod_name.map(str::to_string);
+            map
+        }
+
+        fn visible_names(launcher: &DesktopLauncher) -> Vec<String> {
+            launcher
+                .filtered_map_card_indices()
+                .into_iter()
+                .map(|index| launcher.map_list_cards[index].plain_name())
+                .collect()
+        }
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.map_list_cards = vec![
+            map_card("Alpha Builtin", false, None),
+            map_card("Zulu Custom", true, None),
+            map_card("Gamma Arena", false, Some("Gamma Expansion")),
+            map_card("Beta Arena", false, Some("Beta Tools")),
+        ];
+        launcher.dispatch_menu_action(MenuButtonRole::CustomGame);
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenMapListFilters,
+        );
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::CustomGame,
+        );
+        let dialog = DesktopLauncher::map_list_filter_dialog_rect_for_panel(panel);
+
+        launcher.map_list_search = "expansion".into();
+        assert!(
+            visible_names(&launcher).is_empty(),
+            "MapListDialog should not search mod display names until the Mod Name scope is enabled"
+        );
+        let mod_name_scope = DesktopLauncher::map_list_filter_search_scope_rect(dialog, 2).center();
+        let action = launcher.active_menu_route_shell_action_at_surface_point(
+            surface,
+            mod_name_scope.x,
+            mod_name_scope.y,
+        );
+        assert_eq!(
+            action,
+            Some(super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::ToggleSearchModName
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(action.unwrap());
+        assert!(launcher.map_list_filter_search_mod_name);
+        assert_eq!(visible_names(&launcher), vec!["Gamma Arena".to_string()]);
+
+        launcher.map_list_search.clear();
+        let custom_priority = DesktopLauncher::map_list_filter_priority_rect(dialog, 0).center();
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::TogglePrioritizeCustom,
+            ),
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                custom_priority.x,
+                custom_priority.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::TogglePrioritizeCustom
+            ))
+        );
+        assert!(launcher.map_list_filter_prioritize_custom);
+
+        let modded_priority = DesktopLauncher::map_list_filter_priority_rect(dialog, 1).center();
+        let action = launcher.active_menu_route_shell_action_at_surface_point(
+            surface,
+            modded_priority.x,
+            modded_priority.y,
+        );
+        assert_eq!(
+            action,
+            Some(super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::TogglePrioritizeModded
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(action.unwrap());
+        assert!(launcher.map_list_filter_prioritize_modded);
+        assert!(
+            !launcher.map_list_filter_prioritize_custom,
+            "Java MapListDialog keeps custom/modded priority toggles mutually exclusive"
+        );
+        assert_eq!(
+            visible_names(&launcher),
+            vec![
+                "Beta Arena".to_string(),
+                "Gamma Arena".to_string(),
+                "Alpha Builtin".to_string(),
+                "Zulu Custom".to_string()
+            ]
+        );
+
+        let show_modded = DesktopLauncher::map_list_filter_type_rect(dialog, 2).center();
+        let action = launcher.active_menu_route_shell_action_at_surface_point(
+            surface,
+            show_modded.x,
+            show_modded.y,
+        );
+        assert_eq!(
+            action,
+            Some(super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::ToggleShowModded
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(action.unwrap());
+        assert!(!launcher.map_list_filter_show_modded);
+        assert!(
+            !launcher.map_list_filter_prioritize_modded,
+            "disabling modded maps should clear the disabled modded priority toggle"
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::TogglePrioritizeModded,
+            ),
+        );
+        assert!(
+            !launcher.map_list_filter_prioritize_modded,
+            "prioritize modded should not enable while show modded is disabled"
+        );
+        assert_eq!(
+            visible_names(&launcher),
+            vec!["Alpha Builtin".to_string(), "Zulu Custom".to_string()]
+        );
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(super::MAP_LIST_SETTING_SHOW_MODDED)
+                .map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(super::MAP_LIST_SETTING_SEARCH_MOD_NAME)
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(super::MAP_LIST_SETTING_PRIORITIZE_MODDED)
+                .map(String::as_str),
+            Some("false")
+        );
+
+        launcher.dispatch_menu_route_shell_action(action.unwrap());
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::TogglePrioritizeModded,
+            ),
+        );
+        let persisted = launcher.settings_overrides.clone();
+        let mut fresh = DesktopLauncher::new(Vec::new());
+        fresh.settings_overrides = persisted;
+        fresh.map_list_cards = launcher.map_list_cards.clone();
+        fresh.dispatch_menu_action(MenuButtonRole::CustomGame);
+        assert!(fresh.map_list_filter_show_modded);
+        assert!(fresh.map_list_filter_search_mod_name);
+        assert!(fresh.map_list_filter_prioritize_modded);
+    }
+
+    #[test]
     fn desktop_launcher_map_list_filter_state_round_trips_through_java_settings_keys() {
         fn map_card(
             name: &str,
