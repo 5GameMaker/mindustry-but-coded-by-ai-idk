@@ -22942,6 +22942,19 @@ impl DesktopLauncher {
             );
             return true;
         }
+        if self.active_menu_route == Some(DesktopMenuRoute::Settings) {
+            let action = if self.last_settings_rebind_key.is_some() {
+                DesktopSettingsAction::CancelKeyRebind
+            } else if self.settings_planet_chooser_open {
+                DesktopSettingsAction::ClosePlanetChooser
+            } else if self.settings_child_dialog.is_some() {
+                DesktopSettingsAction::CloseChildDialog
+            } else {
+                DesktopSettingsAction::BackToMain
+            };
+            self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::Settings(action));
+            return true;
+        }
         if self.active_menu_route == Some(DesktopMenuRoute::Database)
             && self.last_database_content_opened.is_some()
         {
@@ -25830,12 +25843,13 @@ impl DesktopLauncher {
                 None,
                 Layer::END_PIXELED + 0.110 + index as f32 * 0.0001,
             );
-            self.push_settings_text_button(
+            self.push_settings_text_button_enabled(
                 pass,
                 Self::settings_keybind_reset_button_rect(dialog, index),
                 self.localize_bundle_markup_text("@settings.resetKey"),
                 None,
                 Layer::END_PIXELED + 0.111 + index as f32 * 0.0001,
+                self.settings_keybind_overrides.contains_key(spec.name),
             );
         }
     }
@@ -26808,7 +26822,9 @@ impl DesktopLauncher {
                             DesktopSettingsAction::StartKeyRebind(spec.name),
                         ));
                     }
-                    if Self::settings_keybind_reset_button_rect(dialog, index).contains_point(point)
+                    if self.settings_keybind_overrides.contains_key(spec.name)
+                        && Self::settings_keybind_reset_button_rect(dialog, index)
+                            .contains_point(point)
                     {
                         return Some(DesktopMenuRouteShellAction::Settings(
                             DesktopSettingsAction::ResetKey(spec.name),
@@ -75233,6 +75249,48 @@ version: "2.0.0"
     }
 
     #[test]
+    fn desktop_launcher_settings_back_key_matches_java_dialog_stack() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Game;
+
+        assert!(launcher.apply_menu_back_key());
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Settings)
+        );
+        assert_eq!(
+            launcher.settings_dialog_state.page,
+            super::DesktopSettingsPage::Main
+        );
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::BackToMain)
+        );
+
+        launcher.settings_child_dialog = Some(super::DesktopSettingsChildDialog::Controls);
+        launcher.settings_keybind_search_focused = true;
+        assert!(launcher.apply_menu_back_key());
+        assert_eq!(launcher.settings_child_dialog, None);
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Settings)
+        );
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::CloseChildDialog)
+        );
+        assert!(!launcher.settings_keybind_search_focused);
+
+        assert!(launcher.apply_menu_back_key());
+        assert_eq!(launcher.active_menu_route, None);
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::BackToMain)
+        );
+    }
+
+    #[test]
     fn desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let dispatch = launcher.dispatch_menu_action(MenuButtonRole::Settings);
@@ -75772,6 +75830,16 @@ version: "2.0.0"
         assert_eq!(rebind_rect.height, 40.0);
         assert_eq!(reset_rect.width, 140.0);
         assert_eq!(reset_rect.height, 40.0);
+        let reset_center = reset_rect.center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                reset_center.x,
+                reset_center.y
+            ),
+            None,
+            "Java KeybindDialog disables per-row reset while the keybind is already at its default"
+        );
         assert!(controls_fills.iter().any(|(rect, color)| {
             (rect.height - 3.0).abs() < f32::EPSILON && *color == [0.32, 0.36, 0.40, 0.88]
         }));
@@ -75838,8 +75906,6 @@ version: "2.0.0"
             !rebind_texts.contains(&"press keyboard/mouse input to bind"),
             "Java KeybindDialog rebind popup should not render an extra Rust-only rebind hint"
         );
-        let reset_center =
-            DesktopLauncher::settings_keybind_reset_button_rect(child_dialog, 0).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
