@@ -28996,20 +28996,49 @@ impl DesktopLauncher {
     }
 
     fn about_link_card_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
-        let columns = if panel.width >= 340.0 { 2usize } else { 1usize };
-        let gap = 8.0;
         let outer_pad = 22.0;
-        let card_height = 54.0;
-        let usable_width = panel.width - outer_pad * 2.0 - gap * (columns.saturating_sub(1)) as f32;
-        let card_width = usable_width / columns as f32;
-        let col = index % columns;
-        let row = index / columns;
-        let top = panel.y + panel.height - 134.0;
+        let gap = 5.0;
+        let card_height = if panel.height > panel.width {
+            90.0
+        } else {
+            80.0
+        };
+        let card_width = (panel.width - outer_pad * 2.0).min(600.0).max(160.0);
+        let top = panel.y + panel.height - 98.0;
         RenderRect::new(
-            panel.x + outer_pad + col as f32 * (card_width + gap),
-            top - card_height - row as f32 * (card_height + gap),
+            panel.x + (panel.width - card_width) * 0.5,
+            top - card_height - index as f32 * (card_height + gap),
             card_width,
             card_height,
+        )
+    }
+
+    fn about_links_clip_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(
+            panel.x + 18.0,
+            panel.y + 62.0,
+            panel.width - 36.0,
+            panel.height - 146.0,
+        )
+    }
+
+    fn about_credits_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width - 56.0).min(560.0).max(260.0);
+        let height = (panel.height - 76.0).min(430.0).max(230.0);
+        RenderRect::new(
+            panel.x + (panel.width - width) * 0.5,
+            panel.y + (panel.height - height) * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn about_credits_dialog_close_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + (dialog.width - 200.0).max(0.0) * 0.5,
+            dialog.y + 16.0,
+            dialog.width.min(200.0),
+            44.0,
         )
     }
 
@@ -29059,8 +29088,8 @@ impl DesktopLauncher {
             DesktopMenuRoute::Campaign => Some("LAUNCH"),
             DesktopMenuRoute::Join => Some("CONNECT"),
             DesktopMenuRoute::About => Some(match self.about_route_page {
-                DesktopAboutRoutePage::Links => "CREDITS",
-                DesktopAboutRoutePage::Credits => "LINKS",
+                DesktopAboutRoutePage::Links => "@credits",
+                DesktopAboutRoutePage::Credits => "@back",
             }),
             DesktopMenuRoute::Discord => Some("OPEN"),
             _ => None,
@@ -34788,6 +34817,16 @@ impl DesktopLauncher {
                 return Some(action);
             }
         }
+        if route == DesktopMenuRoute::About
+            && self.about_route_page == DesktopAboutRoutePage::Credits
+        {
+            let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
+            let dialog = Self::about_credits_dialog_rect_for_panel(panel);
+            if Self::about_credits_dialog_close_rect(dialog).contains_point(RenderPoint::new(x, y))
+            {
+                return Some(DesktopMenuRouteShellAction::ShowAboutLinks);
+            }
+        }
         if let Some(rect) = Self::discord_route_shell_copy_rect_for_viewport(viewport, route) {
             if rect.contains_point(RenderPoint::new(x, y)) {
                 return Some(DesktopMenuRouteShellAction::CopyDiscordLink);
@@ -34822,6 +34861,9 @@ impl DesktopLauncher {
         let panel =
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::About);
         let point = RenderPoint::new(x, y);
+        if !Self::about_links_clip_rect_for_panel(panel).contains_point(point) {
+            return None;
+        }
         for (index, link) in self.visible_about_links().into_iter().enumerate() {
             let rect = Self::about_link_card_rect_for_panel(panel, index);
             if rect.contains_point(point) {
@@ -44164,41 +44206,21 @@ impl DesktopLauncher {
     }
 
     fn push_about_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
-        match self.about_route_page {
-            DesktopAboutRoutePage::Links => self.push_about_links_page(pass, panel),
-            DesktopAboutRoutePage::Credits => self.push_about_credits_page(pass, panel),
+        self.push_about_links_page(pass, panel);
+        if self.about_route_page == DesktopAboutRoutePage::Credits {
+            self.push_about_credits_page(pass, panel);
         }
     }
 
     fn push_about_links_page(&self, pass: &mut RenderPass, panel: RenderRect) {
-        let layer = Layer::END_PIXELED + 0.025;
-        pass.push(RenderCommand::draw_text_styled(
-            self.localize_bundle_markup_text("@credits.text"),
-            RenderPoint::new(panel.x + 22.0, panel.y + panel.height - 112.0),
-            [0.82, 0.90, 0.96, 1.0],
-            12.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Start)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            layer,
+        pass.push(RenderCommand::set_clip(
+            Self::about_links_clip_rect_for_panel(panel),
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            self.about_links_line(),
-            RenderPoint::new(panel.x + 22.0, panel.y + panel.height - 128.0),
-            [0.54, 0.64, 0.72, 1.0],
-            10.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Start)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            layer,
-        ));
-
         for (index, link) in self.visible_about_links().into_iter().enumerate() {
             let rect = Self::about_link_card_rect_for_panel(panel, index);
             self.push_about_link_card(pass, rect, link, index);
         }
+        pass.push(RenderCommand::clear_clip());
     }
 
     fn push_about_link_card(
@@ -44321,64 +44343,93 @@ impl DesktopLauncher {
     }
 
     fn push_about_credits_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let layer = Layer::END_PIXELED + 0.090;
+        let dialog = Self::about_credits_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.54],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.58, 0.76, 0.90, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
         pass.push(RenderCommand::draw_text_styled(
-            self.localize_bundle_markup_text("@credits.text"),
-            RenderPoint::new(panel.x + panel.width * 0.5, panel.y + panel.height - 112.0),
-            [0.92, 0.96, 1.0, 1.0],
-            13.0,
+            self.localize_bundle_markup_text("@credits"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
                 .with_outline(true),
-            Layer::END_PIXELED + 0.03,
+            layer + 0.003,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@credits.text"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 58.0),
+            [0.92, 0.96, 1.0, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.004,
         ));
         pass.push(RenderCommand::fill_rect(
             RenderRect::new(
-                panel.x + 22.0,
-                panel.y + panel.height - 134.0,
-                panel.width - 44.0,
+                dialog.x + 18.0,
+                dialog.y + dialog.height - 78.0,
+                dialog.width - 36.0,
                 3.0,
             ),
             [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
-            Layer::END_PIXELED + 0.031,
+            layer + 0.005,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            format!(
-                "{} ({})",
-                self.localize_bundle_markup_text("@contributors"),
-                ABOUT_CONTRIBUTORS.len()
-            ),
-            RenderPoint::new(panel.x + panel.width * 0.5, panel.y + panel.height - 154.0),
+            self.localize_bundle_markup_text("@contributors"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 98.0),
             [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
             12.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true),
-            Layer::END_PIXELED + 0.032,
+            layer + 0.006,
         ));
 
         let row_height = 15.0;
-        let top = panel.y + panel.height - 174.0;
-        let visible_rows = ((top - (panel.y + 62.0)) / row_height).max(0.0) as usize;
+        let top = dialog.y + dialog.height - 120.0;
+        let bottom = dialog.y + 70.0;
+        let visible_rows = ((top - bottom) / row_height).max(0.0) as usize;
         pass.push(RenderCommand::set_clip(RenderRect::new(
-            panel.x + 22.0,
-            panel.y + 62.0,
-            panel.width - 44.0,
-            top - (panel.y + 62.0) + 8.0,
+            dialog.x + 18.0,
+            bottom,
+            dialog.width - 36.0,
+            (top - bottom + 8.0).max(1.0),
         )));
         for (row, chunk) in ABOUT_CONTRIBUTORS.chunks(3).enumerate() {
             pass.push(RenderCommand::draw_text_styled(
                 chunk.join(" | "),
-                RenderPoint::new(panel.x + 28.0, top - row as f32 * row_height),
+                RenderPoint::new(dialog.x + 24.0, top - row as f32 * row_height),
                 [0.76, 0.80, 0.84, 1.0],
                 9.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Start)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true),
-                Layer::END_PIXELED + 0.033,
+                layer + 0.007,
             ));
         }
         pass.push(RenderCommand::clear_clip());
@@ -44389,16 +44440,23 @@ impl DesktopLauncher {
                     "scroll: {} more contributor rows",
                     total_rows - visible_rows
                 ),
-                RenderPoint::new(panel.x + panel.width * 0.5, panel.y + 52.0),
+                RenderPoint::new(dialog.center().x, dialog.y + 64.0),
                 [0.54, 0.64, 0.72, 1.0],
                 10.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true),
-                Layer::END_PIXELED + 0.033,
+                layer + 0.008,
             ));
         }
+        self.push_settings_text_button(
+            pass,
+            Self::about_credits_dialog_close_rect(dialog),
+            self.localize_bundle_markup_text("@back"),
+            Some("left"),
+            layer + 0.009,
+        );
     }
 
     fn apply_menu_input_events(
@@ -47115,9 +47173,10 @@ impl DesktopLauncher {
         if let Some(primary_rect) =
             Self::active_menu_route_shell_primary_rect_for_viewport(viewport, route)
         {
-            let label = self
-                .active_menu_route_shell_primary_label(route)
-                .unwrap_or("OPEN");
+            let label = self.localize_bundle_markup_text(
+                self.active_menu_route_shell_primary_label(route)
+                    .unwrap_or("OPEN"),
+            );
             pass.push(RenderCommand::fill_rect(
                 primary_rect,
                 [0.18, 0.35, 0.58, 0.92],
@@ -73482,13 +73541,11 @@ version: "2.0.0"
             .collect::<Vec<_>>();
 
         assert!(texts.contains(&"upstream: AboutDialog"));
-        assert!(texts.contains(
-            &launcher
-                .localize_bundle_markup_text("@credits.text")
-                .as_str()
-        ));
         let links_line = launcher.about_links_line();
-        assert!(texts.contains(&links_line.as_str()));
+        assert!(
+            !texts.contains(&links_line.as_str()),
+            "Java AboutDialog shows the link ScrollPane directly instead of a Rust-only links summary"
+        );
         assert!(texts.contains(
             &launcher
                 .localize_bundle_markup_text("@link.discord.description")
@@ -73530,17 +73587,19 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
+        assert!(
+            credit_texts.contains(&"Discord"),
+            "credits should be drawn as a modal over the original About link list"
+        );
+        assert!(credit_texts.contains(&launcher.localize_bundle_markup_text("@credits").as_str()));
         assert!(credit_texts.contains(
             &launcher
                 .localize_bundle_markup_text("@credits.text")
                 .as_str()
         ));
-        let contributors_line = format!(
-            "{} ({})",
-            launcher.localize_bundle_markup_text("@contributors"),
-            super::ABOUT_CONTRIBUTORS.len()
-        );
+        let contributors_line = launcher.localize_bundle_markup_text("@contributors");
         assert!(credit_texts.contains(&contributors_line.as_str()));
+        assert!(credit_texts.contains(&launcher.localize_bundle_markup_text("@back").as_str()));
         assert!(credit_texts
             .iter()
             .any(|text| text.contains("redloong9527 | Prosta4okua | Felix Corvus")));
@@ -73623,6 +73682,7 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_about_menu_route_filters_banned_links_for_ios_or_steam_mode() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
         launcher.about_filter_banned_links = true;
         launcher.dispatch_menu_action(MenuButtonRole::About);
 

@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 733. AboutDialog 链接页与 Credits 层级贴近原版
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **86.9%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `AboutDialog.setup()` 使用单列 `ScrollPane` 承载 link rows，而不是 Rust-only 的链接汇总行或卡片网格；
+  - `AboutDialog.showCredits()` 打开新的 `BaseDialog("@credits")`，Credits 应作为模态层叠在 About 链接页上，而不是替换整个 About 页面。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - About link row 改为单列列表式布局，并加入 clip 区域，减少“卡片网格/调试汇总”的 Rust 痕迹；
+    - 链接页不再渲染 `links: ...` 汇总行和 `@credits.text` 顶部说明；
+    - Credits 改为在链接页上叠加 pane/modal，含 `@credits` 标题、`@credits.text`、accent 分隔线、`@contributors` 和三列贡献者列表；
+    - About 主按钮改为使用 bundle 文案 `@credits/@back`，modal 内 Back 按钮可关闭 Credits 回到链接页。
+  - `README.md`
+    - 迁移进度百分比同步到 `86.9%`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop about --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_frame_loop --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - AboutDialog 仍缺少真实滚动状态/滚轮拖动与像素级 Scene2D table 间距；
+  - Settings、Mods、LoadGame、JoinDialog 等子菜单仍需继续向 Java 对话框层级、滚动和按钮皮肤靠拢；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 732. 菜单 frame-loop 输入坐标翻转回归收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
