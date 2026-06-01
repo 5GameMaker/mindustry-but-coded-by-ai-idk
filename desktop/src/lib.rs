@@ -24604,8 +24604,55 @@ impl DesktopLauncher {
     }
 
     pub fn set_setting_override(&mut self, table: &str, key: &str, value: impl Into<String>) {
+        let value = value.into();
         self.settings_overrides
-            .insert(Self::settings_storage_key(table, key), value.into());
+            .insert(Self::settings_storage_key(table, key), value.clone());
+        self.apply_setting_override_side_effect(table, key, &value);
+    }
+
+    fn apply_setting_override_side_effect(&mut self, table: &str, key: &str, value: &str) {
+        match (table, key) {
+            ("game", "communityservers") => {
+                if Self::settings_bool_from_storage_value(value) {
+                    self.ensure_join_community_server_cache_loaded();
+                } else {
+                    self.join_community_groups.clear();
+                    self.join_community_cache_loaded = false;
+                    self.join_community_feed_fetched = false;
+                    self.join_community_cache_error = None;
+                }
+            }
+            ("graphics", "uiEdgePadding") => {
+                if let Ok(padding) = value.trim().parse::<f32>() {
+                    let padding = padding.clamp(0.0, 100.0);
+                    self.menu_scene_margin_top = padding;
+                    self.menu_scene_margin_left = padding;
+                    self.menu_scene_margin_right = padding;
+                    self.menu_scene_margin_bottom = padding;
+                }
+            }
+            ("graphics", "uiscale") => {
+                if let Ok(scale_percent) = value.trim().parse::<f32>() {
+                    let scale_percent = scale_percent.clamp(25.0, 300.0);
+                    self.menu_ui_scale = scale_percent / 100.0;
+                    self.settings_overrides.insert(
+                        Self::settings_storage_key("graphics", "uiscalechanged"),
+                        (scale_percent.round() as i32 != 100).to_string(),
+                    );
+                }
+            }
+            ("graphics", "pixelate") => {
+                self.pixelate = Self::settings_bool_from_storage_value(value);
+            }
+            _ => {}
+        }
+    }
+
+    fn settings_bool_from_storage_value(value: &str) -> bool {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "true" | "1" | "yes" | "on"
+        )
     }
 
     pub fn setting_override_value(&self, table: &str, key: &str) -> Option<&str> {
@@ -75288,6 +75335,61 @@ version: "2.0.0"
             launcher.last_settings_action,
             Some(super::DesktopSettingsAction::BackToMain)
         );
+    }
+
+    #[test]
+    fn desktop_launcher_settings_immediate_side_effects_match_upstream_menu_expectations() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .join_community_groups
+            .push(super::DesktopJoinCommunityGroup::new(
+                "Cached",
+                vec!["cached.example:6567".into()],
+                true,
+            ));
+        launcher.join_community_cache_loaded = true;
+        launcher.join_community_feed_fetched = true;
+        launcher.set_setting_override("game", "communityservers", "false");
+        assert!(launcher.join_community_groups.is_empty());
+        assert!(!launcher.join_community_cache_loaded);
+        assert!(!launcher.join_community_feed_fetched);
+        assert_eq!(launcher.join_community_cache_error, None);
+
+        launcher.set_setting_override("graphics", "uiEdgePadding", "24");
+        assert_eq!(launcher.menu_scene_margin_top, 24.0);
+        assert_eq!(launcher.menu_scene_margin_left, 24.0);
+        assert_eq!(launcher.menu_scene_margin_right, 24.0);
+        assert_eq!(launcher.menu_scene_margin_bottom, 24.0);
+
+        launcher.set_setting_override("graphics", "uiscale", "150");
+        assert_eq!(launcher.menu_ui_scale, 1.5);
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(&DesktopLauncher::settings_storage_key(
+                    "graphics",
+                    "uiscalechanged"
+                ))
+                .map(String::as_str),
+            Some("true")
+        );
+        launcher.set_setting_override("graphics", "uiscale", "100");
+        assert_eq!(launcher.menu_ui_scale, 1.0);
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(&DesktopLauncher::settings_storage_key(
+                    "graphics",
+                    "uiscalechanged"
+                ))
+                .map(String::as_str),
+            Some("false")
+        );
+
+        launcher.set_setting_override("graphics", "pixelate", "true");
+        assert!(launcher.pixelate);
+        launcher.set_setting_override("graphics", "pixelate", "false");
+        assert!(!launcher.pixelate);
     }
 
     #[test]
