@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 665. DatabaseDialog 打开时按当前星球选中 tab
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **77.7%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是补齐 Java `DatabaseDialog.shown(...)` 中根据当前星球选择 tab 的行为。
+- Java 对照依据：
+  - `DatabaseDialog.shown(...)` 中 `checkTabList(); sortContents();`
+  - 若 `state.isCampaign() && allTabs.contains(state.getPlanet())`，则 `tab = state.getPlanet()`；
+  - 否则若 `state.isGame() && state.rules.planet != null && allTabs.contains(state.rules.planet)`，则选中该 planet；
+  - 不存在于 allTabs 时保留 `Planets.sun` / all tab。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `database_default_selected_tab_index()`；
+    - 打开 Database route 时不再无条件 `database_selected_tab = 0`，而是根据 `game_state.get_planet_name()` 在 `database_tab_keys()` 中定位当前星球；
+    - pause overlay 打开 Database route 时也使用同一逻辑；
+    - 未命中当前星球时回退 `sun`，保持 Java 行为。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop database_route_selects_current_planet --lib`
+  - `cargo test -p mindustry-desktop database --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - DatabaseDialog 仍需继续对照 Java `sortContents()` 的完整 category/tag 排序细节和 ContentInfoDialog 细节字段；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 664. Desktop 窗口图标接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

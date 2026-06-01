@@ -21529,7 +21529,7 @@ impl DesktopLauncher {
             } else if route == DesktopMenuRoute::Database {
                 self.database_search.clear();
                 self.database_search_focused = false;
-                self.database_selected_tab = 0;
+                self.database_selected_tab = self.database_default_selected_tab_index();
                 self.database_scroll_offset = 0;
                 self.last_database_content_opened = None;
                 self.last_database_icon_copy_action = None;
@@ -22475,6 +22475,19 @@ impl DesktopLauncher {
 
     fn database_tab_count(&self) -> usize {
         self.database_tab_keys().len()
+    }
+
+    fn database_default_selected_tab_index(&self) -> usize {
+        if !(self.game_state.is_campaign() || self.game_state.is_game()) {
+            return 0;
+        }
+        let Some(planet_name) = self.game_state.get_planet_name() else {
+            return 0;
+        };
+        self.database_tab_keys()
+            .iter()
+            .position(|tab| tab == planet_name)
+            .unwrap_or(0)
     }
 
     fn database_tab_keys(&self) -> Vec<String> {
@@ -27017,6 +27030,14 @@ impl DesktopLauncher {
                 self.host_error = None;
             }
             DesktopMenuRoute::Join => {}
+            DesktopMenuRoute::Database => {
+                self.database_search.clear();
+                self.database_search_focused = false;
+                self.database_selected_tab = self.database_default_selected_tab_index();
+                self.database_scroll_offset = 0;
+                self.last_database_content_opened = None;
+                self.last_database_icon_copy_action = None;
+            }
             _ => {}
         }
     }
@@ -63081,6 +63102,35 @@ version: "2.0.0"
             super::DesktopMenuRouteShellAction::CloseDatabaseContent,
         );
         assert_eq!(launcher.last_database_content_opened, None);
+    }
+
+    #[test]
+    fn desktop_launcher_database_route_selects_current_planet_tab_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.set(GameStateState::Playing);
+        launcher.game_state.rules.planet = "serpulo".into();
+        let serpulo_index = launcher
+            .database_tab_keys()
+            .iter()
+            .position(|tab| tab == "serpulo")
+            .expect("base content should expose a Serpulo database tab");
+
+        launcher.dispatch_menu_action(MenuButtonRole::ContentDatabase);
+
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Database)
+        );
+        assert_eq!(launcher.database_selected_tab, serpulo_index);
+        assert_eq!(launcher.database_selected_tab_key(), "serpulo");
+
+        launcher.game_state.rules.planet = "unknown-planet".into();
+        launcher.dispatch_menu_action(MenuButtonRole::ContentDatabase);
+        assert_eq!(
+            launcher.database_selected_tab, 0,
+            "Java DatabaseDialog falls back to sun/all when the current planet is not in allTabs"
+        );
+        assert_eq!(launcher.database_selected_tab_key(), "sun");
     }
 
     #[test]
