@@ -166,11 +166,11 @@ const SETTINGS_LANGUAGE_ROW_HEIGHT: f32 = 50.0;
 const SETTINGS_LANGUAGE_ROW_GAP: f32 = 0.0;
 const SETTINGS_LANGUAGE_VISIBLE_ROWS: usize = 7;
 const SETTINGS_LANGUAGE_LIST_WIDTH: f32 = 400.0;
-const SETTINGS_KEYBIND_ROW_HEIGHT: f32 = 34.0;
+const SETTINGS_KEYBIND_ROW_HEIGHT: f32 = 40.0;
 const SETTINGS_KEYBIND_ROW_GAP: f32 = 4.0;
-const SETTINGS_KEYBIND_REBIND_WIDTH: f32 = 126.0;
-const SETTINGS_KEYBIND_RESET_WIDTH: f32 = 126.0;
-const SETTINGS_KEYBIND_VISIBLE_ROWS: usize = 9;
+const SETTINGS_KEYBIND_REBIND_WIDTH: f32 = 140.0;
+const SETTINGS_KEYBIND_RESET_WIDTH: f32 = 140.0;
+const SETTINGS_KEYBIND_VISIBLE_ROWS: usize = 6;
 const JOIN_SERVER_CARD_HEIGHT: f32 = 132.0;
 const JOIN_SERVER_CARD_GAP: f32 = 10.0;
 const JOIN_SERVER_CARD_COLUMN_GAP: f32 = 8.0;
@@ -24287,6 +24287,19 @@ impl DesktopLauncher {
                             .with_outline(true),
                         Layer::END_PIXELED + 0.107 + index as f32 * 0.0001,
                     ));
+                    let separator = RenderRect::new(
+                        rect.x + 138.0,
+                        rect.center().y - 1.5,
+                        (rect.width - 146.0).max(0.0),
+                        3.0,
+                    );
+                    if separator.width > 0.0 {
+                        pass.push(RenderCommand::fill_rect(
+                            separator,
+                            [0.32, 0.36, 0.40, 0.88],
+                            Layer::END_PIXELED + 0.1075 + index as f32 * 0.0001,
+                        ));
+                    }
                 }
                 last_category = spec.category;
             }
@@ -25480,9 +25493,9 @@ impl DesktopLauncher {
         let row = Self::settings_keybind_row_rect(dialog, index);
         RenderRect::new(
             row.x + row.width - SETTINGS_KEYBIND_REBIND_WIDTH - SETTINGS_KEYBIND_RESET_WIDTH - 10.0,
-            row.y + 2.0,
+            row.y,
             SETTINGS_KEYBIND_REBIND_WIDTH,
-            row.height - 4.0,
+            40.0,
         )
     }
 
@@ -25490,20 +25503,19 @@ impl DesktopLauncher {
         let row = Self::settings_keybind_row_rect(dialog, index);
         RenderRect::new(
             row.x + row.width - SETTINGS_KEYBIND_RESET_WIDTH,
-            row.y + 2.0,
+            row.y,
             SETTINGS_KEYBIND_RESET_WIDTH,
-            row.height - 4.0,
+            40.0,
         )
     }
 
     fn settings_keybind_reset_all_rect(dialog: RenderRect) -> RenderRect {
         let back = Self::schematic_info_button_rect(dialog, 0);
-        let x = back.right() + 10.0;
         RenderRect::new(
-            x,
-            back.y,
-            (dialog.right() - x - 18.0).max(200.0),
-            back.height,
+            dialog.x + 18.0,
+            back.y + back.height + 8.0,
+            dialog.width - 36.0,
+            40.0,
         )
     }
 
@@ -68169,6 +68181,19 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
+        let controls_fills = controls_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("controls child dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::FillRect { rect, color, .. } => Some((*rect, *color)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         let search_rect = DesktopLauncher::settings_keybind_search_rect(child_dialog);
         let text_field_background = DesktopLauncher::settings_text_field_background_symbol();
         let text_field_cursor = DesktopLauncher::settings_text_field_cursor_symbol();
@@ -68200,14 +68225,23 @@ version: "2.0.0"
         assert!(
             !controls_texts.contains(&"ControlsDialog placeholder: keybind rows and reset later")
         );
+        let rebind_rect = DesktopLauncher::settings_keybind_rebind_button_rect(child_dialog, 0);
+        let reset_rect = DesktopLauncher::settings_keybind_reset_button_rect(child_dialog, 0);
+        assert_eq!(rebind_rect.width, 140.0);
+        assert_eq!(rebind_rect.height, 40.0);
+        assert_eq!(reset_rect.width, 140.0);
+        assert_eq!(reset_rect.height, 40.0);
+        assert!(controls_fills.iter().any(|(rect, color)| {
+            (rect.height - 3.0).abs() < f32::EPSILON && *color == [0.32, 0.36, 0.40, 0.88]
+        }));
         let back_rect = DesktopLauncher::schematic_info_button_rect(child_dialog, 0);
         let reset_all_rect = DesktopLauncher::settings_keybind_reset_all_rect(child_dialog);
-        assert_eq!(reset_all_rect.y, back_rect.y);
-        assert_eq!(reset_all_rect.height, back_rect.height);
-        assert!(reset_all_rect.x > back_rect.right());
+        assert_eq!(reset_all_rect.x, child_dialog.x + 18.0);
+        assert_eq!(reset_all_rect.y, back_rect.y + back_rect.height + 8.0);
+        assert_eq!(reset_all_rect.height, 40.0);
         assert!(
-            reset_all_rect.width > 300.0,
-            "Java KeybindDialog reset all button fills the bottom row instead of being a small right-corner button"
+            reset_all_rect.width > child_dialog.width - 40.0,
+            "Java KeybindDialog reset all button should be a full-width list row instead of a footer-side chip"
         );
         let total_keybinds = super::SETTINGS_KEYBIND_SPECS.len();
         assert!(launcher.settings_route_lines().contains(&format!(
