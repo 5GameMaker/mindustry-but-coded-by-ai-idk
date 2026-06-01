@@ -5,7 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [features]
-default = []
+default = ["opengl-native-runtime"]
 opengl-backend = []
 opengl-native-runtime = [
     "opengl-backend",

@@ -15,6 +15,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 660. Desktop 默认构建进入 native OpenGL 客户端
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **77.2%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是避免用户默认 `cargo run -p mindustry-desktop` 落入 headless/null runtime，从构建入口层面减少“客户端看起来没起来/黑屏”的误判。
+- Java 对照依据：
+  - 原版 desktop launcher 默认就是创建 LWJGL 窗口并进入 OpenGL 渲染；
+  - Rust 迁移期间保留 headless/null runtime 只应作为测试/CI 辅助路径，不应是默认桌面客户端路径。
+- 本轮主改动：
+  - `desktop/Cargo.toml`
+    - `default` feature 从空列表改为 `["opengl-native-runtime"]`；
+    - 仍保留 `--no-default-features` 作为 headless/无窗口构建路径，便于测试和后续 CI 分层。
+- 已验证：
+  - `cargo check -p mindustry-desktop`
+  - `cargo check -p mindustry-desktop --no-default-features`
+- 仍未完成：
+  - native OpenGL 上下文仍缺 Java `DesktopLauncher` 那种多版本/驱动兼容回退矩阵；
+  - 资源根、shader、font、atlas 缺失时仍需要更明确的窗口内诊断与自动兜底；
+  - 默认进入 native runtime 只解决“默认构建入口”问题，不代表 UI/游戏已完整可玩；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 659. Menu UI flatOver/black6 颜色语义对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
