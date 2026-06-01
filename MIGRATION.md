@@ -15,6 +15,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 695. Desktop 资源根发现覆盖 exe 相对与打包布局
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **80.9%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是降低从非仓库根目录启动时 UI 字体、图标、贴图资源找不到而导致黑屏/缺资源的风险。
+- 风险依据：
+  - 之前 `desktop_default_asset_roots()` 主要依赖当前工作目录 `core/assets` 与固定上游路径；
+  - 打包或从 `target/debug` / `target/release` 直接启动时，当前工作目录不一定是 Rust 仓库根；
+  - 字体、icons.properties、sprite source 解析失败会直接影响主菜单观感和首帧可见性。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_push_asset_root_candidates_near(...)`，同时纳入 `base/core/assets`、`base/assets`、相邻上游 `mindustry-upstream-v157.4/core/assets` 与 `_upstream_mindustry/core/assets`；
+    - `desktop_default_asset_roots()` 同时扫描 `current_dir` ancestors 与 `current_exe` ancestors；
+    - 新增 `desktop_dedup_path_list(...)` 避免重复候选；
+    - 测试覆盖打包/工作区候选路径和去重逻辑。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_asset_root_candidates --lib`
+- 仍未完成：
+  - shader root、atlas upload 诊断和首帧可视 fallback 还要继续审查；
+  - 打包产物的实际资源复制/发布脚本还未完整闭环；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 694. MapListDialog 空状态收敛到 Java 文案风格
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

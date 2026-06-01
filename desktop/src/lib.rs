@@ -7076,15 +7076,51 @@ fn desktop_candidate_asset_raw_root_from_asset_root(
     asset_root.parent().map(|parent| parent.join("assets-raw"))
 }
 
+fn desktop_push_asset_root_candidates_near(roots: &mut Vec<PathBuf>, base: &Path) {
+    roots.push(base.join("core").join("assets"));
+    roots.push(base.join("assets"));
+    roots.push(
+        base.join("..")
+            .join("mindustry-upstream-v157.4")
+            .join("core")
+            .join("assets"),
+    );
+    roots.push(
+        base.join("..")
+            .join("_upstream_mindustry")
+            .join("core")
+            .join("assets"),
+    );
+}
+
+fn desktop_dedup_path_list(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut deduped = Vec::new();
+    for path in paths {
+        if !deduped.iter().any(|known| known == &path) {
+            deduped.push(path);
+        }
+    }
+    deduped
+}
+
 fn desktop_default_asset_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Ok(current_dir) = std::env::current_dir() {
-        roots.push(current_dir.join("core").join("assets"));
+        for ancestor in current_dir.ancestors().take(5) {
+            desktop_push_asset_root_candidates_near(&mut roots, ancestor);
+        }
+    }
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            for ancestor in exe_dir.ancestors().take(6) {
+                desktop_push_asset_root_candidates_near(&mut roots, ancestor);
+            }
+        }
     }
     roots.push(PathBuf::from(
         "D:/MDT/mindustry-upstream-v157.4/core/assets",
     ));
-    roots
+    desktop_dedup_path_list(roots)
 }
 
 fn desktop_existing_sprite_source_path_from_asset_root(
@@ -56638,6 +56674,34 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
         ];
         std::fs::write(path, PNG_1X1_TRANSPARENT).expect("test png should be writable");
+    }
+
+    #[test]
+    fn desktop_asset_root_candidates_cover_packaged_and_workspace_layouts() {
+        let base = std::path::PathBuf::from("D:/MDT/rust-mindustry/target/debug");
+        let mut roots = Vec::new();
+        super::desktop_push_asset_root_candidates_near(&mut roots, &base);
+
+        assert!(roots.contains(&base.join("assets")));
+        assert!(roots.contains(&base.join("core").join("assets")));
+        assert!(roots.contains(
+            &base
+                .join("..")
+                .join("mindustry-upstream-v157.4")
+                .join("core")
+                .join("assets")
+        ));
+        assert!(roots.contains(
+            &base
+                .join("..")
+                .join("_upstream_mindustry")
+                .join("core")
+                .join("assets")
+        ));
+
+        let deduped =
+            super::desktop_dedup_path_list(vec![base.join("assets"), base.join("assets")]);
+        assert_eq!(deduped, vec![base.join("assets")]);
     }
 
     struct EnvVarGuard {
