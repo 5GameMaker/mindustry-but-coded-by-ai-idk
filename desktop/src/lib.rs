@@ -298,6 +298,14 @@ struct DesktopJoinRouteServerSnapshot {
     search_terms: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum DesktopJoinSavedServerRefreshState {
+    Idle,
+    Refreshing,
+    Resolved(Host),
+    Failed(String),
+}
+
 impl DesktopJoinRouteServerSnapshot {
     fn matches_query(&self, query: &str) -> bool {
         let query = query.trim().to_lowercase();
@@ -16487,6 +16495,9 @@ pub struct DesktopLauncher {
     pub join_local_discovery_receiver: Option<Arc<Mutex<mpsc::Receiver<Option<Host>>>>>,
     pub join_community_groups: Vec<DesktopJoinCommunityGroup>,
     pub join_saved_servers: Vec<DesktopConnectTarget>,
+    pub join_saved_server_refresh_states: Vec<DesktopJoinSavedServerRefreshState>,
+    pub join_saved_server_refresh_receiver:
+        Option<Arc<Mutex<mpsc::Receiver<(usize, DesktopJoinSavedServerRefreshState)>>>>,
     pub join_refresh_requests: u32,
     pub join_search: String,
     pub join_search_focused: bool,
@@ -17391,6 +17402,8 @@ impl DesktopLauncher {
             join_local_discovery_receiver: None,
             join_community_groups: Vec::new(),
             join_saved_servers,
+            join_saved_server_refresh_states: Vec::new(),
+            join_saved_server_refresh_receiver: None,
             join_refresh_requests: 0,
             join_search: String::new(),
             join_search_focused: false,
@@ -17687,6 +17700,7 @@ impl DesktopLauncher {
         self.client.update();
         self.net_client.update();
         self.poll_join_local_discovery();
+        self.poll_join_saved_server_refreshes();
         self.sync_loaded_world_data();
         self.sync_client_loaded_state();
         self.sync_state_snapshot();
@@ -27180,8 +27194,83 @@ impl DesktopLauncher {
 
     fn join_route_server_snapshot_for_target(
         &self,
+        index: usize,
         target: &DesktopConnectTarget,
     ) -> DesktopJoinRouteServerSnapshot {
+        if let Some(refresh_state) = self.join_saved_server_refresh_states.get(index) {
+            match refresh_state {
+                DesktopJoinSavedServerRefreshState::Idle => {}
+                DesktopJoinSavedServerRefreshState::Refreshing => {
+                    return Self::join_route_server_snapshot_from_parts(
+                        desktop_connect_target_display_ip(target),
+                        "saved",
+                        "@server.refreshing",
+                        "--",
+                        "@server.refreshing",
+                        "--",
+                        "--",
+                        "--",
+                        "--ms",
+                    );
+                }
+                DesktopJoinSavedServerRefreshState::Resolved(host) => {
+                    let resolved_target =
+                        u16::try_from(host.port)
+                            .ok()
+                            .map(|port| DesktopConnectTarget {
+                                host: if host.address.trim().is_empty() {
+                                    target.host.clone()
+                                } else {
+                                    host.address.clone()
+                                },
+                                port,
+                            });
+                    let address = resolved_target
+                        .as_ref()
+                        .map(desktop_connect_target_display_ip)
+                        .unwrap_or_else(|| desktop_connect_target_display_ip(target));
+                    let description = if host.description.trim().is_empty() {
+                        host.name.as_str()
+                    } else {
+                        host.description.as_str()
+                    };
+                    let map = if host.mapname.trim().is_empty() {
+                        "@unknown"
+                    } else {
+                        host.mapname.as_str()
+                    };
+                    let mode = host
+                        .mode_name
+                        .clone()
+                        .unwrap_or_else(|| format!("@{}", host.mode.name_bundle_key()));
+                    return Self::join_route_server_snapshot_from_parts(
+                        address,
+                        "saved",
+                        "online",
+                        host.version.to_string(),
+                        description,
+                        format!("{}/{}", host.players.max(0), host.player_limit.max(0)),
+                        map,
+                        mode,
+                        format!("{}ms", host.ping.max(0)),
+                    );
+                }
+                DesktopJoinSavedServerRefreshState::Failed(_) => {
+                    return Self::join_route_server_snapshot_from_parts(
+                        desktop_connect_target_display_ip(target),
+                        "saved",
+                        "@host.invalid",
+                        "--",
+                        "@host.invalid",
+                        "--",
+                        "--",
+                        "--",
+                        "--ms",
+                    );
+                }
+            }
+        }
+
         let state = self.net_client.state();
         let state = state.lock().unwrap();
         let world = state.last_loaded_world_data.as_ref();
@@ -27256,10 +27345,58 @@ impl DesktopLauncher {
         }
     }
 
+    fn join_route_server_snapshot_from_parts(
+        address: impl Into<String>,
+        source: impl Into<String>,
+        status: impl Into<String>,
+        version: impl Into<String>,
+        description: impl Into<String>,
+        players: impl Into<String>,
+        map: impl Into<String>,
+        mode: impl Into<String>,
+        ping: impl Into<String>,
+    ) -> DesktopJoinRouteServerSnapshot {
+        let address = address.into();
+        let source = source.into();
+        let status = status.into();
+        let version = version.into();
+        let description = description.into();
+        let players = players.into();
+        let map = map.into();
+        let mode = mode.into();
+        let ping = ping.into();
+        let search_terms = [
+            address.clone(),
+            source.clone(),
+            status.clone(),
+            version.clone(),
+            description.clone(),
+            players.clone(),
+            map.clone(),
+            mode.clone(),
+            ping.clone(),
+        ]
+        .join(" ")
+        .to_lowercase();
+        DesktopJoinRouteServerSnapshot {
+            address,
+            source,
+            status,
+            version,
+            description,
+            players,
+            map,
+            mode,
+            ping,
+            search_terms,
+        }
+    }
+
     fn join_saved_server_snapshots(&self) -> Vec<DesktopJoinRouteServerSnapshot> {
         self.join_saved_servers
             .iter()
-            .map(|target| self.join_route_server_snapshot_for_target(target))
+            .enumerate()
+            .map(|(index, target)| self.join_route_server_snapshot_for_target(index, target))
             .collect()
     }
 
@@ -27268,6 +27405,93 @@ impl DesktopLauncher {
             JOIN_SERVERS_SETTINGS_KEY.into(),
             join_saved_servers_to_settings_json(&self.join_saved_servers),
         );
+        self.ensure_join_saved_server_refresh_states();
+    }
+
+    fn ensure_join_saved_server_refresh_states(&mut self) {
+        self.join_saved_server_refresh_states.resize(
+            self.join_saved_servers.len(),
+            DesktopJoinSavedServerRefreshState::Idle,
+        );
+    }
+
+    fn refresh_join_saved_servers(&mut self) {
+        self.ensure_join_saved_server_refresh_states();
+        if self.join_saved_servers.is_empty() {
+            self.join_saved_server_refresh_receiver = None;
+            return;
+        }
+
+        let (tx, rx) = mpsc::channel::<(usize, DesktopJoinSavedServerRefreshState)>();
+        self.join_saved_server_refresh_receiver = Some(Arc::new(Mutex::new(rx)));
+        let net = self.net_client.net();
+        for (index, target) in self.join_saved_servers.iter().cloned().enumerate() {
+            self.join_saved_server_refresh_states[index] =
+                DesktopJoinSavedServerRefreshState::Refreshing;
+            let tx = tx.clone();
+            let net = Arc::clone(&net);
+            std::thread::spawn(move || {
+                let result = net
+                    .lock()
+                    .unwrap()
+                    .ping_host(&target.host, target.port, Duration::from_secs(2))
+                    .map(DesktopJoinSavedServerRefreshState::Resolved)
+                    .unwrap_or_else(|error| {
+                        DesktopJoinSavedServerRefreshState::Failed(error.to_string())
+                    });
+                let _ = tx.send((index, result));
+            });
+        }
+    }
+
+    fn refresh_join_saved_server_at(&mut self, index: usize) -> bool {
+        self.ensure_join_saved_server_refresh_states();
+        let Some(target) = self.join_saved_servers.get(index).cloned() else {
+            return false;
+        };
+        let (tx, rx) = mpsc::channel::<(usize, DesktopJoinSavedServerRefreshState)>();
+        self.join_saved_server_refresh_receiver = Some(Arc::new(Mutex::new(rx)));
+        for (state_index, state) in self.join_saved_server_refresh_states.iter_mut().enumerate() {
+            if state_index == index {
+                *state = DesktopJoinSavedServerRefreshState::Refreshing;
+            } else if matches!(state, DesktopJoinSavedServerRefreshState::Refreshing) {
+                *state = DesktopJoinSavedServerRefreshState::Idle;
+            }
+        }
+        let net = self.net_client.net();
+        std::thread::spawn(move || {
+            let result = net
+                .lock()
+                .unwrap()
+                .ping_host(&target.host, target.port, Duration::from_secs(2))
+                .map(DesktopJoinSavedServerRefreshState::Resolved)
+                .unwrap_or_else(|error| {
+                    DesktopJoinSavedServerRefreshState::Failed(error.to_string())
+                });
+            let _ = tx.send((index, result));
+        });
+        true
+    }
+
+    fn poll_join_saved_server_refreshes(&mut self) {
+        let Some(receiver) = self.join_saved_server_refresh_receiver.as_ref().cloned() else {
+            return;
+        };
+        self.ensure_join_saved_server_refresh_states();
+        let receiver = receiver.lock().unwrap();
+        while let Ok((index, state)) = receiver.try_recv() {
+            if let Some(slot) = self.join_saved_server_refresh_states.get_mut(index) {
+                *slot = state;
+            }
+        }
+        if self
+            .join_saved_server_refresh_states
+            .iter()
+            .all(|state| !matches!(state, DesktopJoinSavedServerRefreshState::Refreshing))
+        {
+            drop(receiver);
+            self.join_saved_server_refresh_receiver = None;
+        }
     }
 
     pub fn load_join_saved_servers_from_settings(&mut self) -> usize {
@@ -27279,6 +27503,7 @@ impl DesktopLauncher {
             return 0;
         }
         self.join_saved_servers = servers;
+        self.ensure_join_saved_server_refresh_states();
         if self
             .connect_target
             .as_ref()
@@ -27392,6 +27617,9 @@ impl DesktopLauncher {
             return false;
         }
         let removed = self.join_saved_servers.remove(index);
+        if index < self.join_saved_server_refresh_states.len() {
+            self.join_saved_server_refresh_states.remove(index);
+        }
         if self.connect_target.as_ref() == Some(&removed) {
             self.connect_target = self.join_saved_servers.first().cloned();
         }
@@ -30879,11 +31107,21 @@ impl DesktopLauncher {
                     if let Some(index) = self.join_add_server_edit_index {
                         if let Some(saved) = self.join_saved_servers.get_mut(index) {
                             *saved = target.clone();
+                            self.ensure_join_saved_server_refresh_states();
+                            if let Some(state) =
+                                self.join_saved_server_refresh_states.get_mut(index)
+                            {
+                                *state = DesktopJoinSavedServerRefreshState::Idle;
+                            }
                         } else if !self.join_saved_servers.contains(&target) {
                             self.join_saved_servers.push(target.clone());
+                            self.join_saved_server_refresh_states
+                                .push(DesktopJoinSavedServerRefreshState::Idle);
                         }
                     } else if !self.join_saved_servers.contains(&target) {
                         self.join_saved_servers.push(target.clone());
+                        self.join_saved_server_refresh_states
+                            .push(DesktopJoinSavedServerRefreshState::Idle);
                     }
                     self.persist_join_saved_servers_to_settings();
                     self.settings_overrides.insert(
@@ -30917,10 +31155,13 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::RefreshJoinServers => {
                 self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
                 self.refresh_join_local_hosts();
+                self.refresh_join_saved_servers();
             }
             DesktopMenuRouteShellAction::MoveJoinServerCardUp(index) => {
                 if index > 0 && index < self.join_saved_servers.len() {
                     self.join_saved_servers.swap(index, index - 1);
+                    self.ensure_join_saved_server_refresh_states();
+                    self.join_saved_server_refresh_states.swap(index, index - 1);
                     self.persist_join_saved_servers_to_settings();
                     self.connect_error = None;
                 }
@@ -30928,12 +31169,14 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::MoveJoinServerCardDown(index) => {
                 if index + 1 < self.join_saved_servers.len() {
                     self.join_saved_servers.swap(index, index + 1);
+                    self.ensure_join_saved_server_refresh_states();
+                    self.join_saved_server_refresh_states.swap(index, index + 1);
                     self.persist_join_saved_servers_to_settings();
                     self.connect_error = None;
                 }
             }
             DesktopMenuRouteShellAction::RefreshJoinServerCard(index) => {
-                if self.join_saved_servers.get(index).is_some() {
+                if self.refresh_join_saved_server_at(index) {
                     self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
                 }
             }
@@ -30985,10 +31228,22 @@ impl DesktopLauncher {
                 let _ = self.connect_to_target(target);
             }
             DesktopMenuRouteShellAction::ConnectJoinServerCard(index) => {
-                let Some(target) = self.join_saved_servers.get(index).cloned() else {
+                let Some(mut target) = self.join_saved_servers.get(index).cloned() else {
                     self.connect_error = Some("missing connect target".into());
                     return;
                 };
+                if let Some(DesktopJoinSavedServerRefreshState::Resolved(host)) =
+                    self.join_saved_server_refresh_states.get(index)
+                {
+                    if let Ok(port) = u16::try_from(host.port) {
+                        if !host.address.trim().is_empty() {
+                            target = DesktopConnectTarget {
+                                host: host.address.clone(),
+                                port,
+                            };
+                        }
+                    }
+                }
                 self.connect_target = Some(target.clone());
                 let _ = self.connect_to_target(target);
             }
@@ -31017,6 +31272,8 @@ impl DesktopLauncher {
                 };
                 if !self.join_saved_servers.contains(&target) {
                     self.join_saved_servers.push(target.clone());
+                    self.join_saved_server_refresh_states
+                        .push(DesktopJoinSavedServerRefreshState::Idle);
                     self.persist_join_saved_servers_to_settings();
                     self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
                 }
@@ -43287,7 +43544,7 @@ mod tests {
     }
 
     fn free_local_port() -> u16 {
-        for _ in 0..32 {
+        for _ in 0..1024 {
             let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
             let port = tcp.local_addr().unwrap().port();
             if UdpSocket::bind(("127.0.0.1", port)).is_ok() {
@@ -68628,6 +68885,10 @@ version: "2.0.0"
             Some(super::DesktopMenuRouteShellAction::DeleteJoinServerCard(0))
         );
 
+        let saved_servers_before_refresh = launcher.join_saved_servers.clone();
+        let saved_refresh_states_before_refresh = launcher.join_saved_server_refresh_states.clone();
+        launcher.join_saved_servers.clear();
+        launcher.join_saved_server_refresh_states.clear();
         launcher.apply_menu_input_events(
             surface,
             &[
@@ -68646,6 +68907,8 @@ version: "2.0.0"
             Some(super::DesktopMenuRouteShellAction::RefreshJoinServers)
         );
         assert_eq!(launcher.join_refresh_requests, 1);
+        launcher.join_saved_servers = saved_servers_before_refresh;
+        launcher.join_saved_server_refresh_states = saved_refresh_states_before_refresh;
 
         launcher.apply_menu_input_events(
             surface,
@@ -69040,6 +69303,184 @@ version: "2.0.0"
                 .get(super::JOIN_SERVERS_SETTINGS_KEY),
             Some(&"[{\"ip\":\"renamed.example\",\"port\":7002}]".to_string())
         );
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_saved_refresh_states_drive_server_cards_like_java() {
+        let port = super::DEFAULT_MINDUSTRY_PORT;
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
+        launcher.join_saved_servers = vec![
+            super::DesktopConnectTarget {
+                host: "cached.example".into(),
+                port,
+            },
+            super::DesktopConnectTarget {
+                host: "stale.example".into(),
+                port,
+            },
+            super::DesktopConnectTarget {
+                host: "bad.example".into(),
+                port,
+            },
+        ];
+        launcher.join_saved_server_refresh_states = vec![
+            super::DesktopJoinSavedServerRefreshState::Resolved(
+                mindustry_core::mindustry::net::Host::new(
+                    31,
+                    "Cached server",
+                    "cached.example",
+                    port.into(),
+                    "custom map",
+                    12,
+                    3,
+                    158,
+                    "official",
+                    Gamemode::Attack,
+                    16,
+                    "cached description",
+                    Some("@mode.attack.name".into()),
+                ),
+            ),
+            super::DesktopJoinSavedServerRefreshState::Refreshing,
+            super::DesktopJoinSavedServerRefreshState::Failed("timeout".into()),
+        ];
+
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(lines.contains(&"server[0] status: online".to_string()));
+        assert!(lines.contains(&"server[0] version: 158".to_string()));
+        assert!(lines.contains(&"server[0] description: cached description".to_string()));
+        assert!(lines.contains(&"server[0] players: 3/16".to_string()));
+        assert!(lines.contains(&"server[0] map: custom map".to_string()));
+        assert!(lines.contains(&"server[0] mode: @mode.attack.name".to_string()));
+        assert!(lines.contains(&"server[0] ping: 31ms".to_string()));
+        assert!(lines.contains(&"server[1] status: @server.refreshing".to_string()));
+        assert!(lines.contains(&"server[1] description: @server.refreshing".to_string()));
+        assert!(lines.contains(&"server[2] status: @host.invalid".to_string()));
+        assert!(lines.contains(&"server[2] description: @host.invalid".to_string()));
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("join saved refresh frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.iter().any(|text| {
+            text.contains("cached.example") && text.contains("@server.version: 158")
+        }));
+        assert!(texts.contains(&"cached description"));
+        assert!(texts.contains(&"players: 3/16"));
+        assert!(texts.contains(&"save.map: custom map / @mode.attack.name"));
+        assert!(texts.contains(&"ping: 31ms"));
+        assert!(texts.contains(&"@server.refreshing"));
+        assert!(texts.contains(&"@host.invalid"));
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_saved_refresh_states_follow_reorder_delete_and_poll() {
+        let port = super::DEFAULT_MINDUSTRY_PORT;
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
+        launcher.join_saved_servers = vec![
+            super::DesktopConnectTarget {
+                host: "one.example".into(),
+                port,
+            },
+            super::DesktopConnectTarget {
+                host: "two.example".into(),
+                port,
+            },
+        ];
+        launcher.join_saved_server_refresh_states = vec![
+            super::DesktopJoinSavedServerRefreshState::Resolved(
+                mindustry_core::mindustry::net::Host::new(
+                    11,
+                    "One",
+                    "one.example",
+                    port.into(),
+                    "one map",
+                    1,
+                    1,
+                    158,
+                    "official",
+                    Gamemode::Survival,
+                    8,
+                    "one description",
+                    Some("@mode.survival.name".into()),
+                ),
+            ),
+            super::DesktopJoinSavedServerRefreshState::Failed("timeout".into()),
+        ];
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::MoveJoinServerCardDown(0),
+        );
+        assert_eq!(launcher.join_saved_servers[0].host, "two.example");
+        assert!(matches!(
+            launcher.join_saved_server_refresh_states.first(),
+            Some(super::DesktopJoinSavedServerRefreshState::Failed(_))
+        ));
+        assert!(matches!(
+            launcher.join_saved_server_refresh_states.get(1),
+            Some(super::DesktopJoinSavedServerRefreshState::Resolved(_))
+        ));
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::DeleteJoinServerCard(0),
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ConfirmDeleteJoinServerCard,
+        );
+        assert_eq!(launcher.join_saved_servers.len(), 1);
+        assert_eq!(launcher.join_saved_servers[0].host, "one.example");
+        assert_eq!(launcher.join_saved_server_refresh_states.len(), 1);
+        assert!(matches!(
+            launcher.join_saved_server_refresh_states.first(),
+            Some(super::DesktopJoinSavedServerRefreshState::Resolved(_))
+        ));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        launcher.join_saved_server_refresh_states =
+            vec![super::DesktopJoinSavedServerRefreshState::Refreshing];
+        launcher.join_saved_server_refresh_receiver = Some(std::sync::Arc::new(Mutex::new(rx)));
+        tx.send((
+            0,
+            super::DesktopJoinSavedServerRefreshState::Resolved(
+                mindustry_core::mindustry::net::Host::new(
+                    19,
+                    "Polled",
+                    "one.example",
+                    port.into(),
+                    "polled map",
+                    2,
+                    4,
+                    158,
+                    "official",
+                    Gamemode::Survival,
+                    8,
+                    "polled description",
+                    Some("@mode.survival.name".into()),
+                ),
+            ),
+        ))
+        .unwrap();
+
+        launcher.poll_join_saved_server_refreshes();
+        assert!(launcher.join_saved_server_refresh_receiver.is_none());
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(lines.contains(&"server[0] description: polled description".to_string()));
+        assert!(lines.contains(&"server[0] players: 4/8".to_string()));
+        assert!(lines.contains(&"server[0] ping: 19ms".to_string()));
     }
 
     #[test]

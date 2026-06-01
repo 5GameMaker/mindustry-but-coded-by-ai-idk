@@ -15,6 +15,40 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 658. JoinDialog saved server 独立刷新闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **77.0%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是把 Java `JoinDialog.refreshServer(server)` 的 saved server 逐卡 `pingHost` 刷新语义接入 Rust Join route，而不是只显示静态收藏服务器。
+- Java 对照依据：
+  - `JoinDialog.refreshRemote()` 遍历 saved servers；
+  - `refreshServer(server)` 先显示 `@server.refreshing`，再异步 `net.pingHost(...)`；
+  - 成功后 `server.lastHost = host` 并按 `Host` 的 name/version/description/players/map/mode/ping 重绘；
+  - 失败后卡片显示 `@host.invalid`；
+  - saved card 连接优先使用已刷新的 host address/port。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopJoinSavedServerRefreshState::{Idle, Refreshing, Resolved(Host), Failed(String)}` 与后台 receiver；
+    - Join route update tick 轮询 saved refresh 结果，避免 UI/input dispatch 内阻塞；
+    - `RefreshJoinServers` 同时刷新 local discovery 与 saved servers，`RefreshJoinServerCard(index)` 只刷新单卡；
+    - saved server snapshot 读取 refresh state：刷新中显示 `@server.refreshing`，成功显示真实 `Host` 数据，失败显示 `@host.invalid`；
+    - add/edit/delete/reorder/community add saved 时同步维护 refresh state，避免状态串位；
+    - saved card 连接在已有 `Resolved(Host)` 时优先使用刷新得到的 address/port；
+    - 提高测试用本地端口选择重试上限，降低并行测试下 TCP/UDP port pair 抢占导致的假失败。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+  - `cargo test -p mindustry-desktop join_route --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop menu_frame --lib`
+  - `cargo test -p mindustry-core menu_ --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - JoinDialog 仍缺完整 ScrollPane 滚动动画、`Collapser.setDuration(0.1f)` 动画、community 远端 fetch/cache；
+  - Java `safeConnect(..., version)` 版本门禁还没有完整等价数据通路；
+  - mobile JoinDialog 的整体布局仍需继续贴近原版；
+  - 前端 UI 还原下一优先级应转向 `core/src/mindustry/graphics/menu_renderer.rs` 的 `flatToggleMenut` / `black6` skin 语义与首屏菜单真实原版外观；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 657. JoinDialog section 折叠持久化
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
