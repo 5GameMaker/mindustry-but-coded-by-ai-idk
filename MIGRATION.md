@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 696. Native OpenGL shader 资源根覆盖 exe 相对路径
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **81.0%**，仍未达到完整可玩；继续优先前端/UI 与黑屏风险治理，当前闭环目标是让 native OpenGL shader root 不再只依赖仓库根/固定路径。
+- 风险依据：
+  - native OpenGL runtime 启动时若 `shaders` 目录不可见，会触发 `shader assets unavailable`；
+  - 从 `target/debug`、打包目录或非仓库 cwd 启动时，旧候选路径可能漏掉 exe 相邻资源目录；
+  - shader root 缺失会直接影响首帧 GPU 提交与黑屏兜底。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - 新增 `desktop_native_push_shader_asset_root_candidates_near(...)`；
+    - native shader root 同时扫描 `current_dir` ancestors、`current_exe` ancestors 和仓库 root 邻近候选；
+    - 候选包含 `base/core/assets`、`base/assets`、相邻 `mindustry-upstream-v157.4/core/assets`、`_upstream_mindustry/core/assets`；
+    - 新增去重 helper，保留首个来源标签用于诊断；
+    - 测试覆盖打包布局候选与去重。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop native_opengl_shader_asset_root --features opengl-native-runtime`
+- 仍未完成：
+  - 首帧 fallback overlay 仍需继续做真实启动 smoke test；
+  - 打包脚本复制 shaders/assets 的闭环还未完成；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 695. Desktop 资源根发现覆盖 exe 相对与打包布局
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

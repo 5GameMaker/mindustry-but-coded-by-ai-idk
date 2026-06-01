@@ -499,6 +499,46 @@ fn desktop_native_opengl_shader_asset_root_resolution_from_candidates(
     }
 }
 
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_push_shader_asset_root_candidates_near(
+    candidates: &mut Vec<(std::path::PathBuf, &'static str)>,
+    base: &std::path::Path,
+    source: &'static str,
+) {
+    candidates.push((base.join("core").join("assets"), source));
+    candidates.push((base.join("assets"), source));
+    candidates.push((
+        base.join("..")
+            .join("mindustry-upstream-v157.4")
+            .join("core")
+            .join("assets"),
+        source,
+    ));
+    candidates.push((
+        base.join("..")
+            .join("_upstream_mindustry")
+            .join("core")
+            .join("assets"),
+        source,
+    ));
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_dedup_shader_asset_root_candidates(
+    candidates: Vec<(std::path::PathBuf, &'static str)>,
+) -> Vec<(std::path::PathBuf, &'static str)> {
+    let mut deduped = Vec::new();
+    for (path, source) in candidates {
+        if !deduped
+            .iter()
+            .any(|(known, _): &(std::path::PathBuf, &'static str)| known == &path)
+        {
+            deduped.push((path, source));
+        }
+    }
+    deduped
+}
+
 #[cfg(not(feature = "opengl-backend"))]
 fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher, _args: Vec<String>) {
     let mut effect_renderer = mindustry_desktop::HeadlessDesktopEffectRenderer::default();
@@ -852,11 +892,10 @@ fn desktop_native_opengl_shader_asset_root_resolution(
         };
     }
 
-    let repo_assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
-        .join("core")
-        .join("assets");
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")));
+    let repo_assets = repo_root.join("core").join("assets");
     let reference_assets = std::path::PathBuf::from("D:/MDT/mindustry-upstream-v157.4/core/assets");
     let current_dir_assets = std::env::current_dir()
         .ok()
@@ -866,6 +905,32 @@ fn desktop_native_opengl_shader_asset_root_resolution(
     if let Some(current_dir_assets) = current_dir_assets {
         candidates.push((current_dir_assets, "current-dir"));
     }
+    if let Ok(current_dir) = std::env::current_dir() {
+        for ancestor in current_dir.ancestors().take(5) {
+            desktop_native_push_shader_asset_root_candidates_near(
+                &mut candidates,
+                ancestor,
+                "current-dir-near",
+            );
+        }
+    }
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            for ancestor in exe_dir.ancestors().take(6) {
+                desktop_native_push_shader_asset_root_candidates_near(
+                    &mut candidates,
+                    ancestor,
+                    "current-exe-near",
+                );
+            }
+        }
+    }
+    desktop_native_push_shader_asset_root_candidates_near(
+        &mut candidates,
+        repo_root,
+        "repository-near",
+    );
+    let candidates = desktop_native_dedup_shader_asset_root_candidates(candidates);
 
     desktop_native_opengl_shader_asset_root_resolution_from_candidates(
         candidates,
@@ -3486,6 +3551,36 @@ mod tests {
                 .any(|rect| rect.height <= 6 && rect.width >= 150),
             "fallback should expose version or diagnostic text lines"
         );
+    }
+
+    #[test]
+    fn native_opengl_shader_asset_root_candidates_cover_packaged_layouts() {
+        let base = std::path::PathBuf::from("D:/MDT/rust-mindustry/target/debug");
+        let mut candidates = Vec::new();
+        desktop_native_push_shader_asset_root_candidates_near(
+            &mut candidates,
+            &base,
+            "current-exe-near",
+        );
+
+        assert!(candidates
+            .iter()
+            .any(|(path, source)| path == &base.join("assets") && *source == "current-exe-near"));
+        assert!(candidates
+            .iter()
+            .any(|(path, _)| path == &base.join("core").join("assets")));
+        assert!(candidates.iter().any(|(path, _)| path
+            == &base
+                .join("..")
+                .join("mindustry-upstream-v157.4")
+                .join("core")
+                .join("assets")));
+
+        let deduped = desktop_native_dedup_shader_asset_root_candidates(vec![
+            (base.join("assets"), "first"),
+            (base.join("assets"), "second"),
+        ]);
+        assert_eq!(deduped, vec![(base.join("assets"), "first")]);
     }
 
     #[test]
