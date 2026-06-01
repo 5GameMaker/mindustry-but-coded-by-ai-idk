@@ -16722,6 +16722,7 @@ pub struct DesktopOpenGlBackendGraphicsRenderer<R> {
     pub runtime: R,
     pub frames_rendered: usize,
     pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
+    pub submitted_frame_texture_generations: BTreeMap<String, u64>,
     pub resolver_allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
     pub resolver_cache: DesktopGraphicsOpenGlBackendHandleCache,
     pub resolver_location_cache: DesktopGraphicsOpenGlBackendLocationCache,
@@ -16742,6 +16743,7 @@ impl<R> DesktopOpenGlBackendGraphicsRenderer<R> {
             frames_rendered: 0,
             sprite_texture_resource_table:
                 DesktopGraphicsOpenGlBackendTextureResourceTable::default(),
+            submitted_frame_texture_generations: BTreeMap::new(),
             resolver_allocator: DesktopGraphicsOpenGlBackendHandleAllocator::default(),
             resolver_cache: DesktopGraphicsOpenGlBackendHandleCache::default(),
             resolver_location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
@@ -16762,6 +16764,44 @@ impl<R> DesktopOpenGlBackendGraphicsRenderer<R> {
 
     pub fn runtime_mut(&mut self) -> &mut R {
         &mut self.runtime
+    }
+
+    fn is_reusable_full_frame_texture_upload(
+        recreate_texture: bool,
+        kind: DesktopGraphicsOpenGlBackendTextureUploadKind,
+    ) -> bool {
+        recreate_texture
+            && matches!(
+                kind,
+                DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage
+            )
+    }
+
+    fn retain_pending_frame_texture_uploads(
+        &self,
+        plan: &mut DesktopGraphicsOpenGlBackendFramePlan,
+    ) {
+        plan.texture_upload_plans.retain(|upload| {
+            if !Self::is_reusable_full_frame_texture_upload(upload.recreate_texture, upload.kind) {
+                return true;
+            }
+            self.submitted_frame_texture_generations
+                .get(&upload.texture_key)
+                .map(|submitted_generation| *submitted_generation < upload.generation)
+                .unwrap_or(true)
+        });
+    }
+
+    fn remember_resolved_frame_texture_uploads(
+        &mut self,
+        uploads: &[DesktopGraphicsOpenGlBackendResolvedTextureUpload],
+    ) {
+        for upload in uploads {
+            if Self::is_reusable_full_frame_texture_upload(upload.recreate_texture, upload.kind) {
+                self.submitted_frame_texture_generations
+                    .insert(upload.texture_key.clone(), upload.generation);
+            }
+        }
     }
 }
 
@@ -16816,11 +16856,12 @@ where
                 stats.render_passes, stats.render_commands
             ));
         }
-        let opengl_backend_plan =
+        let mut opengl_backend_plan =
             DesktopGraphicsOpenGlBackendFramePlan::from_frame_with_effect_buffer_surface(
                 frame,
                 effect_buffer_surface,
             );
+        self.retain_pending_frame_texture_uploads(&mut opengl_backend_plan);
         if trace_renderer {
             desktop_runtime_trace(format!(
                 "opengl.renderer: backend plan steps={} texture_uploads={}",
@@ -16870,6 +16911,7 @@ where
         self.runtime.present_frame();
 
         self.frames_rendered += 1;
+        self.remember_resolved_frame_texture_uploads(&resolving_executor.resolved_texture_uploads);
         self.sprite_texture_resource_table = next_sprite_texture_resource_table;
         self.resolver_allocator = resolving_executor.allocator.clone();
         self.resolver_cache = resolving_executor.cache.clone();
@@ -22066,6 +22108,19 @@ impl DesktopLauncher {
         let viewport = self.default_render_viewport_for_surface(surface_size);
         let input = self.menu_frame_input_for_viewport(viewport);
         self.menu_renderer_state.hit_test_ui(input, x, y)
+    }
+
+    fn menu_input_event_from_window_space(
+        surface_size: DesktopSurfaceSize,
+        input: &DesktopInputTickEvent,
+    ) -> DesktopInputTickEvent {
+        match input {
+            DesktopInputTickEvent::CursorMoved { x, y } => DesktopInputTickEvent::CursorMoved {
+                x: *x,
+                y: surface_size.height as f32 - *y,
+            },
+            _ => input.clone(),
+        }
     }
 
     fn menu_chrome_action_at_surface_point(
@@ -43487,7 +43542,11 @@ impl DesktopLauncher {
                 input_events.len()
             ));
         }
-        if self.apply_menu_input_events(loop_state.surface.size, &input_events) {
+        let menu_input_events = input_events
+            .iter()
+            .map(|input| Self::menu_input_event_from_window_space(loop_state.surface.size, input))
+            .collect::<Vec<_>>();
+        if self.apply_menu_input_events(loop_state.surface.size, &menu_input_events) {
             loop_state.request_close();
             return DesktopPresentResult {
                 frame_index,
@@ -60583,6 +60642,52 @@ version: "2.0.0"
         assert_eq!(second_draw_handles, first_draw_handles);
     }
 
+    #[cfg(feature = "opengl-backend")]
+    #[test]
+    fn desktop_opengl_backend_renderer_does_not_reupload_static_font_texture_each_frame() {
+        let font_upload_plan = super::DesktopFontAtlasPlan {
+            texture_name: DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME.to_string(),
+            font_asset_count: 1,
+            resolved_font_asset_count: 1,
+            content_icon_glyph_count: 0,
+            planned_glyph_count: 3,
+            unresolved_font_source_paths: Vec::new(),
+            missing_icon_atlas_symbols: Vec::new(),
+            content_icon_load_error: None,
+            placeholder_fallback_required: true,
+        }
+        .upload_plan();
+        let frame = DesktopGraphicsFrame {
+            bundle: RenderBridge::new().finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            font_glyph_upload_plan: Some(font_upload_plan),
+            texture_atlas: TextureAtlasPlan::new(),
+        };
+        let mut renderer = super::DesktopOpenGlBackendGraphicsRenderer::new(
+            super::DesktopGraphicsNullOpenGlBackendRuntime::default(),
+        );
+
+        renderer.render_graphics_frame(&frame);
+        let first_command_count = renderer.runtime.driver.commands.len();
+        assert!(renderer.last_driver_state.texture_upload_commands > 0);
+        assert_eq!(
+            renderer
+                .submitted_frame_texture_generations
+                .get(DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_KEY),
+            Some(&1)
+        );
+
+        renderer.render_graphics_frame(&frame);
+        let second_commands = &renderer.runtime.driver.commands[first_command_count..];
+
+        assert_eq!(renderer.last_driver_state.texture_upload_commands, 0);
+        assert!(second_commands.iter().all(|command| !matches!(
+            command,
+            super::DesktopGraphicsOpenGlBackendDriverCommand::TextureUpload(_)
+        )));
+    }
+
     #[test]
     fn desktop_default_render_viewport_for_surface_falls_back_without_world() {
         let launcher = DesktopLauncher::new(Vec::new());
@@ -73873,13 +73978,14 @@ version: "2.0.0"
             .expect("menu ui should include QUIT")
             .rect
             .center();
+        let window_space_quit_y = frame_loop.surface.size.height as f32 - quit_center.y;
 
         let result = launcher.step_desktop_frame_loop(
             &mut frame_loop,
             &[
                 DesktopFrameLoopEvent::Input(DesktopInputTickEvent::CursorMoved {
                     x: quit_center.x,
-                    y: quit_center.y,
+                    y: window_space_quit_y,
                 }),
                 DesktopFrameLoopEvent::Input(DesktopInputTickEvent::MouseButton {
                     button: "MouseLeft".into(),

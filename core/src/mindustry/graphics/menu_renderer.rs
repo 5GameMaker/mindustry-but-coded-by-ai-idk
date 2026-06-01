@@ -1757,14 +1757,17 @@ pub struct MenuRendererState {
 
 impl MenuRendererState {
     pub fn new(config: MenuRendererConfig) -> Self {
-        let world = generate_menu_world(config);
+        let mut random = MenuArcRand::with_seed(config.seed as i64);
+        let flyer_count = flyer_count_from_random(&mut random);
+        let flyer_type = flyer_type_from_random(&mut random);
+        let world = generate_menu_world_with_random(config, &mut random);
         Self {
             config,
             world,
             time: 0.0,
             flyer_rotation: 45.0,
-            flyer_count: flyer_count_for_seed(config.seed),
-            flyer_type: flyer_type_for_seed(config.seed),
+            flyer_count,
+            flyer_type,
             selected_root: MenuButtonRole::Play,
             active_root: None,
             submenu_root: None,
@@ -2014,30 +2017,30 @@ fn menu_interp_fade(progress: f32) -> f32 {
 }
 
 pub fn generate_menu_world(config: MenuRendererConfig) -> MenuWorldPlan {
+    let mut random = MenuArcRand::with_seed(config.seed as i64);
+    generate_menu_world_with_random(config, &mut random)
+}
+
+fn generate_menu_world_with_random(
+    config: MenuRendererConfig,
+    random: &mut MenuArcRand,
+) -> MenuWorldPlan {
     let width = config.width();
     let height = config.height();
-    let mut random = MenuArcRand::with_seed(config.seed as i64);
-    let offset = random.random_int_inclusive(100_000) as u64;
-    let s1 = offset;
-    let s2 = offset + 1;
-    let s3 = offset + 2;
-    let selected = terrain_pair_from_random(&mut random, true);
-    let selected2 = terrain_pair_from_random(&mut random, false);
-    let mut ores = vec![
-        MenuBlockKind::CopperOre,
-        MenuBlockKind::LeadOre,
-        MenuBlockKind::ScrapOre,
-        MenuBlockKind::CoalOre,
-        MenuBlockKind::TitaniumOre,
-        MenuBlockKind::ThoriumOre,
-    ];
-    let ore1 = ores.remove(random.random_index(ores.len()));
-    let ore2 = ores[random.random_index(ores.len())];
-    let tr1 = random.random_between(0.65, 0.85) as f64;
-    let tr2 = random.random_between(0.65, 0.85) as f64;
-    let do_heat = random.chance(0.25);
-    let tendrils = random.chance(0.25);
-    let tech = random.chance(0.25);
+    let header = menu_world_random_header(random);
+    let offset = header.offset;
+    let s1 = header.s1;
+    let s2 = header.s2;
+    let s3 = header.s3;
+    let selected = header.selected;
+    let selected2 = header.selected2;
+    let ore1 = header.ore1;
+    let ore2 = header.ore2;
+    let tr1 = header.tr1 as f64;
+    let tr2 = header.tr2 as f64;
+    let do_heat = header.do_heat;
+    let tendrils = header.tendrils;
+    let tech = header.tech;
     let sec_size = 10usize;
 
     let mut tiles = Vec::with_capacity(width * height);
@@ -2172,19 +2175,68 @@ fn terrain_pair_from_random(
     pairs[random.random_index(pairs.len())]
 }
 
-fn flyer_count_for_seed(seed: u64) -> usize {
-    if chance(seed, 101, 0.2) {
-        (hash_u64(seed ^ 0x35) as usize) % 36
-    } else {
-        (hash_u64(seed ^ 0x15) as usize) % 16
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MenuWorldRandomHeader {
+    offset: u64,
+    s1: u64,
+    s2: u64,
+    s3: u64,
+    selected: (MenuBlockKind, MenuBlockKind),
+    selected2: (MenuBlockKind, MenuBlockKind),
+    ore1: MenuBlockKind,
+    ore2: MenuBlockKind,
+    tr1: f32,
+    tr2: f32,
+    do_heat: bool,
+    tendrils: bool,
+    tech: bool,
+}
+
+fn menu_world_random_header(random: &mut MenuArcRand) -> MenuWorldRandomHeader {
+    let offset = random.random_int_inclusive(100_000) as u64;
+    let selected = terrain_pair_from_random(random, true);
+    let selected2 = terrain_pair_from_random(random, false);
+    let mut ores = vec![
+        MenuBlockKind::CopperOre,
+        MenuBlockKind::LeadOre,
+        MenuBlockKind::ScrapOre,
+        MenuBlockKind::CoalOre,
+        MenuBlockKind::TitaniumOre,
+        MenuBlockKind::ThoriumOre,
+    ];
+    let ore1 = ores.remove(random.random_index(ores.len()));
+    let ore2 = ores[random.random_index(ores.len())];
+    MenuWorldRandomHeader {
+        offset,
+        s1: offset,
+        s2: offset + 1,
+        s3: offset + 2,
+        selected,
+        selected2,
+        ore1,
+        ore2,
+        tr1: random.random_between(0.65, 0.85),
+        tr2: random.random_between(0.65, 0.85),
+        do_heat: random.chance(0.25),
+        tendrils: random.chance(0.25),
+        tech: random.chance(0.25),
     }
 }
 
-fn flyer_type_for_seed(seed: u64) -> &'static str {
-    const TYPES: [&str; 9] = [
-        "flare", "horizon", "zenith", "mono", "poly", "mega", "alpha", "beta", "gamma",
-    ];
-    TYPES[(hash_u64(seed ^ 0xAA) as usize) % TYPES.len()]
+const MENU_FLYER_TYPES: [&str; 9] = [
+    "flare", "horizon", "zenith", "mono", "poly", "mega", "alpha", "beta", "gamma",
+];
+
+fn flyer_count_from_random(random: &mut MenuArcRand) -> usize {
+    if random.chance(0.2) {
+        random.random_int_inclusive(35) as usize
+    } else {
+        random.random_int_inclusive(15) as usize
+    }
+}
+
+fn flyer_type_from_random(random: &mut MenuArcRand) -> &'static str {
+    MENU_FLYER_TYPES[random.random_index(MENU_FLYER_TYPES.len())]
 }
 
 fn flyer_speed(unit_name: &str) -> f32 {
@@ -2327,15 +2379,6 @@ fn noise01(seed: u64, x: i64, y: i64, salt: i64) -> f32 {
         ^ (salt as u64).wrapping_mul(0xD6E8_FD9D_5A75_7955);
     v = hash_u64(v);
     ((v >> 40) as f32) / ((1u64 << 24) as f32)
-}
-
-fn chance(seed: u64, salt: u64, probability: f32) -> bool {
-    noise01(
-        seed ^ salt,
-        salt as i64,
-        salt.rotate_left(7) as i64,
-        salt as i64,
-    ) < probability
 }
 
 fn hash_u64(mut x: u64) -> u64 {
@@ -3011,6 +3054,41 @@ mod tests {
         assert_eq!(world.tiles.last().unwrap().y, 49);
         assert_eq!(world.cache_floor_id, 1);
         assert_eq!(world.cache_wall_id, 2);
+    }
+
+    #[test]
+    fn menu_renderer_state_consumes_java_flyer_randoms_before_world_generation() {
+        let state = MenuRendererState::new(MenuRendererConfig::new(false, 172_305));
+
+        assert_eq!(state.flyer_count, 2);
+        assert_eq!(state.flyer_type, "horizon");
+        assert_eq!(state.world.seed, 172_305);
+    }
+
+    #[test]
+    fn menu_world_random_header_matches_java_after_flyer_field_initializers() {
+        let mut random = MenuArcRand::with_seed(172_305);
+
+        assert_eq!(flyer_count_from_random(&mut random), 2);
+        assert_eq!(flyer_type_from_random(&mut random), "horizon");
+
+        let header = menu_world_random_header(&mut random);
+        assert_eq!(header.offset, 48_678);
+        assert_eq!(
+            header.selected,
+            (MenuBlockKind::Ice, MenuBlockKind::IceWall)
+        );
+        assert_eq!(
+            header.selected2,
+            (MenuBlockKind::Moss, MenuBlockKind::SporeWall)
+        );
+        assert_eq!(header.ore1, MenuBlockKind::ThoriumOre);
+        assert_eq!(header.ore2, MenuBlockKind::CoalOre);
+        assert!((header.tr1 - 0.809_867_4).abs() < 0.000_001);
+        assert!((header.tr2 - 0.681_263_4).abs() < 0.000_001);
+        assert!(!header.do_heat);
+        assert!(!header.tendrils);
+        assert!(header.tech);
     }
 
     #[test]

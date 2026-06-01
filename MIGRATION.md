@@ -17,6 +17,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 701. 主菜单点击坐标修复与前端帧率减压
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **83.0%**，仍未达到完整可玩；继续优先原版 UI/前端还原与 native OpenGL 首屏体验。
+- 用户反馈闭环：
+  - 主页面点击上下反转：winit 鼠标位置是窗口左上角原点，而菜单 hit-test 使用渲染坐标系；本轮在 `step_desktop_frame_loop(...)` 传入菜单输入前只转换 `CursorMoved.y = surface.height - window_y`，保留 `apply_menu_input_events(...)` 的直接测试语义为 render-space。
+  - 主菜单帧率低：先消除一个确定的 native OpenGL 每帧重复上传点；`DesktopOpenGlBackendGraphicsRenderer` 新增 frame texture generation 缓存，跳过同 key/同 generation 的可复用 FullPage recreate 上传，避免字体 runtime texture 每帧重复重建/上传；dirty-pixels/minimap 等动态路径不被跳过。
+  - 主菜单背景随机流：补完上一轮未完成改动，`MenuRendererState::new(...)` 按 Java 字段初始化顺序先消费 flyer count/type，再进入 world generation；新增固定 seed `172305` 的 Java 随机头回归测试。
+- 主要改动：
+  - `desktop/src/lib.rs`
+    - 新增 `menu_input_event_from_window_space(...)`；
+    - `step_desktop_frame_loop(...)` 传给菜单的输入改用窗口坐标到渲染坐标的转换副本，返回的 `DesktopPresentResult.input_events` 仍保留原始输入；
+    - `DesktopOpenGlBackendGraphicsRenderer` 新增 `submitted_frame_texture_generations`，避免静态 frame texture 重复上传；
+    - 补充 quit 按钮 window-space 点击回归测试与 font texture 不重复上传测试。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuRendererState::new(...)` 改为共享 `MenuArcRand`，先消费 Java flyer 字段初始化随机，再生成菜单世界；
+    - 新增 `MenuWorldRandomHeader` 与 seed 回归测试，锁定 offset/terrain/ore/tr/flags。
+  - `README.md`
+    - 迁移百分比更新为 `83.0%`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_quit_menu_action_requests_close --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_does_not_reupload_static_font_texture_each_frame --lib --features opengl-backend -- --nocapture`
+  - `cargo test -p mindustry-core menu_renderer --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 主菜单背景仍需要进一步做 Java `MenuRenderer` 级别的 cached/batched 静态背景路径，当前只是消除一个重复上传热点；
+  - UI 还原仍需继续对照原版 Scene2D 行为、动画、Dialog 树与真实内容流；
+  - 完整 world runtime、save/load、联机兼容与可玩 smoke test 仍未完成，不能宣告最终目标完成。
+
 ## 700. 主菜单背景随机流继续贴近 Java MenuRenderer
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
