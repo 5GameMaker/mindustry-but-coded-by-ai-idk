@@ -17,6 +17,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 730. JoinDialog 连接中接入 LoadingFragment 遮罩与取消
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **86.2%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `JoinDialog.connect(...)` 调用 `ui.loadfrag.show("@connecting")`；
+  - `LoadingFragment.setButton(...)` 显示取消按钮，取消时隐藏 loadfrag 并 `netClient.disconnectQuietly()`；
+  - loadfrag 是全屏 touchable/modal 层，底层 JoinDialog/主菜单不能继续响应点击，back/escape 触发取消。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `CancelJoinConnect` route action；
+    - 连接中由 `join_connecting_loadfrag_visible()` 驱动全屏 `@connecting` overlay，复用 WarningBar、refresh spinner 与 `@cancel` 按钮；
+    - hit-test 和 `apply_menu_input_events(...)` 优先处理 loadfrag，非取消点击会被吞掉，back/escape 调用取消；
+    - `CancelJoinConnect` 调用 `net_client.disconnect_quietly()` 并清理连接错误/版本提示；
+    - Join 连接回归测试覆盖 `loadfrag: @connecting`、全屏黑幕、取消按钮命中、底层 Settings 点击阻断与取消后 `connecting=false`。
+  - `core/src/mindustry/ui/mod.rs`
+    - 补齐 upstream `connecting/reconnecting/connecting.data` 文案的 en/zh_CN/zh_TW 映射，避免 UI 直接显示裸 key。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop join_route --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core upstream_menu_bundle_locale_entries_cover_chinese_menu_fragment_buttons --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `@reconnecting` / pingHost 重连流程还需继续迁移；
+  - 连接失败/超时还需对齐 Java 的 `loadfrag.hide()` 后 `showErrorMessage(...)` 层级；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 729. JoinDialog 版本不匹配改为 showInfo 风格 modal
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

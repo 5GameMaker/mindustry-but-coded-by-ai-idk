@@ -189,6 +189,9 @@ const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const JOIN_SEARCH_TEXT_MAX_LENGTH: usize = 64;
 const JOIN_ADD_SERVER_TEXT_MAX_LENGTH: usize = 96;
 const JOIN_SERVER_CARD_ACTION_BUTTONS: usize = 5;
+const JOIN_CONNECTING_CANCEL_BUTTON_WIDTH: f32 = 180.0;
+const JOIN_CONNECTING_CANCEL_BUTTON_HEIGHT: f32 = 46.0;
+const JOIN_CONNECTING_CANCEL_BUTTON_GAP: f32 = 34.0;
 const JOIN_SERVERS_SETTINGS_KEY: &str = "servers";
 const JOIN_IP_SETTINGS_KEY: &str = "ip";
 const JOIN_SERVER_DISCLAIMER_SETTINGS_KEY: &str = "server-disclaimer";
@@ -3480,6 +3483,7 @@ pub enum DesktopMenuRouteShellAction {
     OpenJoinInfo,
     CloseJoinInfo,
     CloseJoinVersionMismatch,
+    CancelJoinConnect,
     RefreshJoinServers,
     MoveJoinServerCardUp(usize),
     MoveJoinServerCardDown(usize),
@@ -22900,6 +22904,10 @@ impl DesktopLauncher {
             self.last_menu_route_shell_action = None;
             return true;
         }
+        if self.join_connecting_loadfrag_visible() {
+            self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CancelJoinConnect);
+            return true;
+        }
         if self.active_menu_route == Some(DesktopMenuRoute::Database)
             && self.last_database_content_opened.is_some()
         {
@@ -22993,6 +23001,7 @@ impl DesktopLauncher {
             self.join_add_server_focused = false;
             self.join_add_server_edit_index = None;
             self.join_info_dialog_open = false;
+            self.join_version_mismatch_dialog_message = None;
             self.join_delete_dialog_index = None;
             self.save_game_new_dialog_open = false;
             self.save_game_new_text.clear();
@@ -29795,6 +29804,41 @@ impl DesktopLauncher {
         !self.join_add_server_text.trim().is_empty() && !self.pause_overlay_net_active()
     }
 
+    fn join_connecting_loadfrag_visible(&self) -> bool {
+        if self.active_menu_route != Some(DesktopMenuRoute::Join) || self.connect_error.is_some() {
+            return false;
+        }
+        self.net_client
+            .state()
+            .lock()
+            .map(|state| state.connecting)
+            .unwrap_or(false)
+    }
+
+    fn join_connecting_loadfrag_cancel_button_rect_for_viewport(
+        viewport: RenderViewport,
+    ) -> RenderRect {
+        let stage = RenderRect::new(viewport.x, viewport.y, viewport.width, viewport.height);
+        let scale = (viewport.height / 720.0).clamp(0.75, 1.35);
+        let warning_height = (LOAD_GAME_LOADING_FRAGMENT_WARNING_HEIGHT * scale).max(12.0);
+        let top_spacer = LOAD_GAME_LOADING_FRAGMENT_TOP_SPACER * scale;
+        let label_gap = LOAD_GAME_LOADING_FRAGMENT_LABEL_GAP * scale;
+        let label_height = (LOAD_GAME_LOADING_FRAGMENT_LABEL_HEIGHT * scale).max(20.0);
+        let top_warning_y =
+            stage.y + (stage.height - top_spacer - warning_height).max(stage.height * 0.56);
+        let label_y = top_warning_y - label_gap - label_height;
+        let bottom_warning_y = label_y - label_gap - warning_height;
+        let width = JOIN_CONNECTING_CANCEL_BUTTON_WIDTH * scale;
+        let height = JOIN_CONNECTING_CANCEL_BUTTON_HEIGHT * scale;
+        RenderRect::new(
+            stage.center().x - width * 0.5,
+            (bottom_warning_y - JOIN_CONNECTING_CANCEL_BUTTON_GAP * scale - height)
+                .max(stage.y + 24.0 * scale),
+            width,
+            height,
+        )
+    }
+
     fn join_route_server_card_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
         let columns = Self::join_route_server_card_columns_for_panel(panel);
         let row = index / columns;
@@ -32844,6 +32888,14 @@ impl DesktopLauncher {
     ) -> Option<DesktopMenuRouteShellAction> {
         let panel = Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Join);
         let point = RenderPoint::new(x, y);
+        if self.join_connecting_loadfrag_visible() {
+            if Self::join_connecting_loadfrag_cancel_button_rect_for_viewport(viewport)
+                .contains_point(point)
+            {
+                return Some(DesktopMenuRouteShellAction::CancelJoinConnect);
+            }
+            return None;
+        }
         if self.join_version_mismatch_dialog_message.is_some() {
             let dialog = Self::join_version_mismatch_dialog_rect_for_panel(panel);
             if Self::join_add_dialog_button_rect(dialog, 1).contains_point(point) {
@@ -34933,6 +34985,12 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::CloseJoinVersionMismatch => {
                 self.join_version_mismatch_dialog_message = None;
                 self.connect_error = None;
+            }
+            DesktopMenuRouteShellAction::CancelJoinConnect => {
+                self.net_client.disconnect_quietly();
+                self.connect_error = None;
+                self.join_version_mismatch_dialog_message = None;
+                self.last_menu_guard_message = Some("JoinDialog.connect cancel".into());
             }
             DesktopMenuRouteShellAction::RefreshJoinServers => {
                 self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
@@ -37202,6 +37260,73 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_join_connecting_loadfrag_overlay(
+        &self,
+        pass: &mut RenderPass,
+        viewport: RenderViewport,
+    ) {
+        if !self.join_connecting_loadfrag_visible() {
+            return;
+        }
+        let stage = RenderRect::new(viewport.x, viewport.y, viewport.width, viewport.height);
+        let scale = (viewport.height / 720.0).clamp(0.75, 1.35);
+        let warning_height = (LOAD_GAME_LOADING_FRAGMENT_WARNING_HEIGHT * scale).max(12.0);
+        let top_spacer = LOAD_GAME_LOADING_FRAGMENT_TOP_SPACER * scale;
+        let label_gap = LOAD_GAME_LOADING_FRAGMENT_LABEL_GAP * scale;
+        let label_height = (LOAD_GAME_LOADING_FRAGMENT_LABEL_HEIGHT * scale).max(20.0);
+        let top_warning_y =
+            stage.y + (stage.height - top_spacer - warning_height).max(stage.height * 0.56);
+        let label_y = top_warning_y - label_gap - label_height;
+        let bottom_warning_y = label_y - label_gap - warning_height;
+        let top_warning = RenderRect::new(stage.x, top_warning_y, stage.width, warning_height);
+        let bottom_warning =
+            RenderRect::new(stage.x, bottom_warning_y, stage.width, warning_height);
+        let label_center = RenderPoint::new(stage.center().x, label_y + label_height * 0.5);
+        pass.push(RenderCommand::fill_rect(
+            stage,
+            [0.0, 0.0, 0.0, 0.80],
+            Layer::END_PIXELED + 0.118,
+        ));
+        Self::push_load_game_loading_warning_bar(pass, top_warning, Layer::END_PIXELED + 0.121);
+        Self::push_load_game_loading_warning_bar(pass, bottom_warning, Layer::END_PIXELED + 0.121);
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("refresh", "refresh"),
+            RenderPoint::new(
+                label_center.x,
+                label_center.y + LOAD_GAME_LOADING_FRAGMENT_SPINNER_GAP * scale,
+            ),
+            [0.80, 0.94, 1.0, 1.0],
+            20.0,
+            self.render_time * 8.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.123,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@connecting"),
+            label_center,
+            [0.94, 0.98, 1.0, 1.0],
+            22.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_markup(true)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.124,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::join_connecting_loadfrag_cancel_button_rect_for_viewport(viewport),
+            self.localize_bundle_markup_text("@cancel"),
+            Some("cancel"),
+            Layer::END_PIXELED + 0.125,
+        );
+    }
+
     fn push_host_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
         self.push_settings_text_button(
             pass,
@@ -38036,6 +38161,7 @@ impl DesktopLauncher {
                 self.push_join_server_disclaimer_dialog(pass, panel);
                 self.push_join_info_dialog(pass, panel);
                 self.push_join_version_mismatch_dialog(pass, panel);
+                self.push_join_connecting_loadfrag_overlay(pass, viewport);
                 return;
             }
             pass.push(RenderCommand::draw_text_styled(
@@ -38323,6 +38449,7 @@ impl DesktopLauncher {
         self.push_join_server_disclaimer_dialog(pass, panel);
         self.push_join_info_dialog(pass, panel);
         self.push_join_version_mismatch_dialog(pass, panel);
+        self.push_join_connecting_loadfrag_overlay(pass, viewport);
     }
 
     fn join_route_hover_tooltip_text(&self, panel: RenderRect) -> Option<String> {
@@ -43834,12 +43961,33 @@ impl DesktopLauncher {
 
         let mut close_requested = false;
         for input in input_events {
-            if self.load_game_pending_load.is_some() || self.save_game_pending_save.is_some() {
+            if self.load_game_pending_load.is_some()
+                || self.save_game_pending_save.is_some()
+                || self.join_connecting_loadfrag_visible()
+            {
                 match input {
                     DesktopInputTickEvent::CursorMoved { x, y } => {
                         self.last_menu_cursor = Some(RenderPoint::new(*x, *y));
                         self.last_menu_hovered_button = None;
                         self.last_settings_hovered_control = None;
+                    }
+                    DesktopInputTickEvent::MouseButton { button, pressed }
+                        if *pressed
+                            && self.join_connecting_loadfrag_visible()
+                            && Self::is_primary_menu_mouse_button(button) =>
+                    {
+                        if let Some(cursor) = self.last_menu_cursor {
+                            let viewport = self.default_render_viewport_for_surface(surface_size);
+                            if Self::join_connecting_loadfrag_cancel_button_rect_for_viewport(
+                                viewport,
+                            )
+                            .contains_point(cursor)
+                            {
+                                self.dispatch_menu_route_shell_action(
+                                    DesktopMenuRouteShellAction::CancelJoinConnect,
+                                );
+                            }
+                        }
                     }
                     DesktopInputTickEvent::Key { key_code, pressed }
                         if *pressed && Self::is_menu_back_key(key_code) =>
@@ -44859,6 +45007,10 @@ impl DesktopLauncher {
                             lines.push(format!("server[{index}] filter: @none.found"));
                         }
                     }
+                }
+                if self.join_connecting_loadfrag_visible() {
+                    lines.insert(0, "loadfrag: @connecting".into());
+                    lines.push("button: @cancel".into());
                 }
                 lines
             }
@@ -47824,6 +47976,7 @@ impl DesktopLauncher {
 
     pub fn connect_to_target(&mut self, target: DesktopConnectTarget) -> io::Result<()> {
         self.connect_target = Some(target.clone());
+        self.join_version_mismatch_dialog_message = None;
         self.net_client
             .set_connect_config(Some(ClientConnectConfig::default()));
         self.net_client.begin_connecting();
@@ -78082,6 +78235,73 @@ version: "2.0.0"
             Some(super::DesktopMenuRouteShellAction::ConnectJoin)
         );
         assert_eq!(launcher.connect_error, None);
+        assert!(launcher.join_connecting_loadfrag_visible());
+        let loading_lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(loading_lines.contains(&"loadfrag: @connecting".to_string()));
+        assert!(loading_lines.contains(&"button: @cancel".to_string()));
+
+        let loading_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let loading_commands = loading_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("join connecting frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let loading_texts = loading_commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            loading_texts.contains(&launcher.localize_bundle_markup_text("@connecting").as_str())
+        );
+        assert!(loading_texts.contains(&launcher.localize_bundle_markup_text("@cancel").as_str()));
+        assert!(loading_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::FillRect { rect, color, .. }
+                if *rect == RenderRect::new(viewport.x, viewport.y, viewport.width, viewport.height)
+                    && *color == [0.0, 0.0, 0.0, 0.80]
+        )));
+        let cancel =
+            DesktopLauncher::join_connecting_loadfrag_cancel_button_rect_for_viewport(viewport)
+                .center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, cancel.x, cancel.y),
+            Some(super::DesktopMenuRouteShellAction::CancelJoinConnect)
+        );
+
+        let settings_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Settings)
+            .expect("menu ui should include SETTINGS")
+            .rect
+            .center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: settings_center.x,
+                    y: settings_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Join)
+        );
+        assert_eq!(launcher.last_menu_pressed_button, None);
 
         launcher.update();
         let state = launcher.net_client.state();
@@ -78091,7 +78311,14 @@ version: "2.0.0"
         assert!(state.connect_packet_sent);
         drop(state);
 
-        launcher.net_client.net_mut().disconnect();
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CancelJoinConnect,
+        );
+        let state = launcher.net_client.state();
+        let state = state.lock().unwrap();
+        assert!(!state.connecting);
+        drop(state);
+
         server.close_server();
     }
 
