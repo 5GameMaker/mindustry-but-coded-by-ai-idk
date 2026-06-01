@@ -28244,7 +28244,7 @@ impl DesktopLauncher {
 
     fn map_list_planet_filter_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
         let width = (panel.width * 0.54).clamp(300.0, 380.0);
-        let height = 292.0;
+        let height = 344.0;
         RenderRect::new(
             panel.center().x - width * 0.5,
             panel.center().y - height * 0.5,
@@ -28254,11 +28254,12 @@ impl DesktopLauncher {
     }
 
     fn map_list_planet_filter_option_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let width = 300.0_f32.min(dialog.width - 56.0);
         RenderRect::new(
-            dialog.x + 28.0,
-            dialog.y + dialog.height - 92.0 - index as f32 * 50.0,
-            dialog.width - 56.0,
-            42.0,
+            dialog.center().x - width * 0.5,
+            dialog.y + dialog.height - 106.0 - index as f32 * 66.0,
+            width,
+            60.0,
         )
     }
 
@@ -36952,6 +36953,64 @@ impl DesktopLauncher {
         ));
     }
 
+    fn push_map_list_filter_labeled_icon_toggle(
+        &self,
+        pass: &mut RenderPass,
+        rect: RenderRect,
+        icon: impl Into<String>,
+        label: impl Into<String>,
+        checked: bool,
+        enabled: bool,
+        layer: f32,
+    ) {
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("flatTogglet", false, checked && enabled),
+            rect,
+            if !enabled {
+                [0.28, 0.32, 0.36, 0.54]
+            } else if checked {
+                [0.78, 0.92, 1.0, 0.96]
+            } else {
+                [0.56, 0.64, 0.72, 0.78]
+            },
+            0.0,
+            layer,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            icon.into(),
+            RenderPoint::new(rect.x + 32.0, rect.center().y),
+            if enabled {
+                [0.92, 0.97, 1.0, 1.0]
+            } else {
+                [0.46, 0.52, 0.58, 0.88]
+            },
+            20.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(enabled),
+            layer + 0.0001,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            label.into(),
+            RenderPoint::new(rect.x + 58.0, rect.center().y),
+            if enabled {
+                [0.92, 0.97, 1.0, 1.0]
+            } else {
+                [0.46, 0.52, 0.58, 0.88]
+            },
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(enabled),
+            layer + 0.0002,
+        ));
+    }
+
     fn map_list_filter_hover_tooltip_text(&self, dialog: RenderRect) -> Option<String> {
         let cursor = self.last_menu_cursor?;
         if !self.map_list_filter_dialog_open || self.map_list_planet_filter_dialog_open {
@@ -37311,9 +37370,10 @@ impl DesktopLauncher {
                 .map_list_filter_planets
                 .iter()
                 .any(|selected| selected == &planet_name);
-            self.push_map_list_filter_toggle(
+            self.push_map_list_filter_labeled_icon_toggle(
                 pass,
                 Self::map_list_planet_filter_option_rect(dialog, index),
+                desktop_ui_icon_glyph_or_label("planet", "planet"),
                 label,
                 checked,
                 true,
@@ -62066,7 +62126,7 @@ version: "2.0.0"
         assert!(launcher.map_list_planet_filter_dialog_open);
 
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
-        let texts = frame
+        let commands = frame
             .bundle
             .render_frame
             .as_ref()
@@ -62074,6 +62134,9 @@ version: "2.0.0"
             .passes
             .iter()
             .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let texts = commands
+            .iter()
             .filter_map(|command| match command {
                 RenderCommand::DrawText { text, .. } => Some(text.as_str()),
                 _ => None,
@@ -62085,6 +62148,23 @@ version: "2.0.0"
         assert!(texts.contains(&"serpulo"));
 
         let planet_dialog = DesktopLauncher::map_list_planet_filter_dialog_rect_for_panel(panel);
+        assert_eq!(
+            (
+                DesktopLauncher::map_list_planet_filter_option_rect(planet_dialog, 0).width,
+                DesktopLauncher::map_list_planet_filter_option_rect(planet_dialog, 0).height
+            ),
+            (300.0, 60.0),
+            "Java planet filter rows use 300f x 60f flat toggle buttons"
+        );
+        let planet_glyph = super::desktop_ui_icon_glyph_or_label("planet", "planet");
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawText { text, style, .. }
+                    if text == &planet_glyph && style.font == RenderFontId::Icon
+            )),
+            "planet filter rows should render the Java planet icon beside the label"
+        );
         let erekir = DesktopLauncher::map_list_planet_filter_option_rect(planet_dialog, 1).center();
         let action =
             launcher.active_menu_route_shell_action_at_surface_point(surface, erekir.x, erekir.y);

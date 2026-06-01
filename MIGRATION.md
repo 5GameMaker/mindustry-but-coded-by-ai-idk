@@ -15,6 +15,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 693. MapListDialog 星球筛选候选行对齐图标按钮样式
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **80.7%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是把 planet 选择二级弹窗候选项从纯文本 toggle 推进到 Java 的图标 + 文本行。
+- Java 对照依据：
+  - `MapListDialog.showMapFilters()` 的 planet 选择弹窗候选项使用 `button(label, picon, Styles.flatTogglet, iconMed, ...)`；
+  - 行按钮默认 `width(300f).height(60f)`，并通过 `marginLeft(12f)` 留出图标/文本间距。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `map_list_planet_filter_dialog_rect_for_panel(...)` 加高以容纳 60f 行；
+    - `map_list_planet_filter_option_rect(...)` 改为居中的 `300x60` 行按钮；
+    - 新增 `push_map_list_filter_labeled_icon_toggle(...)`，用于绘制 planet icon + 文本 label；
+    - planet 候选项改用图标 + 文本行，并保留 toggle/过滤行为；
+    - 测试锁定 `300x60` 与 icon font 渲染。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop map_list --lib`
+- 仍未完成：
+  - planet icon 当前仍是通用 `planet` glyph，后续应接真实 planet atlas/icon color fallback；
+  - 二级弹窗滚动/更多星球场景仍需继续完善；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 692. MapListDialog 筛选图标按钮补齐 hover tooltip
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
