@@ -2886,6 +2886,7 @@ pub enum DesktopMenuRouteShellAction {
     OpenModsDetail(usize),
     OpenModsFolder(usize),
     OpenModsContent(usize),
+    OpenModsContentEntry(usize),
     CloseModsContent,
     CloseModsDetail,
     FocusSchematicSearch,
@@ -3000,6 +3001,13 @@ pub struct DesktopModsBrowserAction {
     pub repo: Option<String>,
     pub uri: Option<String>,
     pub opened: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DesktopModsContentEntry {
+    title: String,
+    detail: String,
+    icon: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16648,6 +16656,7 @@ pub struct DesktopLauncher {
     pub mods_selected_mod_index: Option<usize>,
     pub last_mods_folder_action: Option<DesktopModsFolderAction>,
     pub last_mods_content_index: Option<usize>,
+    pub last_mods_content_entry_index: Option<usize>,
     pub mods_content_dialog_index: Option<usize>,
     pub mods_import_dialog_open: bool,
     pub mods_browser_dialog_open: bool,
@@ -17560,6 +17569,7 @@ impl DesktopLauncher {
             mods_selected_mod_index: None,
             last_mods_folder_action: None,
             last_mods_content_index: None,
+            last_mods_content_entry_index: None,
             mods_content_dialog_index: None,
             mods_import_dialog_open: false,
             mods_browser_dialog_open: false,
@@ -31996,6 +32006,7 @@ impl DesktopLauncher {
                 self.mods_import_dialog_open = false;
                 self.mods_selected_mod_index = None;
                 self.mods_content_dialog_index = None;
+                self.last_mods_content_entry_index = None;
             }
             DesktopMenuRouteShellAction::CloseModsBrowser => {
                 self.mods_browser_dialog_open = false;
@@ -32056,15 +32067,25 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::OpenModsContent(index) => {
                 if self.last_mods_directory_mod_names.get(index).is_some() {
                     self.last_mods_content_index = Some(index);
+                    self.last_mods_content_entry_index = None;
                     self.mods_content_dialog_index = Some(index);
+                }
+            }
+            DesktopMenuRouteShellAction::OpenModsContentEntry(index) => {
+                if let Some(mod_index) = self.mods_content_dialog_index {
+                    if index < self.mods_content_entries_for_mod(mod_index).len() {
+                        self.last_mods_content_entry_index = Some(index);
+                    }
                 }
             }
             DesktopMenuRouteShellAction::CloseModsContent => {
                 self.mods_content_dialog_index = None;
+                self.last_mods_content_entry_index = None;
             }
             DesktopMenuRouteShellAction::CloseModsDetail => {
                 self.mods_selected_mod_index = None;
                 self.mods_content_dialog_index = None;
+                self.last_mods_content_entry_index = None;
             }
             DesktopMenuRouteShellAction::FocusSchematicSearch => {
                 self.schematic_search_focused = true;
@@ -40383,6 +40404,19 @@ impl DesktopLauncher {
         if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseModsContent);
         }
+        let grid = Self::mods_content_grid_rect_for_dialog(dialog);
+        for (entry_index, _) in self
+            .mods_content_entries_for_mod(self.mods_content_dialog_index?)
+            .iter()
+            .take(8)
+            .enumerate()
+        {
+            if Self::mods_content_entry_rect_for_grid(grid, entry_index).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::OpenModsContentEntry(
+                    entry_index,
+                ));
+            }
+        }
         None
     }
 
@@ -40394,6 +40428,86 @@ impl DesktopLauncher {
             (detail.width - 48.0).max(240.0),
             (detail.height - 48.0).max(220.0),
         )
+    }
+
+    fn mods_content_grid_rect_for_dialog(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 28.0,
+            dialog.y + 76.0,
+            dialog.width - 56.0,
+            (dialog.height - 142.0).max(120.0),
+        )
+    }
+
+    fn mods_content_entry_rect_for_grid(grid: RenderRect, index: usize) -> RenderRect {
+        let columns = 2usize;
+        let gap = 8.0;
+        let card_height = 58.0;
+        let card_width = ((grid.width - gap) / columns as f32).max(120.0);
+        let row = index / columns;
+        let column = index % columns;
+        RenderRect::new(
+            grid.x + column as f32 * (card_width + gap),
+            grid.y + grid.height - card_height - row as f32 * (card_height + gap),
+            card_width,
+            card_height,
+        )
+    }
+
+    fn mods_content_entries_for_mod(&self, index: usize) -> Vec<DesktopModsContentEntry> {
+        let Some(mod_name) = self.mods_route_mod_display_name_at_index(index) else {
+            return Vec::new();
+        };
+        let meta = self.mods_route_mod_meta_at_index(index);
+        let mut entries = vec![
+            DesktopModsContentEntry {
+                title: self.localize_bundle_markup_text("@editor.name"),
+                detail: mod_name.to_string(),
+                icon: "book",
+            },
+            DesktopModsContentEntry {
+                title: self.localize_bundle_markup_text("@editor.author"),
+                detail: self.localize_bundle_markup_text(
+                    meta.map(ModMetadata::author_or_unknown)
+                        .unwrap_or("@unknown"),
+                ),
+                icon: "players",
+            },
+            DesktopModsContentEntry {
+                title: self.localize_bundle_markup_text("@mod.version"),
+                detail: self.localize_bundle_markup_text(
+                    meta.map(ModMetadata::version_or_unknown)
+                        .unwrap_or("@unknown"),
+                ),
+                icon: "info",
+            },
+        ];
+        if let Some(description) = meta
+            .and_then(|meta| meta.description.as_deref())
+            .map(str::trim)
+            .filter(|description| !description.is_empty())
+        {
+            entries.push(DesktopModsContentEntry {
+                title: self.localize_bundle_markup_text("@editor.description"),
+                detail: description.to_string(),
+                icon: "fileText",
+            });
+        }
+        if let Some(repo) = self.mods_route_mod_repo_at_index(index) {
+            entries.push(DesktopModsContentEntry {
+                title: self.localize_bundle_markup_text("@mods.github.open"),
+                detail: repo.to_string(),
+                icon: "github",
+            });
+        }
+        if let Some(root) = self.mods_route_mod_root_label_at_index(index) {
+            entries.push(DesktopModsContentEntry {
+                title: self.localize_bundle_markup_text("@mods.openfolder"),
+                detail: root,
+                icon: "folder",
+            });
+        }
+        entries
     }
 
     fn push_mods_detail_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -40543,7 +40657,6 @@ impl DesktopLauncher {
             return;
         };
         let dialog = Self::mods_content_dialog_rect_for_panel(panel);
-        let meta = self.mods_route_mod_meta_at_index(index);
         pass.push(RenderCommand::fill_rect(
             panel,
             [0.0, 0.0, 0.0, 0.46],
@@ -40577,82 +40690,77 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.089,
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            meta.and_then(|meta| meta.description.as_deref())
-                .filter(|description| !description.trim().is_empty())
-                .map(|description| {
-                    format!(
-                        "{} {description}",
-                        self.localize_bundle_markup_text("@editor.description")
-                    )
-                })
-                .unwrap_or_else(|| self.localize_bundle_markup_text("@none")),
-            RenderPoint::new(dialog.center().x, dialog.center().y + 24.0),
-            [0.70, 0.78, 0.84, 1.0],
-            12.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.090,
-        ));
-        let description = meta
-            .and_then(|meta| meta.description.as_deref())
-            .filter(|description| !description.trim().is_empty());
-        let repo = meta
-            .and_then(|meta| meta.repo.as_deref())
-            .filter(|repo| !repo.trim().is_empty());
-        for (row, detail) in [
-            Some(format!(
-                "{} {mod_name}",
-                self.localize_bundle_markup_text("@editor.name")
-            )),
-            Some(format!(
-                "{} {}",
-                self.localize_bundle_markup_text("@editor.author"),
-                self.localize_bundle_markup_text(
-                    meta.map(ModMetadata::author_or_unknown)
-                        .unwrap_or("@unknown")
-                )
-            )),
-            Some(format!(
-                "{} {}",
-                self.localize_bundle_markup_text("@mod.version"),
-                self.localize_bundle_markup_text(
-                    meta.map(ModMetadata::version_or_unknown)
-                        .unwrap_or("@unknown")
-                )
-            )),
-            description.map(|description| {
-                format!(
-                    "{} {description}",
-                    self.localize_bundle_markup_text("@editor.description")
-                )
-            }),
-            repo.map(|repo| {
-                format!(
-                    "{} {repo}",
-                    self.localize_bundle_markup_text("@mods.github.open")
-                )
-            }),
-        ]
-        .into_iter()
-        .flatten()
-        .enumerate()
-        {
+        let entries = self.mods_content_entries_for_mod(index);
+        let grid = Self::mods_content_grid_rect_for_dialog(dialog);
+        if entries.is_empty() {
             pass.push(RenderCommand::draw_text_styled(
-                detail,
-                RenderPoint::new(
-                    dialog.x + 34.0,
-                    dialog.center().y - 10.0 - row as f32 * 22.0,
-                ),
-                [0.64, 0.74, 0.82, 1.0],
-                10.0,
+                self.localize_bundle_markup_text("@none"),
+                grid.center(),
+                [0.70, 0.78, 0.84, 1.0],
+                12.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.090,
+            ));
+        }
+        for (entry_index, entry) in entries.iter().take(8).enumerate() {
+            let card = Self::mods_content_entry_rect_for_grid(grid, entry_index);
+            let layer = Layer::END_PIXELED + 0.090 + entry_index as f32 * 0.001;
+            let selected = self.last_mods_content_entry_index == Some(entry_index);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_image_button_symbol("defaulti", selected, false),
+                card,
+                [1.0, 1.0, 1.0, if selected { 0.98 } else { 0.88 }],
+                0.0,
+                layer,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                card,
+                if selected {
+                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.96]
+                } else {
+                    [0.38, 0.50, 0.62, 0.78]
+                },
+                if selected { 2.0 } else { 1.0 },
+                layer + 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                desktop_ui_icon_glyph_or_label(entry.icon, entry.icon),
+                RenderPoint::new(card.x + 24.0, card.center().y),
+                [0.78, 0.88, 0.96, 1.0],
+                16.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_font(RenderFontId::Icon)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.0002,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                format!("{} {}", entry.title, entry.detail),
+                RenderPoint::new(card.x + 48.0, card.center().y + 9.0),
+                [0.88, 0.96, 1.0, 1.0],
+                10.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.0003,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text("@mods.viewcontent"),
+                RenderPoint::new(card.x + 48.0, card.center().y - 11.0),
+                [0.56, 0.68, 0.76, 1.0],
+                8.5,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Start)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true),
-                Layer::END_PIXELED + 0.091 + row as f32 * 0.0001,
+                layer + 0.0004,
             ));
         }
         self.push_settings_text_button(
@@ -57575,6 +57683,22 @@ version: "2.0.0"
         assert!(!content_texts.contains(&"@none"));
         assert!(!content_texts.contains(&"@mods.contents.none"));
         assert!(!content_texts.contains(&"content entries: 0"));
+        let content_dialog = DesktopLauncher::mods_content_dialog_rect_for_panel(panel);
+        let grid = DesktopLauncher::mods_content_grid_rect_for_dialog(content_dialog);
+        let first_content_entry =
+            DesktopLauncher::mods_content_entry_rect_for_grid(grid, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                first_content_entry.x,
+                first_content_entry.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::OpenModsContentEntry(0))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsContentEntry(0),
+        );
+        assert_eq!(launcher.last_mods_content_entry_index, Some(0));
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
@@ -57584,7 +57708,6 @@ version: "2.0.0"
             None,
             "open mods content dialog should block clicks from reaching the detail dialog behind it"
         );
-        let content_dialog = DesktopLauncher::mods_content_dialog_rect_for_panel(panel);
         let close_content = DesktopLauncher::schematic_info_button_rect(content_dialog, 0).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(

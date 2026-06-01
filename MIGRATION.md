@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 699. Mods View Content 推进为可点击内容网格
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **81.4%**，仍未达到完整可玩；继续优先前端/UI 还原。
+- Java 对照依据：
+  - `ModsDialog.showMod(...)` 的 `@mods.viewcontent` 是独立内容查看弹窗，并应展示可点内容项，而不是只显示一组文本状态。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopModsContentEntry` 和内容网格 rect helper；
+    - `push_mods_content_dialog(...)` 从文本壳改为两列可点击卡片网格，显示名称、作者、版本、描述、repo、根目录等当前可用内容/元数据；
+    - 新增 `OpenModsContentEntry(usize)` action 与 `last_mods_content_entry_index`，点击网格项会记录选中项；
+    - 保留未来接入真实 `UnlockableContent` / mod content registry 的入口：`mods_content_entries_for_mod(...)`；
+    - 更新测试覆盖内容网格渲染、点击命中与 detail dialog 点击阻断。
+- 已验证：
+  - `rustfmt --edition 2021 desktop/src/lib.rs`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route -- --nocapture`
+- 仍未完成：
+  - 网格当前优先使用已扫描 mod 元数据/根目录作为稳定内容源，后续要接入真实 mod 内容 registry 和 content info 流程；
+  - Settings 通用 textPref/areaTextPref、Join community feed/cache 仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 698. 主菜单 clear-up、Join 安全连接与 native 黑屏诊断补强
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
