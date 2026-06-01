@@ -17,6 +17,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 724. KeybindDialog Reset All 高度对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **85.6%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `KeybindDialog.java` 底部 `@settings.reset` 使用 `.height(50f).fill()`；
+  - Reset All 应是列表底部全宽条目，而不是偏小 footer chip。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `SETTINGS_KEYBIND_RESET_ALL_HEIGHT = 50.0`；
+    - `settings_keybind_reset_all_rect(...)` 高度从 `40.0` 对齐 Java `50f`；
+    - 更新 Controls 回归测试，锁定 reset-all 行高度来自 Java 常量。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop settings --lib -- --nocapture`
+- 仍未完成：
+  - Controls 重绑弹窗仍需继续做更细粒度的 bare modal/二段 axis 捕获视觉回归；
+  - LoadDialog loading 全屏退场、JoinDialog 连接态/阻断态仍需继续向 Java 对齐；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 723. LoadDialog 缺失预览回退为原版 nomap
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

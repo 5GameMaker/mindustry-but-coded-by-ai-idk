@@ -171,6 +171,7 @@ const SETTINGS_KEYBIND_ROW_HEIGHT: f32 = 40.0;
 const SETTINGS_KEYBIND_ROW_GAP: f32 = 4.0;
 const SETTINGS_KEYBIND_REBIND_WIDTH: f32 = 140.0;
 const SETTINGS_KEYBIND_RESET_WIDTH: f32 = 140.0;
+const SETTINGS_KEYBIND_RESET_ALL_HEIGHT: f32 = 50.0;
 const SETTINGS_KEYBIND_VISIBLE_ROWS: usize = 6;
 const JOIN_SERVER_CARD_HEIGHT: f32 = 132.0;
 const JOIN_SERVER_CARD_GAP: f32 = 10.0;
@@ -26979,7 +26980,7 @@ impl DesktopLauncher {
             dialog.x + 18.0,
             back.y + back.height + 8.0,
             dialog.width - 36.0,
-            40.0,
+            SETTINGS_KEYBIND_RESET_ALL_HEIGHT,
         )
     }
 
@@ -51336,9 +51337,31 @@ mod tests {
             RenderCommand::DrawText { text, style, layer, .. }
                 if text.starts_with("client sync")
                     && style.vertical_align == RenderTextVerticalAlign::Center
-                    && style.outline
-                    && *layer == Layer::END
+            && style.outline
+            && *layer == Layer::END
         )));
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_status_bar_requires_real_connecting_state() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.connect_target = Some(super::DesktopConnectTarget {
+            host: "127.0.0.1".into(),
+            port: super::DEFAULT_MINDUSTRY_PORT,
+        });
+
+        assert_eq!(launcher.desktop_ui_status_bar_model(), None);
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.connecting = true;
+        }
+
+        assert_eq!(
+            launcher.desktop_ui_status_bar_model(),
+            Some(("connecting".to_string(), 0.1, 0xffd3_7fff))
+        );
     }
 
     #[test]
@@ -74905,7 +74928,11 @@ version: "2.0.0"
         let reset_all_rect = DesktopLauncher::settings_keybind_reset_all_rect(child_dialog);
         assert_eq!(reset_all_rect.x, child_dialog.x + 18.0);
         assert_eq!(reset_all_rect.y, back_rect.y + back_rect.height + 8.0);
-        assert_eq!(reset_all_rect.height, 40.0);
+        assert_eq!(
+            reset_all_rect.height,
+            super::SETTINGS_KEYBIND_RESET_ALL_HEIGHT,
+            "Java KeybindDialog reset-all row uses height(50f)"
+        );
         assert!(
             reset_all_rect.width > child_dialog.width - 40.0,
             "Java KeybindDialog reset all button should be a full-width list row instead of a footer-side chip"

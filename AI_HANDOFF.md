@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **85.5%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **85.6%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：LoadDialog 缺失预览回退为原版 nomap
+## 最新闭环：KeybindDialog Reset All 高度对齐
+
+- 当前总体迁移完成度：约 **85.6%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/KeybindDialog.java`：
+  - Java 底部 `@settings.reset` 使用 `.height(50f).fill()`；
+  - Rust 已将 `settings_keybind_reset_all_rect(...)` 从 `40.0` 对齐到 `50.0`，并抽出 `SETTINGS_KEYBIND_RESET_ALL_HEIGHT`；
+  - 回归测试锁定 reset-all 是底部全宽列表行，且高度为 Java `50f`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop settings --lib -- --nocapture`
+- 下一步建议继续前端：
+  1. LoadDialog loading 罩层继续向 Java `ui.loadAnd(...)` 的全屏退场/黑屏过渡靠拢；
+  2. JoinDialog 免责声明/版本不匹配/连接失败弹窗层级继续收口；
+  3. Controls bare modal 与 axis 二段重绑视觉/输入回归继续细化。
+
+## 上一闭环：LoadDialog 缺失预览回退为原版 nomap
 
 - 当前总体迁移完成度：约 **85.5%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LoadDialog.java`：
