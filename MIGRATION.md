@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 688. CustomRulesDialog 从调试摘要推进到规则分类面板
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **80.2%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是消除 `CustomRulesDialog` 类名壳和 `map.applyRules(...)` 调试串观感。
+- Java 对照依据：
+  - `CustomRulesDialog` 构造器标题使用 `@mode.custom`；
+  - 主体按 `rules.title.waves/resourcesbuilding/enemy/planet` 等分类组织规则；
+  - 规则行应显示用户态 key 文案与勾选/数值状态，而不是 Java 方法调用或字段名摘要。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 补 `mode.custom`、`rules.title.*`、`rules.wavetimer`、`rules.wavesending`、`rules.schematic`、`rules.corecapture`、`rules.build*multiplier` 等 EN/简中/繁中 fallback；
+  - `desktop/src/lib.rs`
+    - `push_map_play_customize_dialog(...)` 标题从 `@customize` 改为 `@mode.custom`；
+    - 子弹窗主体从线性调试摘要改为近似 Java `CustomRulesDialog` 的搜索条 + 分类规则面板；
+    - 分类中显示 waves/resources/enemy/planet 的用户态标题、勾选状态与当前地图/星球/env 信息；
+    - 保留 edit/reset/back 可见按钮，为后续接真实规则编辑行为留入口；
+    - 测试明确禁止 `CustomRulesDialog` 与 `map.applyRules(...)` 再出现在用户可见文本。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop map_play --lib`
+- 仍未完成：
+  - 规则开关/数值输入目前仍是可见状态面板，尚未迁移 Java 的真实交互、搜索过滤、分类横向 scroll 与 JSON copy/load/reset 行为；
+  - team/weather/banned blocks/loadout 等深层规则编辑器仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 687. MapList/EditorMapsDialog 与 MapPlay 子弹窗文案接入 bundle locale
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

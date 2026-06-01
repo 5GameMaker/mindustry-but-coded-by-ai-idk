@@ -36513,63 +36513,192 @@ impl DesktopLauncher {
         let child = self.push_map_play_child_dialog_shell(
             pass,
             dialog,
-            self.localize_bundle_markup_text("@customize"),
+            self.localize_bundle_markup_text("@mode.custom"),
             layer,
         );
         let rules = self
             .map_play_rules
             .clone()
             .unwrap_or_else(|| Self::map_play_rules_for_mode(map, self.map_play_selected_mode));
-        for (index, line) in [
-            self.localize_bundle_markup_text("@customize"),
+        let search = RenderRect::new(
+            child.x + 32.0,
+            child.y + child.height - 78.0,
+            child.width - 64.0,
+            30.0,
+        );
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("grayt", false, false),
+            search,
+            [1.0, 1.0, 1.0, 0.72],
+            0.0,
+            layer + 0.004,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
             format!(
                 "{} {}",
-                self.localize_bundle_markup_text("@level.mode"),
+                self.localize_bundle_markup_text("@search"),
                 self.localize_bundle_markup_text(format!(
                     "@mode.{}.name",
                     self.map_play_selected_mode.wire_name()
                 ))
             ),
+            RenderPoint::new(search.x + 16.0, search.center().y),
+            [0.70, 0.82, 0.90, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            layer + 0.005,
+        ));
+
+        let content = RenderRect::new(
+            child.x + 28.0,
+            child.y + 62.0,
+            child.width - 56.0,
+            child.height - 156.0,
+        );
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            content,
+            [1.0, 1.0, 1.0, 0.74],
+            0.0,
+            layer + 0.006,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            content,
+            [0.28, 0.42, 0.52, 0.82],
+            1.0,
+            layer + 0.007,
+        ));
+
+        let toggle_label = |key: &str, value: bool| {
             format!(
-                "map.applyRules({})",
-                self.map_play_selected_mode.wire_name()
+                "{} {}",
+                if value { "✓" } else { "□" },
+                self.localize_bundle_markup_text(key)
+            )
+        };
+        let categories = [
+            (
+                self.localize_bundle_markup_text("@rules.title.waves"),
+                vec![
+                    toggle_label("@rules.waves", rules.waves),
+                    toggle_label("@rules.wavetimer", rules.wave_timer),
+                ],
             ),
-            format!(
-                "{}: {}",
-                self.localize_bundle_markup_text("@rules.waves"),
-                rules.waves
+            (
+                self.localize_bundle_markup_text("@rules.title.resourcesbuilding"),
+                vec![
+                    toggle_label("@rules.infiniteresources", rules.infinite_resources),
+                    toggle_label("@rules.schematic", rules.schematics_allowed),
+                ],
             ),
-            format!(
-                "{}: {}",
-                self.localize_bundle_markup_text("@rules.attack"),
-                rules.attack_mode
+            (
+                self.localize_bundle_markup_text("@rules.title.enemy"),
+                vec![
+                    toggle_label("@rules.attack", rules.attack_mode),
+                    format!(
+                        "{}: {}",
+                        self.localize_bundle_markup_text("@mode.pvp.name"),
+                        rules.pvp
+                    ),
+                ],
             ),
-            format!("rules.pvp: {}", rules.pvp),
-            format!(
-                "{}: {}",
-                self.localize_bundle_markup_text("@rules.infiniteresources"),
-                rules.infinite_resources
+            (
+                self.localize_bundle_markup_text("@rules.title.planet"),
+                vec![
+                    format!(
+                        "{}: {}",
+                        self.localize_bundle_markup_text("@maps"),
+                        map.plain_name()
+                    ),
+                    format!("Planet: {}", rules.planet),
+                    format!("Environment: {}", rules.env),
+                ],
             ),
-            format!("rules source: {}", map.plain_name()),
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        ];
+
+        let mut y = content.y + content.height - 20.0;
+        let mut row_index = 0usize;
+        'categories: for (title, rows) in categories {
+            if y < content.y + 34.0 {
+                break;
+            }
             pass.push(RenderCommand::draw_text_styled(
-                line,
-                RenderPoint::new(
-                    child.x + 32.0,
-                    child.y + child.height - 82.0 - index as f32 * 34.0,
-                ),
-                [0.82, 0.91, 0.98, 1.0],
+                title,
+                RenderPoint::new(content.x + 14.0, y),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
                 11.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Start)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
-                layer + 0.010 + index as f32 * 0.001,
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.010 + row_index as f32 * 0.001,
             ));
+            y -= 16.0;
+            pass.push(RenderCommand::stroke_rect(
+                RenderRect::new(content.x + 14.0, y, content.width - 28.0, 1.0),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.72],
+                1.0,
+                layer + 0.011 + row_index as f32 * 0.001,
+            ));
+            y -= 20.0;
+            for row in rows {
+                if y < content.y + 18.0 {
+                    break 'categories;
+                }
+                pass.push(RenderCommand::draw_text_styled(
+                    row,
+                    RenderPoint::new(content.x + 22.0, y),
+                    [0.82, 0.91, 0.98, 1.0],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_markup(true)
+                        .with_wrap_width((content.width - 44.0).max(80.0))
+                        .with_integer_position(true),
+                    layer + 0.012 + row_index as f32 * 0.001,
+                ));
+                y -= 24.0;
+                row_index += 1;
+            }
+            y -= 10.0;
         }
+        for (index, line) in [
+            self.localize_bundle_markup_text("@edit"),
+            self.localize_bundle_markup_text("@settings.reset"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let rect = RenderRect::new(
+                child.right() - 32.0 - 132.0,
+                child.y + 64.0 + index as f32 * 38.0,
+                132.0,
+                32.0,
+            );
+            self.push_settings_text_button(
+                pass,
+                rect,
+                line,
+                None,
+                layer + 0.030 + index as f32 * 0.001,
+            );
+        }
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@customize"),
+            RenderPoint::new(content.right() - 22.0, content.y + 18.0),
+            [0.54, 0.64, 0.72, 1.0],
+            9.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::End)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            layer + 0.034,
+        ));
         self.push_settings_text_button(
             pass,
             Self::map_play_child_dialog_close_rect(child),
@@ -61097,10 +61226,17 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(!customize_texts.contains(&"CustomRulesDialog"));
-        assert!(customize_texts.contains(&"Customize Rules"));
-        assert!(customize_texts.contains(&"map.applyRules(survival)"));
-        assert!(customize_texts.contains(&"Waves: true"));
-        assert!(customize_texts.contains(&"Attack Mode: false"));
+        assert!(!customize_texts
+            .iter()
+            .any(|text| text.contains("map.applyRules(")));
+        assert!(customize_texts.contains(&"Custom Rules"));
+        assert!(customize_texts.contains(&"Waves"));
+        assert!(customize_texts.contains(&"Resources & Building"));
+        assert!(customize_texts.contains(&"Enemies"));
+        assert!(customize_texts.contains(&"Planet"));
+        assert!(customize_texts.contains(&"✓ Waves"));
+        assert!(customize_texts.contains(&"□ Attack Mode"));
+        assert!(customize_texts.contains(&"PvP: false"));
     }
 
     #[test]
