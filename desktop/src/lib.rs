@@ -93,8 +93,9 @@ use mindustry_core::mindustry::modsys::{
     ModMetadata, ModResourceContainerPlan, ModResourceDirectoryPlan, ModResourcePlan,
 };
 use mindustry_core::mindustry::net::{
-    ArcNetProvider, EffectCallPacket2, Host, Net, NetworkPlayerData, NetworkPlayerSyncData,
-    NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
+    ArcNetProvider, EffectCallPacket2, Host, KickReason, Net, NetworkPlayerData,
+    NetworkPlayerSyncData, NetworkWorldData, PacketKind, SoundAtCallPacket,
+    StateSnapshotCallPacket,
 };
 use mindustry_core::mindustry::r#type::{
     ItemStack, ParticleDrawParticlesPlan, ParticleNoiseLayerPlan, RainDrawPlan, Sector,
@@ -192,6 +193,10 @@ const JOIN_SERVER_CARD_ACTION_BUTTONS: usize = 5;
 const JOIN_CONNECTING_CANCEL_BUTTON_WIDTH: f32 = 180.0;
 const JOIN_CONNECTING_CANCEL_BUTTON_HEIGHT: f32 = 46.0;
 const JOIN_CONNECTING_CANCEL_BUTTON_GAP: f32 = 34.0;
+#[cfg(test)]
+const JOIN_RECONNECT_MAX_PING_ATTEMPTS: usize = 1;
+#[cfg(not(test))]
+const JOIN_RECONNECT_MAX_PING_ATTEMPTS: usize = 30;
 const JOIN_SERVERS_SETTINGS_KEY: &str = "servers";
 const JOIN_IP_SETTINGS_KEY: &str = "ip";
 const JOIN_SERVER_DISCLAIMER_SETTINGS_KEY: &str = "server-disclaimer";
@@ -17795,6 +17800,9 @@ pub struct DesktopLauncher {
     pub join_version_mismatch_dialog_message: Option<String>,
     pub join_connection_error_dialog_message: Option<String>,
     pub join_last_timeout_disconnects_seen: u64,
+    pub join_reconnect_target: Option<DesktopConnectTarget>,
+    pub join_reconnect_receiver:
+        Option<Arc<Mutex<mpsc::Receiver<Result<DesktopConnectTarget, String>>>>>,
     pub join_delete_dialog_index: Option<usize>,
     pub join_server_disclaimer_accepted: bool,
     pub join_server_disclaimer_pending_target: Option<DesktopConnectTarget>,
@@ -18960,6 +18968,8 @@ impl DesktopLauncher {
             join_version_mismatch_dialog_message: None,
             join_connection_error_dialog_message: None,
             join_last_timeout_disconnects_seen: 0,
+            join_reconnect_target: None,
+            join_reconnect_receiver: None,
             join_delete_dialog_index: None,
             join_server_disclaimer_accepted: false,
             join_server_disclaimer_pending_target: None,
@@ -19271,6 +19281,8 @@ impl DesktopLauncher {
         }
         self.client.update();
         self.net_client.update();
+        self.sync_join_reconnect_from_net_state();
+        self.poll_join_reconnect();
         self.sync_join_connection_error_dialog_from_net_state();
         self.poll_join_local_discovery();
         self.poll_join_saved_server_refreshes();
@@ -22910,7 +22922,7 @@ impl DesktopLauncher {
             self.last_menu_route_shell_action = None;
             return true;
         }
-        if self.join_connecting_loadfrag_visible() {
+        if self.join_route_loadfrag_visible() {
             self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CancelJoinConnect);
             return true;
         }
@@ -23025,6 +23037,8 @@ impl DesktopLauncher {
             self.join_info_dialog_open = false;
             self.join_version_mismatch_dialog_message = None;
             self.join_connection_error_dialog_message = None;
+            self.join_reconnect_target = None;
+            self.join_reconnect_receiver = None;
             self.join_delete_dialog_index = None;
             self.save_game_new_dialog_open = false;
             self.save_game_new_text.clear();
@@ -29668,6 +29682,8 @@ impl DesktopLauncher {
             self.connect_error = Some(message.clone());
             self.join_version_mismatch_dialog_message = Some(message);
             self.join_connection_error_dialog_message = None;
+            self.join_reconnect_target = None;
+            self.join_reconnect_receiver = None;
             self.join_add_dialog_open = false;
             self.join_add_server_focused = false;
             self.join_add_server_edit_index = None;
@@ -29843,6 +29859,26 @@ impl DesktopLauncher {
             .unwrap_or(false)
     }
 
+    fn join_reconnecting_loadfrag_visible(&self) -> bool {
+        self.active_menu_route == Some(DesktopMenuRoute::Join)
+            && self.connect_error.is_none()
+            && self.join_reconnect_target.is_some()
+    }
+
+    fn join_route_loadfrag_label(&self) -> Option<&'static str> {
+        if self.join_reconnecting_loadfrag_visible() {
+            Some("@reconnecting")
+        } else if self.join_connecting_loadfrag_visible() {
+            Some("@connecting")
+        } else {
+            None
+        }
+    }
+
+    fn join_route_loadfrag_visible(&self) -> bool {
+        self.join_route_loadfrag_label().is_some()
+    }
+
     fn join_connecting_loadfrag_cancel_button_rect_for_viewport(
         viewport: RenderViewport,
     ) -> RenderRect {
@@ -29873,13 +29909,140 @@ impl DesktopLauncher {
         state.last_connect_packet_error = None;
         state.last_connect_confirm_error = None;
         state.last_world_data_error = None;
+        state.last_kick = None;
+        state.last_kick_reason = None;
+        state.last_disconnect = None;
+        state.kicked = false;
         self.join_last_timeout_disconnects_seen = state.timeout_disconnects;
+    }
+
+    fn join_kick_reason_message(&self, reason: KickReason) -> String {
+        let key = format!("server.kicked.{}", reason.wire_name());
+        upstream_menu_bundle_value_for_locale(&self.settings_locale, &key)
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                if matches!(reason, KickReason::ServerRestarting) {
+                    "The server is restarting.".into()
+                } else {
+                    format!(
+                        "{}\n{}",
+                        self.localize_bundle_markup_text("@disconnect"),
+                        reason.wire_name()
+                    )
+                }
+            })
+    }
+
+    fn start_join_reconnect(&mut self, target: DesktopConnectTarget) {
+        let (tx, rx) = mpsc::channel::<Result<DesktopConnectTarget, String>>();
+        self.join_reconnect_target = Some(target.clone());
+        self.join_reconnect_receiver = Some(Arc::new(Mutex::new(rx)));
+        self.connect_target = Some(target.clone());
+        self.connect_error = None;
+        self.join_version_mismatch_dialog_message = None;
+        self.join_connection_error_dialog_message = None;
+        self.join_add_dialog_open = false;
+        self.join_add_server_focused = false;
+        self.join_add_server_edit_index = None;
+        self.join_info_dialog_open = false;
+        self.join_delete_dialog_index = None;
+        self.join_search_focused = false;
+        let net = self.net_client.net();
+        std::thread::spawn(move || {
+            let mut last_error = None;
+            for attempt in 0..JOIN_RECONNECT_MAX_PING_ATTEMPTS {
+                match net.lock().unwrap().ping_host(
+                    &target.host,
+                    target.port,
+                    Duration::from_secs(2),
+                ) {
+                    Ok(_) => {
+                        let _ = tx.send(Ok(target));
+                        return;
+                    }
+                    Err(error) => {
+                        last_error = Some(error.to_string());
+                    }
+                }
+                if attempt + 1 < JOIN_RECONNECT_MAX_PING_ATTEMPTS {
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+            }
+            let _ = tx.send(Err(last_error.unwrap_or_else(|| "reconnect failed".into())));
+        });
+    }
+
+    fn sync_join_reconnect_from_net_state(&mut self) {
+        if self.join_reconnect_target.is_some()
+            || self.join_connection_error_dialog_message.is_some()
+            || self.join_version_mismatch_dialog_message.is_some()
+        {
+            return;
+        }
+        let should_reconnect = {
+            let state = self.net_client.state();
+            let mut state = state.lock().unwrap();
+            let should_reconnect = state
+                .last_kick_reason
+                .as_ref()
+                .map(|packet| packet.reason == KickReason::ServerRestarting)
+                .unwrap_or(false);
+            if should_reconnect {
+                state.last_kick_reason = None;
+                state.last_kick = None;
+                state.last_disconnect = None;
+                state.kicked = false;
+            }
+            should_reconnect
+        };
+        if !should_reconnect {
+            return;
+        }
+        if let Some(target) = self.connect_target.clone() {
+            self.start_join_reconnect(target);
+        } else {
+            let message = self.join_kick_reason_message(KickReason::ServerRestarting);
+            self.connect_error = Some(message.clone());
+            self.join_connection_error_dialog_message = Some(message);
+        }
+    }
+
+    fn poll_join_reconnect(&mut self) {
+        let Some(receiver) = self.join_reconnect_receiver.as_ref().cloned() else {
+            return;
+        };
+        let message = {
+            let receiver = receiver.lock().unwrap();
+            receiver.try_recv().ok()
+        };
+        let Some(message) = message else {
+            return;
+        };
+        self.join_reconnect_receiver = None;
+        self.join_reconnect_target = None;
+        match message {
+            Ok(target) => {
+                let _ = self.connect_to_target(target);
+            }
+            Err(error) => {
+                let message = format!(
+                    "{}\n{}",
+                    self.localize_bundle_markup_text("@disconnect.error"),
+                    error
+                );
+                self.connect_error = Some(message.clone());
+                self.join_connection_error_dialog_message = Some(message);
+            }
+        }
     }
 
     fn pending_join_connection_error_from_net_state(&self) -> Option<(String, bool, u64)> {
         let state = self.net_client.state();
         let state = state.lock().unwrap();
         let timeout_disconnects = state.timeout_disconnects;
+        if self.join_reconnect_target.is_some() {
+            return None;
+        }
         if let Some(error) = state.last_connect_packet_error.as_ref() {
             return Some((
                 format!(
@@ -29912,6 +30075,42 @@ impl DesktopLauncher {
                 true,
                 timeout_disconnects,
             ));
+        }
+        if let Some(packet) = state.last_kick_reason.as_ref() {
+            if packet.reason != KickReason::ServerRestarting {
+                return Some((
+                    self.join_kick_reason_message(packet.reason),
+                    true,
+                    timeout_disconnects,
+                ));
+            }
+        }
+        if let Some(packet) = state.last_kick.as_ref() {
+            let reason = packet.reason.trim();
+            let message = if reason.is_empty() {
+                self.localize_bundle_markup_text("@disconnect")
+            } else {
+                format!(
+                    "{}\n{}",
+                    self.localize_bundle_markup_text("@disconnect"),
+                    reason
+                )
+            };
+            return Some((message, true, timeout_disconnects));
+        }
+        if let Some(disconnect) = state.last_disconnect.as_ref() {
+            let reason = disconnect.reason.trim();
+            let message = match reason {
+                "closed" => self.localize_bundle_markup_text("@disconnect.closed"),
+                "timeout" => self.localize_bundle_markup_text("@disconnect.timeout"),
+                "" => self.localize_bundle_markup_text("@disconnect"),
+                other => format!(
+                    "{}\n{}",
+                    self.localize_bundle_markup_text("@disconnect.error"),
+                    other
+                ),
+            };
+            return Some((message, true, timeout_disconnects));
         }
         if timeout_disconnects > self.join_last_timeout_disconnects_seen {
             return Some((
@@ -32992,7 +33191,7 @@ impl DesktopLauncher {
     ) -> Option<DesktopMenuRouteShellAction> {
         let panel = Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Join);
         let point = RenderPoint::new(x, y);
-        if self.join_connecting_loadfrag_visible() {
+        if self.join_route_loadfrag_visible() {
             if Self::join_connecting_loadfrag_cancel_button_rect_for_viewport(viewport)
                 .contains_point(point)
             {
@@ -34889,6 +35088,8 @@ impl DesktopLauncher {
                 self.join_info_dialog_open = false;
                 self.join_version_mismatch_dialog_message = None;
                 self.join_connection_error_dialog_message = None;
+                self.join_reconnect_target = None;
+                self.join_reconnect_receiver = None;
                 self.join_delete_dialog_index = None;
                 self.join_search_focused = false;
                 self.database_search_focused = false;
@@ -35108,6 +35309,8 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::CancelJoinConnect => {
                 self.net_client.disconnect_quietly();
+                self.join_reconnect_target = None;
+                self.join_reconnect_receiver = None;
                 self.connect_error = None;
                 self.join_version_mismatch_dialog_message = None;
                 self.join_connection_error_dialog_message = None;
@@ -37446,9 +37649,9 @@ impl DesktopLauncher {
         pass: &mut RenderPass,
         viewport: RenderViewport,
     ) {
-        if !self.join_connecting_loadfrag_visible() {
+        let Some(label) = self.join_route_loadfrag_label() else {
             return;
-        }
+        };
         let stage = RenderRect::new(viewport.x, viewport.y, viewport.width, viewport.height);
         let scale = (viewport.height / 720.0).clamp(0.75, 1.35);
         let warning_height = (LOAD_GAME_LOADING_FRAGMENT_WARNING_HEIGHT * scale).max(12.0);
@@ -37487,7 +37690,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.123,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            self.localize_bundle_markup_text("@connecting"),
+            self.localize_bundle_markup_text(label),
             label_center,
             [0.94, 0.98, 1.0, 1.0],
             22.0,
@@ -44146,7 +44349,7 @@ impl DesktopLauncher {
         for input in input_events {
             if self.load_game_pending_load.is_some()
                 || self.save_game_pending_save.is_some()
-                || self.join_connecting_loadfrag_visible()
+                || self.join_route_loadfrag_visible()
             {
                 match input {
                     DesktopInputTickEvent::CursorMoved { x, y } => {
@@ -44156,7 +44359,7 @@ impl DesktopLauncher {
                     }
                     DesktopInputTickEvent::MouseButton { button, pressed }
                         if *pressed
-                            && self.join_connecting_loadfrag_visible()
+                            && self.join_route_loadfrag_visible()
                             && Self::is_primary_menu_mouse_button(button) =>
                     {
                         if let Some(cursor) = self.last_menu_cursor {
@@ -45223,8 +45426,8 @@ impl DesktopLauncher {
                         }
                     }
                 }
-                if self.join_connecting_loadfrag_visible() {
-                    lines.insert(0, "loadfrag: @connecting".into());
+                if let Some(label) = self.join_route_loadfrag_label() {
+                    lines.insert(0, format!("loadfrag: {label}"));
                     lines.push("button: @cancel".into());
                 }
                 lines
@@ -48191,6 +48394,8 @@ impl DesktopLauncher {
 
     pub fn connect_to_target(&mut self, target: DesktopConnectTarget) -> io::Result<()> {
         self.connect_target = Some(target.clone());
+        self.join_reconnect_target = None;
+        self.join_reconnect_receiver = None;
         self.join_version_mismatch_dialog_message = None;
         self.join_connection_error_dialog_message = None;
         self.net_client
@@ -79638,6 +79843,84 @@ version: "2.0.0"
             timeout_modal,
             launcher.localize_bundle_markup_text("@disconnect.timeout")
         );
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_kick_reason_opens_error_modal() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.kicked = true;
+            state.last_kick_reason = Some(mindustry_core::mindustry::net::KickCallPacket2 {
+                reason: mindustry_core::mindustry::net::KickReason::Banned,
+            });
+        }
+
+        launcher.update();
+
+        let modal = launcher
+            .join_connection_error_dialog_message
+            .clone()
+            .expect("kick reason should open JoinDialog-style error modal");
+        assert_eq!(modal, "You are banned on this server.");
+        assert_eq!(launcher.connect_error, Some(modal));
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CloseJoinConnectionError,
+        );
+        {
+            let state = launcher.net_client.state();
+            let state = state.lock().unwrap();
+            assert_eq!(state.last_kick_reason, None);
+            assert!(!state.kicked);
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_server_restarting_enters_reconnecting_loadfrag() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
+        launcher.connect_target = Some(super::DesktopConnectTarget {
+            host: "127.0.0.1".into(),
+            port: super::DEFAULT_MINDUSTRY_PORT,
+        });
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.kicked = true;
+            state.last_kick_reason = Some(mindustry_core::mindustry::net::KickCallPacket2 {
+                reason: mindustry_core::mindustry::net::KickReason::ServerRestarting,
+            });
+        }
+
+        launcher.sync_join_reconnect_from_net_state();
+
+        assert!(launcher.join_reconnecting_loadfrag_visible());
+        assert!(launcher.join_route_loadfrag_visible());
+        assert_eq!(launcher.join_route_loadfrag_label(), Some("@reconnecting"));
+        assert_eq!(launcher.join_connection_error_dialog_message, None);
+        {
+            let state = launcher.net_client.state();
+            let state = state.lock().unwrap();
+            assert_eq!(state.last_kick_reason, None);
+            assert!(!state.kicked);
+        }
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(lines.contains(&"loadfrag: @reconnecting".to_string()));
+        assert!(lines.contains(&"button: @cancel".to_string()));
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CancelJoinConnect,
+        );
+        assert!(!launcher.join_reconnecting_loadfrag_visible());
+        assert_eq!(launcher.join_reconnect_target, None);
+        assert!(launcher.join_reconnect_receiver.is_none());
     }
 
     #[test]
