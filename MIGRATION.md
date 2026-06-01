@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 684. 加载页背景网格从 custom 标记落到真实绘制
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **79.7%**，仍未达到完整可玩；继续优先前端/UI 与黑屏兜底，当前闭环目标是让加载页背景不再依赖 desktop 侧未实现的 `load-background-grid` custom marker。
+- Java 对照依据：
+  - 上游加载页不是纯黑底，背景 glow、星球、logo、进度条与网格/层次共同构成可见加载界面；
+  - Rust 原 `LoadRenderCommand::BackgroundGrid` 只输出 `RenderCommand::Custom("load-background-grid")`，desktop/OpenGL 后端没有专门落地，视觉上等于缺失。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/load_renderer.rs`
+    - `BackgroundGrid` 增加 bounds；
+    - `into_render_commands()` 直接生成横纵 `DrawLine` 网格，层级位于 glow 与 planet 之间；
+    - 更新 load renderer 测试，断言网格线、默认 `serpulo` sprite、关键文案与 banner 仍稳定输出。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core load_renderer --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - 仍需继续做实际窗口启动截图验证，确认黑屏/近黑屏在目标机器上彻底消除；
+  - 加载页仍未完全复刻 Java 的 shader/planet 细节与过渡动画；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 683. 加载页默认星球贴图接入桌面图集
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

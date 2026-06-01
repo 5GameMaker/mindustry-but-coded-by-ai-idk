@@ -5,14 +5,12 @@
 //! stage selection, progress bar, prompt text, logo/planet/background layers,
 //! plus error and completion overlays.
 
-use super::{
-    RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderProperty, RenderRect,
-    RenderTextAlign,
-};
+use super::{RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderRect, RenderTextAlign};
 use crate::mindustry::ui::{WarningBar, WarningBarDrawCommand, WarningBarLayout};
 
 const LOAD_PASS_KIND: &str = "load";
 const LOAD_GLOW_LAYER: f32 = 1.0;
+const LOAD_GRID_LAYER: f32 = 1.5;
 const LOAD_PLANET_LAYER: f32 = 2.0;
 const LOAD_LOGO_LAYER: f32 = 3.0;
 const LOAD_PROGRESS_TRACK_LAYER: f32 = 10.0;
@@ -218,6 +216,7 @@ impl LoadRendererState {
 
         if self.theme.show_background_grid {
             commands.push(LoadRenderCommand::BackgroundGrid {
+                bounds: LoadRect::new(0.0, 0.0, input.graphics_width, input.graphics_height),
                 spacing: (58.0 * scale).max(24.0),
                 stroke: (4.0 * scale).max(1.0),
                 color: self.theme.accent_alt_rgba,
@@ -383,6 +382,7 @@ pub enum LoadRenderCommand {
         color: [f32; 4],
     },
     BackgroundGrid {
+        bounds: LoadRect,
         spacing: f32,
         stroke: f32,
         color: [f32; 4],
@@ -465,21 +465,41 @@ impl LoadRenderCommand {
                 ));
             }
             Self::BackgroundGrid {
+                bounds,
                 spacing,
                 stroke,
                 color,
             } => {
-                commands.push(RenderCommand::custom(
-                    "load-background-grid",
-                    vec![
-                        RenderProperty::new("spacing", spacing.to_string()),
-                        RenderProperty::new("stroke", stroke.to_string()),
-                        RenderProperty::new("r", color[0].to_string()),
-                        RenderProperty::new("g", color[1].to_string()),
-                        RenderProperty::new("b", color[2].to_string()),
-                        RenderProperty::new("a", color[3].to_string()),
-                    ],
-                ));
+                let spacing = spacing.max(1.0);
+                let stroke = stroke.max(0.25);
+                let left = bounds.x;
+                let right = bounds.x + bounds.width.max(0.0);
+                let bottom = bounds.y;
+                let top = bounds.y + bounds.height.max(0.0);
+
+                let mut x = left;
+                while x <= right {
+                    commands.push(RenderCommand::draw_line(
+                        RenderPoint::new(x, bottom),
+                        RenderPoint::new(x, top),
+                        stroke,
+                        color,
+                        LOAD_GRID_LAYER,
+                    ));
+                    x += spacing;
+                }
+
+                let mut y = bottom;
+                while y <= top {
+                    commands.push(RenderCommand::draw_line(
+                        RenderPoint::new(left, y),
+                        RenderPoint::new(right, y),
+                        stroke,
+                        color,
+                        LOAD_GRID_LAYER,
+                    ));
+                    y += spacing;
+                }
             }
             Self::Logo {
                 text,
@@ -1110,6 +1130,7 @@ mod tests {
                     color: [0.20, 0.42, 0.83, 0.18],
                 },
                 LoadRenderCommand::BackgroundGrid {
+                    bounds: LoadRect::new(0.0, 0.0, 1280.0, 720.0),
                     spacing: 48.0,
                     stroke: 2.0,
                     color: [0.10, 0.18, 0.28, 1.0],
@@ -1167,7 +1188,7 @@ mod tests {
             owned.order,
             RenderPassKind::Custom("load".to_string()).default_order()
         );
-        assert_eq!(owned.commands.len(), 15);
+        assert!(owned.commands.len() > 15);
 
         assert!(matches!(owned.commands[0], RenderCommand::Clear { .. }));
         assert!(matches!(
@@ -1176,65 +1197,46 @@ mod tests {
         ));
         assert!(matches!(
             owned.commands[2],
-            RenderCommand::Custom { ref name, .. } if name == "load-background-grid"
+            RenderCommand::DrawLine { layer, .. } if (layer - LOAD_GRID_LAYER).abs() < f32::EPSILON
         ));
-        assert!(matches!(
-            owned.commands[3],
-            RenderCommand::DrawSprite { .. }
-        ));
-        assert!(matches!(owned.commands[4], RenderCommand::DrawText { .. }));
-        assert!(matches!(owned.commands[5], RenderCommand::FillRect { .. }));
-        assert!(matches!(owned.commands[6], RenderCommand::FillRect { .. }));
-        assert!(matches!(owned.commands[7], RenderCommand::DrawText { .. }));
-        assert!(matches!(owned.commands[8], RenderCommand::DrawText { .. }));
-        assert!(matches!(owned.commands[9], RenderCommand::DrawText { .. }));
-        assert!(matches!(owned.commands[10], RenderCommand::FillRect { .. }));
-        assert!(matches!(owned.commands[11], RenderCommand::DrawText { .. }));
-        assert!(matches!(owned.commands[12], RenderCommand::DrawText { .. }));
-        assert!(matches!(owned.commands[13], RenderCommand::FillRect { .. }));
-        assert!(matches!(owned.commands[14], RenderCommand::DrawText { .. }));
-
-        match &owned.commands[7] {
-            RenderCommand::DrawText { text, .. } => assert_eq!(text, "assets"),
-            other => panic!("unexpected progress label command: {other:?}"),
+        assert!(owned
+            .commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "serpulo")));
+        assert!(
+            owned
+                .commands
+                .iter()
+                .filter(|command| {
+                    matches!(
+                        command,
+                        RenderCommand::DrawLine { layer, .. }
+                            if (*layer - LOAD_GRID_LAYER).abs() < f32::EPSILON
+                    )
+                })
+                .count()
+                >= 4
+        );
+        for expected in [
+            "assets",
+            "error  25%",
+            "loading assets",
+            "asset loader crashed",
+            "retry or inspect the failure source",
+            "all assets ready",
+        ] {
+            assert!(
+                owned.commands.iter().any(|command| {
+                    matches!(command, RenderCommand::DrawText { text, .. } if text == expected)
+                }),
+                "load pass should contain text command {expected:?}"
+            );
         }
-
-        match &owned.commands[8] {
-            RenderCommand::DrawText { text, .. } => assert_eq!(text, "error  25%"),
-            other => panic!("unexpected stage label command: {other:?}"),
-        }
-
-        match &owned.commands[9] {
-            RenderCommand::DrawText { text, .. } => assert_eq!(text, "loading assets"),
-            other => panic!("unexpected prompt command: {other:?}"),
-        }
-
-        match &owned.commands[11] {
-            RenderCommand::DrawText { text, .. } => {
-                assert_eq!(text, "asset loader crashed")
-            }
-            other => panic!("unexpected banner message command: {other:?}"),
-        }
-
-        match &owned.commands[12] {
-            RenderCommand::DrawText { text, .. } => {
-                assert_eq!(text, "retry or inspect the failure source")
-            }
-            other => panic!("unexpected banner details command: {other:?}"),
-        }
-
-        match &owned.commands[13] {
-            RenderCommand::FillRect { color, .. } => {
-                assert_eq!(*color, [0.32, 0.84, 0.50, 1.0]);
-            }
-            other => panic!("unexpected completion background command: {other:?}"),
-        }
-
-        match &owned.commands[14] {
-            RenderCommand::DrawText { text, .. } => {
-                assert_eq!(text, "all assets ready")
-            }
-            other => panic!("unexpected completion message command: {other:?}"),
-        }
+        assert!(owned.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::FillRect { color, .. } if *color == [0.32, 0.84, 0.50, 1.0]
+            )
+        }));
     }
 }
