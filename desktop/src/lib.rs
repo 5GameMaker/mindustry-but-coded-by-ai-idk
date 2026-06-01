@@ -28448,19 +28448,6 @@ impl DesktopLauncher {
         desktop_ui_icon_glyph_or_label(Self::load_game_mode_filter_icon(mode), mode.wire_name())
     }
 
-    fn map_list_has_active_filters(&self) -> bool {
-        !self.map_list_filter_modes.is_empty()
-            || !self.map_list_filter_planets.is_empty()
-            || !self.map_list_filter_show_builtin
-            || !self.map_list_filter_show_custom
-            || !self.map_list_filter_show_modded
-            || self.map_list_filter_search_author
-            || self.map_list_filter_search_description
-            || self.map_list_filter_search_mod_name
-            || self.map_list_filter_prioritize_custom
-            || self.map_list_filter_prioritize_modded
-    }
-
     fn map_list_filter_summary_text(&self) -> Option<String> {
         let mut parts = Vec::new();
 
@@ -28542,15 +28529,7 @@ impl DesktopLauncher {
     fn map_list_empty_state_texts(&self) -> (String, Option<String>) {
         let search = self.map_list_search.trim();
         if !search.is_empty() {
-            (
-                format!("@none.found: {search}"),
-                self.map_list_filter_summary_text(),
-            )
-        } else if self.map_list_has_active_filters() {
-            (
-                "@maps.none".to_string(),
-                self.map_list_filter_summary_text(),
-            )
+            (format!("@none.found: {search}"), None)
         } else {
             ("@maps.none".to_string(), None)
         }
@@ -61745,6 +61724,18 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(empty_texts.contains(&"[lightgray]<none found>: missing"));
+        launcher.map_list_filter_modes.push(Gamemode::Survival);
+        assert_eq!(
+            launcher.map_list_empty_state_texts(),
+            ("@none.found: missing".to_string(), None),
+            "Java MapListDialog empty search state should not render Rust-only filter debug hints"
+        );
+        launcher.map_list_search.clear();
+        assert_eq!(
+            launcher.map_list_empty_state_texts(),
+            ("@maps.none".to_string(), None),
+            "Java MapListDialog filtered empty state should keep the visible UI to @maps.none only"
+        );
 
         let search = DesktopLauncher::map_list_search_rect_for_panel(
             panel,

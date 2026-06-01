@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 694. MapListDialog 空状态收敛到 Java 文案风格
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **80.8%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是让地图列表空状态不再显示 Rust-only 的筛选调试汇总。
+- Java 对照依据：
+  - `MapListDialog.rebuildMaps()` 空列表主要显示 `@maps.none` / `@none.found` 这类简洁文案；
+  - Java 不会在正式 UI 里额外画 `filters: modes/types/search/priority...` 汇总行。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `map_list_empty_state_texts(...)` 对搜索无结果只返回 `@none.found: query`；
+    - 对筛选导致无结果只返回 `@maps.none`；
+    - 移除正式 UI 空状态中的第二行 filter debug hint；
+    - 保留 `map_list_filter_summary_text(...)` 供 `active_menu_route_shell_lines(...)` 等调试/交接输出使用；
+    - 测试锁定空状态不再返回 filter debug hint。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop map_list --lib`
+- 仍未完成：
+  - 地图列表滚动条/筛选弹窗更多细节仍需继续对照 Java Scene2D 行为；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 693. MapListDialog 星球筛选候选行对齐图标按钮样式
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
