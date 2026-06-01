@@ -36952,6 +36952,86 @@ impl DesktopLauncher {
         ));
     }
 
+    fn map_list_filter_hover_tooltip_text(&self, dialog: RenderRect) -> Option<String> {
+        let cursor = self.last_menu_cursor?;
+        if !self.map_list_filter_dialog_open || self.map_list_planet_filter_dialog_open {
+            return None;
+        }
+        for (index, mode) in Gamemode::ALL
+            .into_iter()
+            .filter(|mode| !mode.hidden())
+            .enumerate()
+        {
+            if Self::map_list_filter_mode_rect(dialog, index).contains_point(cursor) {
+                return Some(
+                    self.localize_bundle_markup_text(format!("@mode.{}.name", mode.wire_name())),
+                );
+            }
+        }
+        for (index, label) in [
+            self.localize_bundle_markup_text("@editor.filters.prioritizecustom"),
+            self.localize_bundle_markup_text("@editor.filters.prioritizemod"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if Self::map_list_filter_priority_rect(dialog, index).contains_point(cursor) {
+                return Some(label);
+            }
+        }
+        if Self::map_list_filter_planet_button_rect(dialog).contains_point(cursor) {
+            return Some(self.localize_bundle_markup_text("@editor.filters.planetselect"));
+        }
+        None
+    }
+
+    fn push_map_list_filter_hover_tooltip(
+        &self,
+        pass: &mut RenderPass,
+        panel: RenderRect,
+        dialog: RenderRect,
+    ) {
+        let Some(label) = self.map_list_filter_hover_tooltip_text(dialog) else {
+            return;
+        };
+        let Some(cursor) = self.last_menu_cursor else {
+            return;
+        };
+        let tooltip_width = (label.len() as f32 * 7.0 + 28.0).clamp(92.0, 280.0);
+        let tooltip_height = 32.0;
+        let tooltip_x = (cursor.x + 14.0)
+            .min(panel.right() - tooltip_width - 4.0)
+            .max(panel.x + 4.0);
+        let tooltip_y = (cursor.y + 14.0)
+            .min(panel.y + panel.height - tooltip_height - 4.0)
+            .max(panel.y + 4.0);
+        let tooltip = RenderRect::new(tooltip_x, tooltip_y, tooltip_width, tooltip_height);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            tooltip,
+            [1.0, 1.0, 1.0, 0.96],
+            0.0,
+            Layer::END_PIXELED + 0.104,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            tooltip,
+            [0.42, 0.58, 0.70, 0.94],
+            1.0,
+            Layer::END_PIXELED + 0.105,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            label,
+            tooltip.center(),
+            [0.94, 0.98, 1.0, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.1055,
+        ));
+    }
+
     fn push_map_list_filter_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
         if !self.map_list_filter_dialog_open {
             return;
@@ -37183,6 +37263,7 @@ impl DesktopLauncher {
             Some("left"),
             Layer::END_PIXELED + 0.103,
         );
+        self.push_map_list_filter_hover_tooltip(pass, panel, dialog);
     }
 
     fn push_map_list_planet_filter_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -61731,6 +61812,32 @@ version: "2.0.0"
                 "MapListDialog filter icon buttons should render Java-like icon glyph {glyph}"
             );
         }
+        let survival_hover = DesktopLauncher::map_list_filter_mode_rect(dialog, 0).center();
+        custom.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: survival_hover.x,
+                y: survival_hover.y,
+            }],
+        );
+        let hover_frame = custom.menu_graphics_frame_for_surface(0, viewport);
+        let hover_texts = hover_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("hovered map list filter dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            hover_texts.contains(&"Survival"),
+            "Java MapListDialog mode icon buttons expose their localized mode name as a tooltip"
+        );
         let close_filter = DesktopLauncher::schematic_info_button_rect(dialog, 0).center();
         assert_eq!(
             custom.active_menu_route_shell_action_at_surface_point(

@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 692. MapListDialog 筛选图标按钮补齐 hover tooltip
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **80.6%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是在上一轮 60f 图标按钮基础上补齐 Java `tooltip(...)` 语义。
+- Java 对照依据：
+  - mode 图标按钮使用 `tooltip("@mode.<name>.name")`；
+  - priority 图标按钮使用 `tooltip("@editor.filters.prioritizecustom")` / `tooltip("@editor.filters.prioritizemod")`；
+  - planet 图标按钮使用 `tooltip("@editor.filters.planetselect")`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_list_filter_hover_tooltip_text(...)`，根据 `last_menu_cursor` 命中 mode / priority / planet 过滤按钮；
+    - 新增 `push_map_list_filter_hover_tooltip(...)`，渲染 Java 风格 tooltip 小浮层；
+    - 测试覆盖 mode 图标 hover 后显示本地化 `Survival` tooltip。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop map_list --lib`
+- 仍未完成：
+  - tooltip 目前是轻量浮层，还未完整复刻 Scene2D tooltip 延迟/动画；
+  - planet 二级弹窗候选行仍需继续对齐 Java 图标 + 文本样式；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 691. MapListDialog 筛选弹窗按钮尺寸与图标化对齐 Java
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
