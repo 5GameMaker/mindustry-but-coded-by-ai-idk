@@ -1428,6 +1428,13 @@ impl TeamRules {
         }
         self.values[team_id].get_or_insert_with(|| TeamRule::for_team_id(team_id))
     }
+
+    pub fn iter_present(&self) -> impl Iterator<Item = (usize, &TeamRule)> {
+        self.values
+            .iter()
+            .enumerate()
+            .filter_map(|(team_id, rule)| rule.as_ref().map(|rule| (team_id, rule)))
+    }
 }
 
 impl GamemodeApplier for crate::mindustry::game::Gamemode {

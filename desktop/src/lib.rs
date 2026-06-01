@@ -39,7 +39,7 @@ use mindustry_core::mindustry::entities::{
     WorldLabelComp, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::game::{
-    Gamemode, Rules, Schematic, TechContentRef, TechNode, TechNodeId, TechTree,
+    Gamemode, Rules, Schematic, TeamRule, TechContentRef, TechNode, TechNodeId, TechTree,
 };
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
@@ -1013,6 +1013,76 @@ fn json_weather_entries(values: &[WeatherEntry]) -> String {
         })
         .collect::<Vec<_>>();
     format!("[{}]", items.join(","))
+}
+
+fn json_team_rule(rule: &TeamRule) -> String {
+    format!(
+        concat!(
+            "{{",
+            "\"aiCoreSpawn\":{},",
+            "\"protectCores\":{},",
+            "\"checkPlacement\":{},",
+            "\"cheat\":{},",
+            "\"fillItems\":{},",
+            "\"infiniteResources\":{},",
+            "\"infiniteAmmo\":{},",
+            "\"prebuildAi\":{},",
+            "\"buildAi\":{},",
+            "\"buildAiTier\":{},",
+            "\"respawn\":{},",
+            "\"unitDamageMultiplier\":{},",
+            "\"unitHealthMultiplier\":{},",
+            "\"unitCrashDamageMultiplier\":{},",
+            "\"unitMineSpeedMultiplier\":{},",
+            "\"unitCostMultiplier\":{},",
+            "\"unitBuildSpeedMultiplier\":{},",
+            "\"blockDamageMultiplier\":{},",
+            "\"blockHealthMultiplier\":{},",
+            "\"buildSpeedMultiplier\":{},",
+            "\"rtsAi\":{},",
+            "\"rtsMinSquad\":{},",
+            "\"rtsMaxSquad\":{},",
+            "\"rtsMinWeight\":{},",
+            "\"unitFactoryActivationDelay\":{},",
+            "\"extraCoreBuildRadius\":{}",
+            "}}"
+        ),
+        rule.ai_core_spawn,
+        rule.protect_cores,
+        rule.check_placement,
+        rule.cheat,
+        rule.fill_items,
+        rule.infinite_resources,
+        rule.infinite_ammo,
+        rule.prebuild_ai,
+        rule.build_ai,
+        rule.build_ai_tier,
+        rule.respawn,
+        rule.unit_damage_multiplier,
+        rule.unit_health_multiplier,
+        rule.unit_crash_damage_multiplier,
+        rule.unit_mine_speed_multiplier,
+        rule.unit_cost_multiplier,
+        rule.unit_build_speed_multiplier,
+        rule.block_damage_multiplier,
+        rule.block_health_multiplier,
+        rule.build_speed_multiplier,
+        rule.rts_ai,
+        rule.rts_min_squad,
+        rule.rts_max_squad,
+        rule.rts_min_weight,
+        rule.unit_factory_activation_delay,
+        rule.extra_core_build_radius
+    )
+}
+
+fn json_team_rules(rules: &Rules) -> String {
+    let items = rules
+        .teams
+        .iter_present()
+        .map(|(team_id, rule)| format!("\"{}\":{}", team_id, json_team_rule(rule)))
+        .collect::<Vec<_>>();
+    format!("{{{}}}", items.join(","))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30758,6 +30828,9 @@ impl DesktopLauncher {
                 "\"waveSpacing\":{},",
                 "\"initialWaveSpacing\":{},",
                 "\"dropZoneRadius\":{},",
+                "\"defaultTeam\":{},",
+                "\"waveTeam\":{},",
+                "\"teams\":{},",
                 "\"modeName\":\"{}\"",
                 "}}"
             ),
@@ -30779,6 +30852,9 @@ impl DesktopLauncher {
             rules.wave_spacing,
             rules.initial_wave_spacing,
             rules.drop_zone_radius,
+            rules.default_team,
+            rules.wave_team,
+            json_team_rules(rules),
             mode_name.replace('"', "\\\"")
         )
     }
@@ -66776,6 +66852,18 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(toggled_texts.contains(&"✓ Attack Mode"));
+        {
+            let rules = launcher
+                .map_play_rules
+                .as_mut()
+                .expect("custom rules edits should keep a mutable rules snapshot");
+            rules.default_team = 3;
+            rules.wave_team = 4;
+            let team = rules.teams.get_or_insert(1);
+            team.protect_cores = false;
+            team.rts_ai = true;
+            team.block_health_multiplier = 1.5;
+        }
 
         let edit_center = DesktopLauncher::map_play_customize_edit_button_rect(child, 0).center();
         let open_edit =
@@ -66837,6 +66925,12 @@ version: "2.0.0"
         assert!(copied_rules.contains("\"weather\":[{"));
         assert!(copied_rules.contains(&format!("\"weather\":\"{}\"", weather_candidate)));
         assert!(copied_rules.contains("\"always\":true"));
+        assert!(copied_rules.contains("\"defaultTeam\":3"));
+        assert!(copied_rules.contains("\"waveTeam\":4"));
+        assert!(copied_rules.contains("\"teams\":{\"1\":{"));
+        assert!(copied_rules.contains("\"protectCores\":false"));
+        assert!(copied_rules.contains("\"rtsAi\":true"));
+        assert!(copied_rules.contains("\"blockHealthMultiplier\":1.5"));
 
         let reset_center =
             DesktopLauncher::map_play_rules_edit_button_rect(edit_dialog, 2).center();
@@ -66885,6 +66979,26 @@ version: "2.0.0"
                 .map(|entry| (entry.weather.as_str(), entry.always)),
             Some((weather_candidate.as_str(), true)),
             "load should restore CustomRulesDialog weather entries from JSON"
+        );
+        assert_eq!(
+            launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| (rules.default_team, rules.wave_team)),
+            Some((3, 4)),
+            "load should restore CustomRulesDialog default/wave teams from JSON"
+        );
+        assert_eq!(
+            launcher.map_play_rules.as_ref().map(|rules| {
+                let team = rules.teams.get_or_default(1);
+                (
+                    team.protect_cores,
+                    team.rts_ai,
+                    team.block_health_multiplier,
+                )
+            }),
+            Some((false, true, 1.5)),
+            "load should restore nested CustomRulesDialog team rule fields from JSON"
         );
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
