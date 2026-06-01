@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 731. JoinDialog 即时连接失败改为错误 modal
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **86.3%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - Join 连接失败会从 loading 层收回，再通过 UI 错误/信息 dialog 给出阻断式提示；
+  - 错误 modal 应阻断底层 JoinDialog 输入，OK/back/escape 回到底层页面；
+  - 失败后不应继续显示 `@connecting` loadfrag。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_connection_error_dialog_message` 与 `CloseJoinConnectionError`；
+    - `connect_to_target(...)` 的即时 `net.connect(...)` 错误会 `disconnect_quietly()`、停止 connecting 状态并打开 `@host.invalid` modal；
+    - 错误 modal 渲染 `@host.invalid` 标题、底层错误详情和 `@ok`，hit-test 会阻断底层 Join 按钮；
+    - back/escape/enter 均可关闭错误 modal，关闭后保留 Join 页面而不是退出路由；
+    - 新增回归测试覆盖错误 modal、`connecting=false`、OK 命中与底层 Add Server 点击阻断。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_error_uses_java_like_error_modal --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop join_route --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `@reconnecting` / pingHost 重连流程还需继续迁移；
+  - 异步连接超时、world data 失败和 server kick 还需统一映射到 Java `loadfrag.hide()` 后错误 modal；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 730. JoinDialog 连接中接入 LoadingFragment 遮罩与取消
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -3483,6 +3483,7 @@ pub enum DesktopMenuRouteShellAction {
     OpenJoinInfo,
     CloseJoinInfo,
     CloseJoinVersionMismatch,
+    CloseJoinConnectionError,
     CancelJoinConnect,
     RefreshJoinServers,
     MoveJoinServerCardUp(usize),
@@ -17792,6 +17793,7 @@ pub struct DesktopLauncher {
     pub join_add_server_edit_index: Option<usize>,
     pub join_info_dialog_open: bool,
     pub join_version_mismatch_dialog_message: Option<String>,
+    pub join_connection_error_dialog_message: Option<String>,
     pub join_delete_dialog_index: Option<usize>,
     pub join_server_disclaimer_accepted: bool,
     pub join_server_disclaimer_pending_target: Option<DesktopConnectTarget>,
@@ -18955,6 +18957,7 @@ impl DesktopLauncher {
             join_add_server_edit_index: None,
             join_info_dialog_open: false,
             join_version_mismatch_dialog_message: None,
+            join_connection_error_dialog_message: None,
             join_delete_dialog_index: None,
             join_server_disclaimer_accepted: false,
             join_server_disclaimer_pending_target: None,
@@ -22908,6 +22911,22 @@ impl DesktopLauncher {
             self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CancelJoinConnect);
             return true;
         }
+        if self.active_menu_route == Some(DesktopMenuRoute::Join)
+            && self.join_connection_error_dialog_message.is_some()
+        {
+            self.dispatch_menu_route_shell_action(
+                DesktopMenuRouteShellAction::CloseJoinConnectionError,
+            );
+            return true;
+        }
+        if self.active_menu_route == Some(DesktopMenuRoute::Join)
+            && self.join_version_mismatch_dialog_message.is_some()
+        {
+            self.dispatch_menu_route_shell_action(
+                DesktopMenuRouteShellAction::CloseJoinVersionMismatch,
+            );
+            return true;
+        }
         if self.active_menu_route == Some(DesktopMenuRoute::Database)
             && self.last_database_content_opened.is_some()
         {
@@ -23002,6 +23021,7 @@ impl DesktopLauncher {
             self.join_add_server_edit_index = None;
             self.join_info_dialog_open = false;
             self.join_version_mismatch_dialog_message = None;
+            self.join_connection_error_dialog_message = None;
             self.join_delete_dialog_index = None;
             self.save_game_new_dialog_open = false;
             self.save_game_new_text.clear();
@@ -29644,6 +29664,7 @@ impl DesktopLauncher {
             self.connect_target = Some(target);
             self.connect_error = Some(message.clone());
             self.join_version_mismatch_dialog_message = Some(message);
+            self.join_connection_error_dialog_message = None;
             self.join_add_dialog_open = false;
             self.join_add_server_focused = false;
             self.join_add_server_edit_index = None;
@@ -29755,6 +29776,10 @@ impl DesktopLauncher {
             width,
             height,
         )
+    }
+
+    fn join_connection_error_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        Self::join_version_mismatch_dialog_rect_for_panel(panel)
     }
 
     fn join_delete_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
@@ -32896,6 +32921,13 @@ impl DesktopLauncher {
             }
             return None;
         }
+        if self.join_connection_error_dialog_message.is_some() {
+            let dialog = Self::join_connection_error_dialog_rect_for_panel(panel);
+            if Self::join_add_dialog_button_rect(dialog, 1).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CloseJoinConnectionError);
+            }
+            return None;
+        }
         if self.join_version_mismatch_dialog_message.is_some() {
             let dialog = Self::join_version_mismatch_dialog_rect_for_panel(panel);
             if Self::join_add_dialog_button_rect(dialog, 1).contains_point(point) {
@@ -34777,6 +34809,7 @@ impl DesktopLauncher {
                 self.join_add_server_edit_index = None;
                 self.join_info_dialog_open = false;
                 self.join_version_mismatch_dialog_message = None;
+                self.join_connection_error_dialog_message = None;
                 self.join_delete_dialog_index = None;
                 self.join_search_focused = false;
                 self.database_search_focused = false;
@@ -34915,6 +34948,7 @@ impl DesktopLauncher {
                 self.join_search_focused = false;
                 self.connect_error = None;
                 self.join_version_mismatch_dialog_message = None;
+                self.join_connection_error_dialog_message = None;
             }
             DesktopMenuRouteShellAction::CloseJoinAddServer => {
                 self.join_add_dialog_open = false;
@@ -34959,6 +34993,7 @@ impl DesktopLauncher {
                     self.connect_target = Some(target);
                     self.connect_error = None;
                     self.join_version_mismatch_dialog_message = None;
+                    self.join_connection_error_dialog_message = None;
                     self.join_add_dialog_open = false;
                     self.join_add_server_focused = false;
                     self.join_add_server_edit_index = None;
@@ -34977,6 +35012,7 @@ impl DesktopLauncher {
                 self.join_add_server_focused = false;
                 self.join_delete_dialog_index = None;
                 self.join_version_mismatch_dialog_message = None;
+                self.join_connection_error_dialog_message = None;
                 self.join_search_focused = false;
             }
             DesktopMenuRouteShellAction::CloseJoinInfo => {
@@ -34986,10 +35022,15 @@ impl DesktopLauncher {
                 self.join_version_mismatch_dialog_message = None;
                 self.connect_error = None;
             }
+            DesktopMenuRouteShellAction::CloseJoinConnectionError => {
+                self.join_connection_error_dialog_message = None;
+                self.connect_error = None;
+            }
             DesktopMenuRouteShellAction::CancelJoinConnect => {
                 self.net_client.disconnect_quietly();
                 self.connect_error = None;
                 self.join_version_mismatch_dialog_message = None;
+                self.join_connection_error_dialog_message = None;
                 self.last_menu_guard_message = Some("JoinDialog.connect cancel".into());
             }
             DesktopMenuRouteShellAction::RefreshJoinServers => {
@@ -35043,6 +35084,7 @@ impl DesktopLauncher {
                     self.join_add_server_edit_index = None;
                     self.join_info_dialog_open = false;
                     self.join_version_mismatch_dialog_message = None;
+                    self.join_connection_error_dialog_message = None;
                 }
             }
             DesktopMenuRouteShellAction::ConfirmDeleteJoinServerCard => {
@@ -35141,6 +35183,7 @@ impl DesktopLauncher {
                     self.join_info_dialog_open = false;
                     self.join_delete_dialog_index = None;
                     self.join_version_mismatch_dialog_message = None;
+                    self.join_connection_error_dialog_message = None;
                     return;
                 }
                 self.connect_target = Some(target.clone());
@@ -37260,6 +37303,64 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_join_connection_error_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(message) = self.join_connection_error_dialog_message.as_ref() else {
+            return;
+        };
+        let dialog = Self::join_connection_error_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.54],
+            Layer::END_PIXELED + 0.116,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.117,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.90, 0.28, 0.24, 0.98],
+            2.0,
+            Layer::END_PIXELED + 0.118,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@host.invalid"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 32.0),
+            [1.0, 0.80, 0.76, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_markup(true)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.119,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            message.clone(),
+            RenderPoint::new(dialog.x + 30.0, dialog.center().y + 18.0),
+            [0.92, 0.90, 0.88, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_wrap_width(dialog.width - 60.0)
+                .with_markup(true)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.120,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::join_add_dialog_button_rect(dialog, 1),
+            self.localize_bundle_markup_text("@ok"),
+            Some("ok"),
+            Layer::END_PIXELED + 0.121,
+        );
+    }
+
     fn push_join_connecting_loadfrag_overlay(
         &self,
         pass: &mut RenderPass,
@@ -38161,6 +38262,7 @@ impl DesktopLauncher {
                 self.push_join_server_disclaimer_dialog(pass, panel);
                 self.push_join_info_dialog(pass, panel);
                 self.push_join_version_mismatch_dialog(pass, panel);
+                self.push_join_connection_error_dialog(pass, panel);
                 self.push_join_connecting_loadfrag_overlay(pass, viewport);
                 return;
             }
@@ -38449,6 +38551,7 @@ impl DesktopLauncher {
         self.push_join_server_disclaimer_dialog(pass, panel);
         self.push_join_info_dialog(pass, panel);
         self.push_join_version_mismatch_dialog(pass, panel);
+        self.push_join_connection_error_dialog(pass, panel);
         self.push_join_connecting_loadfrag_overlay(pass, viewport);
     }
 
@@ -44165,6 +44268,32 @@ impl DesktopLauncher {
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
                         && self.active_menu_route == Some(DesktopMenuRoute::Join)
+                        && self.join_connection_error_dialog_message.is_some()
+                        && matches!(
+                            key_code.as_str(),
+                            "Enter" | "enter" | "NumpadEnter" | "Escape" | "Esc"
+                        ) =>
+                {
+                    self.dispatch_menu_route_shell_action(
+                        DesktopMenuRouteShellAction::CloseJoinConnectionError,
+                    );
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Join)
+                        && self.join_version_mismatch_dialog_message.is_some()
+                        && matches!(
+                            key_code.as_str(),
+                            "Enter" | "enter" | "NumpadEnter" | "Escape" | "Esc"
+                        ) =>
+                {
+                    self.dispatch_menu_route_shell_action(
+                        DesktopMenuRouteShellAction::CloseJoinVersionMismatch,
+                    );
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Join)
                         && self.join_info_dialog_open
                         && matches!(
                             key_code.as_str(),
@@ -44932,6 +45061,12 @@ impl DesktopLauncher {
                 if let Some(message) = self.join_version_mismatch_dialog_message.as_ref() {
                     lines.extend([
                         format!("dialog: @info.title @server.versions message={message}"),
+                        "button: @ok".into(),
+                    ]);
+                }
+                if let Some(message) = self.join_connection_error_dialog_message.as_ref() {
+                    lines.extend([
+                        format!("dialog: @host.invalid message={message}"),
                         "button: @ok".into(),
                     ]);
                 }
@@ -47977,6 +48112,7 @@ impl DesktopLauncher {
     pub fn connect_to_target(&mut self, target: DesktopConnectTarget) -> io::Result<()> {
         self.connect_target = Some(target.clone());
         self.join_version_mismatch_dialog_message = None;
+        self.join_connection_error_dialog_message = None;
         self.net_client
             .set_connect_config(Some(ClientConnectConfig::default()));
         self.net_client.begin_connecting();
@@ -47986,7 +48122,12 @@ impl DesktopLauncher {
         };
         match &result {
             Ok(()) => self.connect_error = None,
-            Err(error) => self.connect_error = Some(error.to_string()),
+            Err(error) => {
+                let message = error.to_string();
+                self.net_client.disconnect_quietly();
+                self.connect_error = Some(message.clone());
+                self.join_connection_error_dialog_message = Some(message);
+            }
         }
         result
     }
@@ -79282,6 +79423,87 @@ version: "2.0.0"
         );
         assert_eq!(launcher.join_version_mismatch_dialog_message, None);
         assert_eq!(launcher.connect_error, None);
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_connect_error_uses_java_like_error_modal() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
+        let target = super::DesktopConnectTarget {
+            host: "127.0.0.1".into(),
+            port: 0,
+        };
+
+        let result = launcher.connect_to_target(target.clone());
+
+        assert!(result.is_err());
+        assert_eq!(launcher.connect_target, Some(target));
+        let modal = launcher
+            .join_connection_error_dialog_message
+            .clone()
+            .expect("connect failure should open a Java showErrorMessage-style modal");
+        assert_eq!(launcher.connect_error, Some(modal.clone()));
+        assert!(launcher
+            .active_menu_route_shell_lines(super::DesktopMenuRoute::Join)
+            .iter()
+            .any(|line| line.starts_with("dialog: @host.invalid message=")));
+        {
+            let state = launcher.net_client.state();
+            let state = state.lock().unwrap();
+            assert!(
+                !state.connecting,
+                "failed immediate connect should hide the connecting loadfrag"
+            );
+        }
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Join,
+        );
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("join connect error frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@host.invalid")
+                .as_str()
+        ));
+        assert!(texts.contains(&modal.as_str()));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@ok").as_str()));
+
+        let dialog = DesktopLauncher::join_connection_error_dialog_rect_for_panel(panel);
+        let ok = DesktopLauncher::join_add_dialog_button_rect(dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, ok.x, ok.y),
+            Some(super::DesktopMenuRouteShellAction::CloseJoinConnectionError)
+        );
+        let add = DesktopLauncher::join_route_add_button_rect_for_panel(panel).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, add.x, add.y),
+            None
+        );
+        assert!(launcher.apply_menu_back_key());
+        assert_eq!(launcher.join_connection_error_dialog_message, None);
+        assert_eq!(launcher.connect_error, None);
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Join)
+        );
     }
 
     #[test]
