@@ -15,6 +15,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 674. 菜单文案接入 settings locale 简繁中 fallback
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **78.6%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是让首屏菜单按钮文案跟随 Rust settings locale，而不是永远停留在英文 plan label。
+- Java 对照依据：
+  - Java `MenuFragment` 使用 `@play`、`@database.button`、`@database` 等 bundle key；
+  - `bundle_zh_CN.properties` / `bundle_zh_TW.properties` 分别提供简体/繁体菜单文案；
+  - Java 由 `Core.bundle` 按当前语言环境解析 UI 文本。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 新增简中/繁中菜单 bundle 子表；
+    - 新增 `upstream_menu_bundle_entries_for_locale(...)` 与 `upstream_menu_bundle_value_for_locale(...)`，支持 `zh_CN/zh/zh_Hans`、`zh_TW/zh_HK` 与英文 fallback；
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLauncher::localize_menu_frame_plan(...)`；
+    - `menu_frame_for_render(...)` 与 `menu_graphics_frame_for_surface(...)` 都在生成 plan 后按 `settings_locale` 覆盖 `MenuButtonPlan.label`；
+    - 补简中、繁中与 unknown fallback 的菜单出帧测试。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_uses_settings_locale_bundle_for_menu_buttons --lib`
+  - `cargo test -p mindustry-desktop menu_locale --lib`
+  - `cargo test -p mindustry-desktop logo --lib`
+  - `cargo test -p mindustry-desktop chrome --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - 目前只接了主菜单相关 key 的简繁中表；完整 `bundle*.properties` 加载/解析还需继续迁移；
+  - route/dialog/settings 内大量 `@key` 仍需继续按 Java bundle 渲染；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 673. 菜单 Database 子项文案对齐上游 bundle
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

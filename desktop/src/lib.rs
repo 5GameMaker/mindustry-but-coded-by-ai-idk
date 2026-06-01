@@ -106,7 +106,8 @@ use mindustry_core::mindustry::ui::dialogs::{BaseDialog, DialogShellLayout};
 use mindustry_core::mindustry::ui::upstream_ui_skin_sprite_source_paths;
 use mindustry_core::mindustry::ui::{
     parse_upstream_icon_properties, upstream_check_box_style_skin, upstream_font_assets,
-    upstream_font_source_paths, upstream_image_button_style_skin, upstream_scroll_pane_style_skin,
+    upstream_font_source_paths, upstream_image_button_style_skin,
+    upstream_menu_bundle_value_for_locale, upstream_scroll_pane_style_skin,
     upstream_slider_style_skin, upstream_text_button_style_skin, upstream_text_field_style_skin,
     upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, Bar, BarDrawCommand, BarDrawPlan,
     BarLayout, BarTextDraw, UpstreamContentIcon, UpstreamFontRole, UpstreamUiIconGlyph,
@@ -18680,6 +18681,7 @@ impl DesktopLauncher {
 
     pub fn menu_frame_for_render(&mut self, input: MenuFrameInput) -> DesktopFrame {
         let mut plan = self.menu_renderer_state.render_plan(input);
+        self.localize_menu_frame_plan(&mut plan);
         plan.ui = plan
             .ui
             .with_hovered_role(self.last_menu_hovered_button)
@@ -18688,6 +18690,18 @@ impl DesktopLauncher {
         DesktopFrame {
             kind: DesktopFrameKind::Menu,
             payload: DesktopFramePayload::Menu(plan),
+        }
+    }
+
+    fn localize_menu_frame_plan(&self, plan: &mut MenuFramePlan) {
+        for button in &mut plan.ui.buttons {
+            if let Some(key) = button.role.bundle_key() {
+                if let Some(label) =
+                    upstream_menu_bundle_value_for_locale(&self.settings_locale, key)
+                {
+                    button.label = label.to_string();
+                }
+            }
         }
     }
 
@@ -41255,6 +41269,7 @@ impl DesktopLauncher {
     ) -> DesktopGraphicsFrame {
         let input = self.menu_frame_input_for_viewport(viewport);
         let mut plan = self.menu_renderer_state.render_plan(input);
+        self.localize_menu_frame_plan(&mut plan);
         plan.ui = plan
             .ui
             .with_hovered_role(self.last_menu_hovered_button)
@@ -63391,6 +63406,87 @@ version: "2.0.0"
             RenderRect::new(512.0, 650.0, 256.0, 64.0),
             "Java MenuFragment uses Core.atlas.find(\"logo\") width/height and logo.scale instead of a hard-coded logo size"
         );
+    }
+
+    #[test]
+    fn desktop_launcher_menu_uses_settings_locale_bundle_for_menu_buttons() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "zh_CN".into();
+        assert!(launcher
+            .menu_renderer_state
+            .select_desktop_root(MenuButtonRole::Database));
+
+        let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(texts.contains(&"数据库"));
+        assert!(texts.contains(&"核心数据库"));
+        assert!(texts.contains(&"蓝图"));
+        assert!(
+            !texts.contains(&"Core Database"),
+            "Java MenuFragment resolves @database through the active Core.bundle locale"
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_menu_locale_bundle_covers_tw_and_fallback_paths() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "zh_TW".into();
+        assert!(launcher
+            .menu_renderer_state
+            .select_desktop_root(MenuButtonRole::Database));
+
+        let frame =
+            launcher.menu_frame_for_render(MenuFrameInput::new(1280.0, 720.0, 4.0, 1.0 / 60.0));
+        let DesktopFramePayload::Menu(plan) = frame.payload else {
+            panic!("menu_frame_for_render should return menu payload");
+        };
+        let labels = plan
+            .ui
+            .buttons
+            .iter()
+            .map(|button| button.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"資料庫"));
+        assert!(labels.contains(&"核心資料庫"));
+        assert!(labels.contains(&"藍圖"));
+
+        let mut fallback_launcher = DesktopLauncher::new(Vec::new());
+        fallback_launcher.settings_locale = "unknown".into();
+        assert!(fallback_launcher
+            .menu_renderer_state
+            .select_desktop_root(MenuButtonRole::Database));
+        let frame = fallback_launcher.menu_frame_for_render(MenuFrameInput::new(
+            1280.0,
+            720.0,
+            4.0,
+            1.0 / 60.0,
+        ));
+        let DesktopFramePayload::Menu(plan) = frame.payload else {
+            panic!("menu_frame_for_render should return menu payload");
+        };
+        let labels = plan
+            .ui
+            .buttons
+            .iter()
+            .map(|button| button.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"Database"));
+        assert!(labels.contains(&"Core Database"));
+        assert!(labels.contains(&"Schematics"));
     }
 
     #[test]

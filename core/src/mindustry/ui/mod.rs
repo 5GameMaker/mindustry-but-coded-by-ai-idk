@@ -28,10 +28,76 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("quit", "Quit"),
 ];
 
+pub const UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES: &[(&str, &str)] = &[
+    ("play", "开始游戏"),
+    ("campaign", "战役模式"),
+    ("joingame", "加入游戏"),
+    ("customgame", "自定义游戏"),
+    ("loadgame", "载入游戏"),
+    ("database.button", "数据库"),
+    ("database", "核心数据库"),
+    ("schematics", "蓝图"),
+    ("techtree", "科技树"),
+    ("about.button", "关于"),
+    ("editor", "地图编辑器"),
+    ("workshop", "创意工坊"),
+    ("mods", "模组"),
+    ("settings", "设置"),
+    ("quit", "退出"),
+];
+
+pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
+    ("play", "開始遊戲"),
+    ("campaign", "戰役"),
+    ("joingame", "多人連線"),
+    ("customgame", "自訂遊戲"),
+    ("loadgame", "載入遊戲"),
+    ("database.button", "資料庫"),
+    ("database", "核心資料庫"),
+    ("schematics", "藍圖"),
+    ("techtree", "科技樹"),
+    ("about.button", "關於"),
+    ("editor", "地圖編輯器"),
+    ("workshop", "工作坊"),
+    ("mods", "模組"),
+    ("settings", "設定"),
+    ("quit", "退出"),
+];
+
 pub fn upstream_bundle_en_value(key: &str) -> Option<&'static str> {
     UPSTREAM_MENU_BUNDLE_ENTRIES
         .iter()
         .find_map(|(candidate, value)| (*candidate == key).then_some(*value))
+}
+
+fn upstream_bundle_value_from_entries(
+    entries: &'static [(&'static str, &'static str)],
+    key: &str,
+) -> Option<&'static str> {
+    entries
+        .iter()
+        .find_map(|(candidate, value)| (*candidate == key).then_some(*value))
+}
+
+pub fn upstream_menu_bundle_entries_for_locale(
+    locale: &str,
+) -> &'static [(&'static str, &'static str)] {
+    let locale = locale.trim().replace('-', "_");
+    if locale.eq_ignore_ascii_case("zh_TW") || locale.eq_ignore_ascii_case("zh_HK") {
+        UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES
+    } else if locale.eq_ignore_ascii_case("zh_CN")
+        || locale.eq_ignore_ascii_case("zh")
+        || locale.eq_ignore_ascii_case("zh_Hans")
+    {
+        UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES
+    } else {
+        UPSTREAM_MENU_BUNDLE_ENTRIES
+    }
+}
+
+pub fn upstream_menu_bundle_value_for_locale(locale: &str, key: &str) -> Option<&'static str> {
+    upstream_bundle_value_from_entries(upstream_menu_bundle_entries_for_locale(locale), key)
+        .or_else(|| upstream_bundle_en_value(key))
 }
 
 pub use bar::{
@@ -94,5 +160,29 @@ mod tests {
             assert_eq!(upstream_bundle_en_value(key), Some(expected));
         }
         assert_eq!(upstream_bundle_en_value("missing.menu.key"), None);
+    }
+
+    #[test]
+    fn upstream_menu_bundle_locale_entries_cover_chinese_menu_fragment_buttons() {
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "play"),
+            Some("开始游戏")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "database"),
+            Some("核心数据库")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh-TW", "joingame"),
+            Some("多人連線")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "settings"),
+            Some("設定")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("unknown", "database"),
+            Some("Core Database")
+        );
     }
 }
