@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 670. 菜单 chrome 桌面/移动分支改为平台标志驱动
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **78.2%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是避免桌面窗口被拉窄/竖屏时错误切到 mobile chrome，提升 `MenuFragment.build()` 分支还原度。
+- Java 对照依据：
+  - `MenuFragment.build(...)` 使用平台级 `if(!mobile) buildDesktop(); else buildMobile();`；
+  - Java 不会仅因桌面窗口 viewport 变窄就切换到 mobile terminal/info/gutter chrome。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuChromeLayoutOptions` 增加可选 `mobile` 标志；
+    - runtime 当前菜单 chrome 使用 `self.menu_renderer_state.config.mobile` 显式决定桌面/移动分支；
+    - 保留测试 helper 的 viewport 推断 fallback，便于历史几何测试继续构造 mobile layout；
+    - Join route info 按钮可见性也改用当前 launcher 的 chrome options；
+    - 补窄桌面 viewport 仍保持 desktop chrome 的回归测试，并给 mobile chrome 相关测试显式设置 mobile config。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_narrow_desktop_viewport_keeps_desktop_chrome_like_java_platform_branch --lib`
+  - `cargo test -p mindustry-desktop menu_chrome --lib`
+  - `cargo test -p mindustry-desktop mobile_gutters --lib`
+  - `cargo test -p mindustry-desktop about_menu_route --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - mobile 真机/平台入口仍需继续接入完整平台配置；首屏 logo/chrome 像素级偏差仍需继续校准；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 669. Native OpenGL shader 资产缺失时保持可见 fallback
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

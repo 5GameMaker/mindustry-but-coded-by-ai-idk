@@ -3113,6 +3113,7 @@ impl DesktopLoadGamePendingLoad {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct DesktopMenuChromeLayoutOptions {
+    mobile: Option<bool>,
     console_shown: bool,
     console_setting_enabled: bool,
     becheck_active: bool,
@@ -3127,6 +3128,7 @@ struct DesktopMenuChromeLayoutOptions {
 impl Default for DesktopMenuChromeLayoutOptions {
     fn default() -> Self {
         Self {
+            mobile: None,
             console_shown: false,
             console_setting_enabled: true,
             becheck_active: true,
@@ -3168,7 +3170,8 @@ impl DesktopMenuChromeLayout {
     ) -> Self {
         let width = viewport.width.max(1.0);
         let height = viewport.height.max(1.0);
-        let is_mobile = width <= 720.0 || height > width * 1.2;
+        let inferred_mobile = width <= 720.0 || height > width * 1.2;
+        let is_mobile = options.mobile.unwrap_or(inferred_mobile);
         let right_margin = 10.0;
         let bottom_margin = 9.0;
 
@@ -20766,6 +20769,7 @@ impl DesktopLauncher {
 
     fn current_menu_chrome_options(&self) -> DesktopMenuChromeLayoutOptions {
         DesktopMenuChromeLayoutOptions {
+            mobile: Some(self.menu_renderer_state.config.mobile),
             console_shown: self.menu_mobile_terminal_open,
             console_setting_enabled: self.menu_console_setting_enabled,
             becheck_active: self.menu_becheck_active,
@@ -27211,7 +27215,7 @@ impl DesktopLauncher {
         self.join_route_info_button_available_for_platform()
             && !DesktopMenuChromeLayout::for_viewport_with_state(
                 viewport,
-                DesktopMenuChromeLayoutOptions::default(),
+                self.current_menu_chrome_options(),
             )
             .is_mobile
     }
@@ -63737,6 +63741,7 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_menu_renders_mobile_terminal_info_and_gutter_chrome() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_renderer_state.config.mobile = true;
 
         let viewport = RenderViewport::new(0.0, 0.0, 540.0, 960.0);
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
@@ -63820,8 +63825,49 @@ version: "2.0.0"
     }
 
     #[test]
+    fn desktop_launcher_narrow_desktop_viewport_keeps_desktop_chrome_like_java_platform_branch() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_becheck_active = true;
+
+        let viewport = RenderViewport::new(0.0, 0.0, 540.0, 960.0);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "@be.check"
+            )),
+            "Java MenuFragment chooses desktop/mobile chrome from the platform mobile flag, not viewport shape"
+        );
+        assert!(!commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. }
+                    if text == &super::desktop_ui_icon_glyph_or_label("terminal", "terminal")
+            )
+        }));
+        assert!(!commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, .. }
+                    if symbol == "pane-right.9" || symbol == "pane-left.9" || symbol == "pane-top.9"
+            )
+        }));
+    }
+
+    #[test]
     fn desktop_launcher_mobile_gutters_follow_scene_margins_like_java() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_renderer_state.config.mobile = true;
         launcher.menu_scene_margin_left = 0.0;
         launcher.menu_scene_margin_right = 0.0;
         launcher.menu_scene_margin_bottom = 0.0;
@@ -63877,6 +63923,7 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_menu_chrome_visibility_matches_console_and_becontrol_gates() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_renderer_state.config.mobile = true;
         let mobile_surface = DesktopSurfaceSize::new(540, 960);
         let mobile_viewport = launcher.default_render_viewport_for_surface(mobile_surface);
         let mobile_chrome = DesktopLauncher::menu_chrome_layout_for_viewport(mobile_viewport);
@@ -63978,6 +64025,7 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_menu_chrome_hit_test_and_actions_share_layout() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_renderer_state.config.mobile = true;
         let surface = DesktopSurfaceSize::new(540, 960);
         let viewport = launcher.default_render_viewport_for_surface(surface);
         let chrome = DesktopLauncher::menu_chrome_layout_for_viewport(viewport);
@@ -64074,6 +64122,7 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_menu_chrome_hover_and_pressed_emit_button_feedback() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_renderer_state.config.mobile = true;
         let surface = DesktopSurfaceSize::new(540, 960);
         let viewport = launcher.default_render_viewport_for_surface(surface);
         let chrome = DesktopLauncher::menu_chrome_layout_for_viewport(viewport);
@@ -64136,6 +64185,7 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_mobile_terminal_toggle_renders_consolefrag_shell() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_renderer_state.config.mobile = true;
         let surface = DesktopSurfaceSize::new(540, 960);
         let viewport = launcher.default_render_viewport_for_surface(surface);
         let chrome = DesktopLauncher::menu_chrome_layout_for_viewport(viewport);
@@ -64188,6 +64238,7 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_about_menu_route_renders_upstream_credits_links_and_contributors() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_renderer_state.config.mobile = true;
         let surface = DesktopSurfaceSize::new(540, 960);
         let viewport = launcher.default_render_viewport_for_surface(surface);
         let chrome = DesktopLauncher::menu_chrome_layout_for_viewport(viewport);
@@ -64483,6 +64534,7 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_menu_chrome_records_discord_and_becheck_actions() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_becheck_active = true;
         let surface = DesktopSurfaceSize::new(1280, 720);
         let viewport = launcher.default_render_viewport_for_surface(surface);
         let chrome = DesktopLauncher::menu_chrome_layout_for_viewport(viewport);
@@ -64602,6 +64654,10 @@ version: "2.0.0"
         assert_eq!(
             launcher.last_discord_clipboard_text.as_deref(),
             Some("https://discord.gg/mindustry")
+        );
+        assert!(
+            launcher.apply_menu_back_key(),
+            "close DiscordDialog shell before testing the independent becheck chrome button"
         );
 
         let becheck_center = chrome
@@ -69368,6 +69424,7 @@ version: "2.0.0"
         assert!(!steam_texts.contains(&"?"));
 
         let mut mobile_launcher = DesktopLauncher::new(Vec::new());
+        mobile_launcher.menu_renderer_state.config.mobile = true;
         mobile_launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
         let mobile_surface = DesktopSurfaceSize::new(540, 960);
         let mobile_viewport = mobile_launcher.default_render_viewport_for_surface(mobile_surface);
