@@ -970,15 +970,19 @@ pub enum DesktopTeamRuleToggle {
     ProtectCores,
     CheckPlacement,
     InfiniteResources,
+    FillItems,
     RtsAi,
+    BuildAi,
 }
 
 impl DesktopTeamRuleToggle {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 6] = [
         Self::ProtectCores,
         Self::CheckPlacement,
         Self::InfiniteResources,
+        Self::FillItems,
         Self::RtsAi,
+        Self::BuildAi,
     ];
 
     fn label_key(self) -> &'static str {
@@ -986,7 +990,9 @@ impl DesktopTeamRuleToggle {
             Self::ProtectCores => "@rules.protectcores",
             Self::CheckPlacement => "@rules.checkplacement",
             Self::InfiniteResources => "@rules.infiniteresources",
+            Self::FillItems => "@rules.fillitems",
             Self::RtsAi => "@rules.rtsai",
+            Self::BuildAi => "@rules.buildai",
         }
     }
 
@@ -995,7 +1001,9 @@ impl DesktopTeamRuleToggle {
             Self::ProtectCores => rule.protect_cores,
             Self::CheckPlacement => rule.check_placement,
             Self::InfiniteResources => rule.infinite_resources,
+            Self::FillItems => rule.fill_items,
             Self::RtsAi => rule.rts_ai,
+            Self::BuildAi => rule.build_ai,
         }
     }
 
@@ -1004,7 +1012,9 @@ impl DesktopTeamRuleToggle {
             Self::ProtectCores => rule.protect_cores = !rule.protect_cores,
             Self::CheckPlacement => rule.check_placement = !rule.check_placement,
             Self::InfiniteResources => rule.infinite_resources = !rule.infinite_resources,
+            Self::FillItems => rule.fill_items = !rule.fill_items,
             Self::RtsAi => rule.rts_ai = !rule.rts_ai,
+            Self::BuildAi => rule.build_ai = !rule.build_ai,
         }
     }
 }
@@ -1012,37 +1022,138 @@ impl DesktopTeamRuleToggle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopTeamRuleNumber {
     BlockHealthMultiplier,
+    BlockDamageMultiplier,
+    BuildSpeedMultiplier,
     UnitDamageMultiplier,
+    UnitCrashDamageMultiplier,
+    UnitMineSpeedMultiplier,
+    UnitBuildSpeedMultiplier,
+    UnitCostMultiplier,
+    UnitHealthMultiplier,
+    RtsMinSquad,
+    RtsMaxSquad,
+    RtsMinWeight,
+    BuildAiTier,
+    UnitFactoryActivationDelay,
+    ExtraCoreBuildRadius,
 }
 
 impl DesktopTeamRuleNumber {
-    const ALL: [Self; 2] = [Self::BlockHealthMultiplier, Self::UnitDamageMultiplier];
+    const ALL: [Self; 15] = [
+        Self::BlockHealthMultiplier,
+        Self::BlockDamageMultiplier,
+        Self::BuildSpeedMultiplier,
+        Self::UnitDamageMultiplier,
+        Self::UnitCrashDamageMultiplier,
+        Self::UnitMineSpeedMultiplier,
+        Self::UnitBuildSpeedMultiplier,
+        Self::UnitCostMultiplier,
+        Self::UnitHealthMultiplier,
+        Self::RtsMinSquad,
+        Self::RtsMaxSquad,
+        Self::RtsMinWeight,
+        Self::BuildAiTier,
+        Self::UnitFactoryActivationDelay,
+        Self::ExtraCoreBuildRadius,
+    ];
 
     fn label_key(self) -> &'static str {
         match self {
             Self::BlockHealthMultiplier => "@rules.blockhealthmultiplier",
+            Self::BlockDamageMultiplier => "@rules.blockdamagemultiplier",
+            Self::BuildSpeedMultiplier => "@rules.buildspeedmultiplier",
             Self::UnitDamageMultiplier => "@rules.unitdamagemultiplier",
+            Self::UnitCrashDamageMultiplier => "@rules.unitcrashdamagemultiplier",
+            Self::UnitMineSpeedMultiplier => "@rules.unitminespeedmultiplier",
+            Self::UnitBuildSpeedMultiplier => "@rules.unitbuildspeedmultiplier",
+            Self::UnitCostMultiplier => "@rules.unitcostmultiplier",
+            Self::UnitHealthMultiplier => "@rules.unithealthmultiplier",
+            Self::RtsMinSquad => "@rules.rtsminsquadsize",
+            Self::RtsMaxSquad => "@rules.rtsmaxsquadsize",
+            Self::RtsMinWeight => "@rules.rtsminattackweight",
+            Self::BuildAiTier => "@rules.buildaitier",
+            Self::UnitFactoryActivationDelay => "@rules.unitfactoryactivation",
+            Self::ExtraCoreBuildRadius => "@rules.extracorebuildradius",
         }
     }
 
     fn value_text(self, rule: &TeamRule) -> String {
-        let value = match self {
-            Self::BlockHealthMultiplier => rule.block_health_multiplier,
-            Self::UnitDamageMultiplier => rule.unit_damage_multiplier,
-        };
-        format_custom_rules_number(value)
+        match self {
+            Self::RtsMinSquad => rule.rts_min_squad.to_string(),
+            Self::RtsMaxSquad => rule.rts_max_squad.to_string(),
+            _ => {
+                let value = match self {
+                    Self::BlockHealthMultiplier => rule.block_health_multiplier,
+                    Self::BlockDamageMultiplier => rule.block_damage_multiplier,
+                    Self::BuildSpeedMultiplier => rule.build_speed_multiplier,
+                    Self::UnitDamageMultiplier => rule.unit_damage_multiplier,
+                    Self::UnitCrashDamageMultiplier => rule.unit_crash_damage_multiplier,
+                    Self::UnitMineSpeedMultiplier => rule.unit_mine_speed_multiplier,
+                    Self::UnitBuildSpeedMultiplier => rule.unit_build_speed_multiplier,
+                    Self::UnitCostMultiplier => rule.unit_cost_multiplier,
+                    Self::UnitHealthMultiplier => rule.unit_health_multiplier,
+                    Self::RtsMinWeight => rule.rts_min_weight,
+                    Self::BuildAiTier => rule.build_ai_tier,
+                    Self::UnitFactoryActivationDelay => rule.unit_factory_activation_delay / 60.0,
+                    Self::ExtraCoreBuildRadius => rule.extra_core_build_radius / TILE_SIZE as f32,
+                    Self::RtsMinSquad | Self::RtsMaxSquad => unreachable!(),
+                };
+                format_custom_rules_number(value)
+            }
+        }
     }
 
     fn adjust(self, rule: &mut TeamRule, direction: i32) {
-        let delta = direction.signum() as f32 * 0.1;
-        if delta == 0.0 {
+        let direction = direction.signum();
+        if direction == 0 {
             return;
         }
-        let value = match self {
-            Self::BlockHealthMultiplier => &mut rule.block_health_multiplier,
-            Self::UnitDamageMultiplier => &mut rule.unit_damage_multiplier,
-        };
-        *value = (*value + delta).max(0.001);
+        match self {
+            Self::RtsMinSquad => {
+                rule.rts_min_squad = (rule.rts_min_squad + direction).clamp(0, 100);
+                if rule.rts_max_squad < rule.rts_min_squad {
+                    rule.rts_max_squad = rule.rts_min_squad;
+                }
+            }
+            Self::RtsMaxSquad => {
+                rule.rts_max_squad = (rule.rts_max_squad + direction).clamp(1, 1000);
+                if rule.rts_min_squad > rule.rts_max_squad {
+                    rule.rts_min_squad = rule.rts_max_squad;
+                }
+            }
+            Self::BuildAiTier => {
+                rule.build_ai_tier = (rule.build_ai_tier + direction as f32 * 0.1).clamp(0.0, 1.0);
+            }
+            Self::UnitFactoryActivationDelay => {
+                rule.unit_factory_activation_delay =
+                    (rule.unit_factory_activation_delay / 60.0 + direction as f32).max(0.0) * 60.0;
+            }
+            Self::ExtraCoreBuildRadius => {
+                rule.extra_core_build_radius =
+                    (rule.extra_core_build_radius / TILE_SIZE as f32 + direction as f32).max(0.0)
+                        * TILE_SIZE as f32;
+            }
+            _ => {
+                let value = match self {
+                    Self::BlockHealthMultiplier => &mut rule.block_health_multiplier,
+                    Self::BlockDamageMultiplier => &mut rule.block_damage_multiplier,
+                    Self::BuildSpeedMultiplier => &mut rule.build_speed_multiplier,
+                    Self::UnitDamageMultiplier => &mut rule.unit_damage_multiplier,
+                    Self::UnitCrashDamageMultiplier => &mut rule.unit_crash_damage_multiplier,
+                    Self::UnitMineSpeedMultiplier => &mut rule.unit_mine_speed_multiplier,
+                    Self::UnitBuildSpeedMultiplier => &mut rule.unit_build_speed_multiplier,
+                    Self::UnitCostMultiplier => &mut rule.unit_cost_multiplier,
+                    Self::UnitHealthMultiplier => &mut rule.unit_health_multiplier,
+                    Self::RtsMinWeight => &mut rule.rts_min_weight,
+                    Self::RtsMinSquad
+                    | Self::RtsMaxSquad
+                    | Self::BuildAiTier
+                    | Self::UnitFactoryActivationDelay
+                    | Self::ExtraCoreBuildRadius => unreachable!(),
+                };
+                *value = (*value + direction as f32 * 0.1).max(0.001);
+            }
+        }
     }
 }
 
@@ -30811,23 +30922,27 @@ impl DesktopLauncher {
     }
 
     fn map_play_team_rules_field_rect(dialog: RenderRect, field_index: usize) -> RenderRect {
+        let gap = 12.0;
+        let width = ((dialog.width - 244.0 - gap) * 0.5).max(150.0);
+        let col = field_index % 2;
+        let row = field_index / 2;
         RenderRect::new(
-            dialog.x + 220.0,
-            dialog.y + dialog.height - 174.0 - field_index as f32 * 36.0,
-            dialog.width - 244.0,
-            30.0,
+            dialog.x + 220.0 + col as f32 * (width + gap),
+            dialog.y + dialog.height - 158.0 - row as f32 * 30.0,
+            width,
+            26.0,
         )
     }
 
     fn map_play_team_rules_field_toggle_rect(row: RenderRect) -> RenderRect {
-        RenderRect::new(row.right() - 76.0, row.y + 3.0, 68.0, 24.0)
+        RenderRect::new(row.right() - 48.0, row.y + 2.0, 42.0, 22.0)
     }
 
     fn map_play_team_rules_number_button_rect(row: RenderRect, increase: bool) -> RenderRect {
         if increase {
-            RenderRect::new(row.right() - 28.0, row.y + 3.0, 24.0, 24.0)
+            RenderRect::new(row.right() - 24.0, row.y + 2.0, 22.0, 22.0)
         } else {
-            RenderRect::new(row.right() - 112.0, row.y + 3.0, 24.0, 24.0)
+            RenderRect::new(row.right() - 88.0, row.y + 2.0, 22.0, 22.0)
         }
     }
 

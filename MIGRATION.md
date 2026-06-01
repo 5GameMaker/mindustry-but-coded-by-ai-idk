@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 718. CustomRulesDialog 队伍规则字段扩展
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **84.9%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - 原版 `CustomRulesDialog` 的 team 折叠项不止 `protectCores`，还包含 `fillItems/buildAi/rtsAi`、block/unit multiplier、RTS squad、factory delay、extra core radius 等字段；
+  - 这些字段在 Rust `TeamRule` 和 JSON 往返中已有数据能力，应继续接入前端而不是保持隐藏。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - team rules 子弹窗字段布局改为双列，避免字段扩展后溢出；
+    - toggle 覆盖扩展到 `Fill Core With Items` 与 `Base Builder AI`；
+    - number 覆盖扩展到 block damage/build speed、unit damage/crash/mine/build/cost/health、RTS min/max squad、RTS min weight、builder AI tier、unit factory activation delay、extra core build radius；
+    - 调整数值时按字段语义 clamp，并保持 RTS min/max squad 顺序；
+    - 现有 team rules 回归继续覆盖入口、选择 team、toggle 与 number 调整、copy/load 往返。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore -- --nocapture`
+  - `git diff --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 仍未完全复刻 Java 的滚动表格、tooltip/rule info 和文本输入；
+  - `allowEditRules` 与部分全局规则仍需补进前端；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 717. CustomRulesDialog 队伍规则子弹窗最小闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
