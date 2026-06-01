@@ -274,6 +274,25 @@ fn desktop_fast_menu_enabled() -> bool {
         .unwrap_or(false)
 }
 
+fn render_command_is_screen_visible(command: &RenderCommand) -> bool {
+    matches!(
+        command,
+        RenderCommand::FillRect { .. }
+            | RenderCommand::StrokeRect { .. }
+            | RenderCommand::DrawSprite { .. }
+            | RenderCommand::DrawLine { .. }
+            | RenderCommand::DrawCircle { .. }
+            | RenderCommand::DrawPolygon { .. }
+            | RenderCommand::DrawTriangle { .. }
+            | RenderCommand::DrawPixel { .. }
+            | RenderCommand::DrawText { .. }
+    )
+}
+
+fn render_pass_has_screen_visible_commands(pass: &RenderPass) -> bool {
+    pass.commands.iter().any(render_command_is_screen_visible)
+}
+
 fn desktop_show_upstream_route_debug() -> bool {
     cfg!(test) || std::env::var_os("MINDUSTRY_DESKTOP_SHOW_UPSTREAM_ROUTE_DEBUG").is_some()
 }
@@ -3172,8 +3191,12 @@ impl DesktopMenuChromeLayout {
         let height = viewport.height.max(1.0);
         let inferred_mobile = width <= 720.0 || height > width * 1.2;
         let is_mobile = options.mobile.unwrap_or(inferred_mobile);
-        let right_margin = 10.0;
-        let bottom_margin = 9.0;
+        let discord_width = 84.0;
+        let discord_height = 45.0;
+        let terminal_size = 60.0;
+        let terminal_cell_pad = 4.0;
+        let info_width = 84.0;
+        let info_height = 45.0;
 
         let scene_margin_left = options.scene_margin_left.max(0.0);
         let scene_margin_right = options.scene_margin_right.max(0.0);
@@ -3191,37 +3214,35 @@ impl DesktopMenuChromeLayout {
         let bottom_gutter =
             (is_mobile && scene_margin_bottom > f32::EPSILON).then_some(RenderRect::new(
                 viewport.x + scene_margin_left,
-                viewport.y + height - scene_margin_bottom,
+                viewport.y,
                 (width - scene_margin_right - scene_margin_left).max(1.0),
                 scene_margin_bottom,
             ));
 
         let discord_rect = RenderRect::new(
-            viewport.x + width - right_margin - 84.0,
-            viewport.y + height - bottom_margin - 45.0,
-            84.0,
-            45.0,
+            viewport.x + width - discord_width,
+            viewport.y,
+            discord_width,
+            discord_height,
         );
         let terminal_rect = is_mobile.then_some(RenderRect::new(
-            viewport.x + 6.0,
-            viewport.y + height - bottom_margin - 60.0,
-            60.0,
-            60.0,
+            viewport.x + terminal_cell_pad,
+            viewport.y + info_height + terminal_cell_pad,
+            terminal_size,
+            terminal_size,
         ));
-        let info_rect = terminal_rect.map(|terminal_rect| {
-            RenderRect::new(
-                terminal_rect.x,
-                (terminal_rect.y - 49.0).max(viewport.y),
-                84.0,
-                45.0,
-            )
-        });
+        let info_rect = is_mobile.then_some(RenderRect::new(
+            viewport.x,
+            viewport.y,
+            info_width,
+            info_height,
+        ));
         let becheck_rect = if is_mobile {
             None
         } else {
             Some(RenderRect::new(
-                viewport.x + width - right_margin - 200.0,
-                discord_rect.y - 8.0 - 60.0,
+                viewport.x + width - 200.0,
+                viewport.y,
                 200.0,
                 60.0,
             ))
@@ -40904,6 +40925,10 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.013,
         ));
+        debug_assert!(
+            render_pass_has_screen_visible_commands(pass),
+            "menu empty-plan fallback should emit visible commands"
+        );
     }
 
     fn world_empty_frame_fallback_render_pass(viewport: RenderViewport) -> RenderPass {
@@ -41242,6 +41267,10 @@ impl DesktopLauncher {
         self.push_menu_logo_and_version_chrome(&mut menu_pass, frame_viewport);
         self.tick_save_game_pending_save();
         self.tick_load_game_pending_load();
+        debug_assert!(
+            render_pass_has_screen_visible_commands(&menu_pass),
+            "menu graphics frame should keep at least one screen-visible command"
+        );
         let camera = menu_pass
             .camera
             .unwrap_or_else(|| self.default_render_camera_for_viewport(frame_viewport));
@@ -63634,8 +63663,8 @@ version: "2.0.0"
             .flat_map(|pass| pass.commands.iter())
             .collect::<Vec<_>>();
 
-        let discord_rect = RenderRect::new(1186.0, 666.0, 84.0, 45.0);
-        let becheck_rect = RenderRect::new(1070.0, 598.0, 200.0, 60.0);
+        let discord_rect = RenderRect::new(1196.0, 0.0, 84.0, 45.0);
+        let becheck_rect = RenderRect::new(1080.0, 0.0, 200.0, 60.0);
         assert!(!commands.iter().any(|command| {
             matches!(
                 command,
@@ -63757,10 +63786,10 @@ version: "2.0.0"
 
         let left_gutter = RenderRect::new(0.0, 0.0, 14.0, 960.0);
         let right_gutter = RenderRect::new(526.0, 0.0, 14.0, 960.0);
-        let bottom_gutter = RenderRect::new(14.0, 948.0, 512.0, 12.0);
-        let terminal_rect = RenderRect::new(6.0, 891.0, 60.0, 60.0);
-        let info_rect = RenderRect::new(6.0, 842.0, 84.0, 45.0);
-        let discord_rect = RenderRect::new(446.0, 906.0, 84.0, 45.0);
+        let bottom_gutter = RenderRect::new(14.0, 0.0, 512.0, 12.0);
+        let terminal_rect = RenderRect::new(4.0, 49.0, 60.0, 60.0);
+        let info_rect = RenderRect::new(0.0, 0.0, 84.0, 45.0);
+        let discord_rect = RenderRect::new(456.0, 0.0, 84.0, 45.0);
 
         for (symbol, rect) in [
             ("pane-right.9", left_gutter),
@@ -63908,7 +63937,7 @@ version: "2.0.0"
         for (symbol, rect) in [
             ("pane-right.9", RenderRect::new(0.0, 0.0, 20.0, 960.0)),
             ("pane-left.9", RenderRect::new(530.0, 0.0, 10.0, 960.0)),
-            ("pane-top.9", RenderRect::new(20.0, 942.0, 510.0, 18.0)),
+            ("pane-top.9", RenderRect::new(20.0, 0.0, 510.0, 18.0)),
         ] {
             assert!(commands.iter().any(|command| {
                 matches!(
@@ -70573,10 +70602,6 @@ version: "2.0.0"
         assert!(graphics_renderer.last_trace.render_passes[0]
             .commands
             .iter()
-            .all(|command| !matches!(command, RenderCommand::Custom { .. })));
-        assert!(graphics_renderer.last_trace.render_passes[0]
-            .commands
-            .iter()
             .any(|command| matches!(command, RenderCommand::DrawSprite { .. })));
         assert!(graphics_renderer.last_trace.render_passes[0]
             .commands
@@ -71428,6 +71453,57 @@ version: "2.0.0"
                 panic!("menu frame must not use load payload");
             }
         }
+    }
+
+    #[test]
+    fn desktop_launcher_menu_graphics_frame_for_surface_keeps_screen_visible_commands() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let render_frame = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu graphics frame should contain render frame");
+
+        assert_eq!(render_frame.passes.len(), 1);
+        let menu_pass = &render_frame.passes[0];
+        assert!(super::render_pass_has_screen_visible_commands(menu_pass));
+        assert!(menu_pass
+            .commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::Clear { .. })));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_empty_plan_fallback_emits_screen_visible_commands() {
+        let launcher = DesktopLauncher::new(Vec::new());
+        let viewport = RenderViewport::new(0.0, 0.0, 640.0, 360.0);
+        let camera = launcher.default_render_camera_for_viewport(viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Custom("menu".to_string()))
+            .with_viewport(viewport)
+            .with_camera(camera);
+
+        launcher.push_menu_empty_plan_fallback(&mut pass, viewport);
+
+        assert!(super::render_pass_has_screen_visible_commands(&pass));
+        assert!(pass
+            .commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::FillRect { .. })));
+        assert!(pass
+            .commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::StrokeRect { .. })));
+        assert!(pass.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, .. } if text == "menu render plan empty"
+        )));
+        assert!(pass.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, .. } if text == "check MINDUSTRY_ASSET_ROOT and stderr trace"
+        )));
     }
 
     #[test]

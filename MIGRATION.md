@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 671. 菜单 chrome 底部锚定与首帧可见性回归
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **78.3%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是把首屏 chrome 的底部锚定行为拉回 Java `MenuFragment.build()`，并确保菜单帧不会退化为只剩 `Clear` 的黑屏帧。
+- Java 对照依据：
+  - Discord 使用 `parent.fill(c -> c.bottom().right().button(...).marginTop(9f).marginLeft(10f).size(84, 45))`，视觉锚点在屏幕底部右侧；
+  - mobile terminal/info 使用 `c.bottom().left()`，terminal/info 贴屏幕底部左侧排布；
+  - mobile gutter 的 `Tex.paneTop.draw(..., 0, ..., Core.scene.marginBottom)` 是底部安全区，不是顶部条；
+  - desktop `becheck` 也来自 `c.bottom().right().button(...).size(200, 60)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuChromeLayout::for_viewport_with_state(...)` 将 Discord、mobile terminal/info、mobile bottom gutter、desktop becheck 从上沿推导改为 Java 式底部锚定；
+    - 调整 chrome 相关回归测试中的精确 rect，锁定 bottom-left/bottom-right 布局；
+    - 集成菜单帧可见性 helper 与 debug 断言：`render_command_is_screen_visible(...)`、`render_pass_has_screen_visible_commands(...)`，空菜单 fallback 与正常菜单帧都必须包含非 `Clear` 可见命令。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop chrome --lib`
+  - `cargo test -p mindustry-desktop mobile_gutters --lib`
+  - `cargo test -p mindustry-desktop menu_graphics_frame --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_empty_plan_fallback_emits_screen_visible_commands --lib`
+- 仍未完成：
+  - UI 还原还要继续推进真实像素级 smoke、locale-aware 文案、完整 route/dialog 视觉细节与主菜单背景/资产路径稳定性；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 670. 菜单 chrome 桌面/移动分支改为平台标志驱动
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
