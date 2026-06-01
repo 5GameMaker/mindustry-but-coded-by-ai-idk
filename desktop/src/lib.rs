@@ -196,6 +196,7 @@ const LOAD_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const LOAD_SEARCH_TEXT_MAX_LENGTH: usize = 50;
 const LOAD_RENAME_TEXT_MAX_LENGTH: usize = 32;
 const SAVE_NEW_TEXT_MAX_LENGTH: usize = 30;
+const EDITOR_NEW_MAP_TEXT_MAX_LENGTH: usize = 32;
 const LOAD_GAME_LOADING_DELAY_FRAMES: u8 = 5;
 const SAVE_GAME_SAVING_DELAY_FRAMES: u8 = 5;
 const MAP_PLAY_HELP_LABEL_WIDTH: f32 = 400.0;
@@ -2885,6 +2886,9 @@ pub enum DesktopMenuRouteShellAction {
     CloseMapPlayHelp,
     CloseMapPlayCustomize,
     NewEditorMap,
+    FocusEditorNewMapName,
+    ConfirmEditorNewMap,
+    CancelEditorNewMap,
     ImportEditorMap,
     OpenTechTreeSelect,
     CloseTechTreeSelect,
@@ -17012,6 +17016,10 @@ pub struct DesktopLauncher {
     pub map_play_playtesting: bool,
     pub last_map_card_action: Option<DesktopMapCardAction>,
     pub editor_new_map_dialog_open: bool,
+    pub editor_new_map_name_text: String,
+    pub editor_new_map_name_focused: bool,
+    pub editor_new_map_error: Option<String>,
+    pub last_editor_new_map_name: Option<String>,
     pub editor_import_map_dialog_open: bool,
     pub tech_tree_selected_root: Option<String>,
     pub tech_tree_select_dialog_open: bool,
@@ -18158,6 +18166,10 @@ impl DesktopLauncher {
             map_play_playtesting: false,
             last_map_card_action: None,
             editor_new_map_dialog_open: false,
+            editor_new_map_name_text: String::new(),
+            editor_new_map_name_focused: false,
+            editor_new_map_error: None,
+            last_editor_new_map_name: None,
             editor_import_map_dialog_open: false,
             tech_tree_selected_root: None,
             tech_tree_select_dialog_open: false,
@@ -22279,6 +22291,8 @@ impl DesktopLauncher {
             self.map_list_filter_dialog_open = false;
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
+            self.clear_editor_new_map_dialog();
+            self.editor_import_map_dialog_open = false;
             self.load_game_search_focused = false;
             self.last_database_content_opened = None;
             self.load_game_pending_load = None;
@@ -22333,6 +22347,8 @@ impl DesktopLauncher {
             self.map_list_filter_dialog_open = false;
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
+            self.clear_editor_new_map_dialog();
+            self.editor_import_map_dialog_open = false;
             self.load_game_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
@@ -22361,6 +22377,8 @@ impl DesktopLauncher {
                 self.tech_tree_selected_node = None;
                 self.map_list_planet_filter_dialog_open = false;
                 self.map_list_search_focused = false;
+                self.clear_editor_new_map_dialog();
+                self.editor_import_map_dialog_open = false;
                 self.load_game_search_focused = false;
                 self.map_play_dialog_index = None;
                 self.editor_map_info_dialog_index = None;
@@ -22402,6 +22420,8 @@ impl DesktopLauncher {
             self.map_list_filter_dialog_open = false;
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
+            self.clear_editor_new_map_dialog();
+            self.editor_import_map_dialog_open = false;
             self.load_game_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
@@ -22422,6 +22442,8 @@ impl DesktopLauncher {
             self.map_list_filter_dialog_open = false;
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
+            self.clear_editor_new_map_dialog();
+            self.editor_import_map_dialog_open = false;
             self.database_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
@@ -22510,6 +22532,8 @@ impl DesktopLauncher {
             self.mods_browser_sort_date = false;
             self.tech_tree_selected_node = None;
             self.map_list_search_focused = false;
+            self.clear_editor_new_map_dialog();
+            self.editor_import_map_dialog_open = false;
             self.load_game_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
@@ -29211,6 +29235,38 @@ impl DesktopLauncher {
         )
     }
 
+    fn editor_new_map_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width - 96.0).clamp(430.0, 560.0);
+        let height = 202.0;
+        RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn editor_new_map_name_field_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 132.0,
+            dialog.center().y - 13.0,
+            dialog.width - 166.0,
+            50.0,
+        )
+    }
+
+    fn editor_new_map_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let width = 120.0;
+        let gap = 8.0;
+        let total = width * 2.0 + gap;
+        RenderRect::new(
+            dialog.center().x - total * 0.5 + index as f32 * (width + gap),
+            dialog.y + 18.0,
+            width,
+            54.0,
+        )
+    }
+
     fn map_list_card_columns_for_pane(pane: RenderRect) -> usize {
         ((pane.width + MAP_LIST_CARD_GAP) / (MAP_LIST_CARD_WIDTH + MAP_LIST_CARD_GAP))
             .floor()
@@ -29732,6 +29788,7 @@ impl DesktopLauncher {
         if self.map_list_filter_dialog_open
             || self.map_play_dialog_index.is_some()
             || self.editor_map_info_dialog_index.is_some()
+            || self.editor_new_map_dialog_open
         {
             return false;
         }
@@ -29968,6 +30025,95 @@ impl DesktopLauncher {
         self.merge_map_preview_textures(&cards);
         self.map_list_cards = cards;
         self.map_list_cards.len()
+    }
+
+    fn editor_new_map_name_conflicts(&self, name: &str) -> bool {
+        self.map_list_cards.iter().any(|map| map.name() == name)
+    }
+
+    fn editor_new_map_file_slug(name: &str) -> String {
+        let mut slug = String::new();
+        for ch in name.chars() {
+            if ch.is_ascii_alphanumeric() {
+                slug.push(ch.to_ascii_lowercase());
+            } else if !slug.ends_with('-') {
+                slug.push('-');
+            }
+        }
+        let slug = slug.trim_matches('-');
+        if slug.is_empty() {
+            "new-map".to_string()
+        } else {
+            slug.to_string()
+        }
+    }
+
+    fn editor_new_map_descriptor(name: &str) -> MapDescriptor {
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), name.to_string());
+        MapDescriptor::new(
+            format!("maps/custom/{}.msav", Self::editor_new_map_file_slug(name)),
+            128,
+            128,
+            tags,
+            true,
+            1,
+            DEFAULT_CLIENT_VERSION,
+        )
+    }
+
+    fn clear_editor_new_map_dialog(&mut self) {
+        self.editor_new_map_dialog_open = false;
+        self.editor_new_map_name_text.clear();
+        self.editor_new_map_name_focused = false;
+        self.editor_new_map_error = None;
+    }
+
+    fn commit_editor_new_map(&mut self) -> bool {
+        if !self.editor_new_map_dialog_open {
+            return false;
+        }
+        let name = self.editor_new_map_name_text.clone();
+        if name.is_empty() {
+            self.editor_new_map_error = Some("@editor.mapname".to_string());
+            return false;
+        }
+        if self.editor_new_map_name_conflicts(&name) {
+            self.editor_new_map_error = Some("@editor.exists".to_string());
+            return false;
+        }
+
+        let map = Self::editor_new_map_descriptor(&name);
+        self.map_list_cards.push(map.clone());
+        self.map_list_cards.sort_by_key(|map| map.plain_name());
+        if self.map_list_search.trim().is_empty()
+            || self.map_list_filter_matches_query(&map, &self.map_list_search)
+        {
+            self.map_list_scroll_offset = 0;
+        }
+        self.last_editor_new_map_name = Some(name.clone());
+        self.last_map_card_action = Some(DesktopMapCardAction::new(
+            self.map_list_cards
+                .iter()
+                .position(|candidate| candidate.name() == name)
+                .unwrap_or(0),
+            DesktopMapCardActionKind::OpenInEditor,
+        ));
+        self.game_state.map = map.clone();
+        self.game_state.rules.editor = true;
+        self.runtime.state.map = map;
+        self.runtime.state.rules.editor = true;
+        let map_make_plan = self.client.service.state().map_make_plan();
+        let summary = map_make_plan.apply_to(
+            &mut self.client.service,
+            &mut self.client.achievement_state,
+            AchievementContext::normal(),
+        );
+        self.last_service_trigger_apply_summary = Some(summary);
+        self.clear_editor_new_map_dialog();
+        self.map_list_search_focused = false;
+        self.last_menu_info_message = Some(format!("MapMakeEvent: {name}"));
+        true
     }
 
     fn map_preview_dir(&self) -> PathBuf {
@@ -31031,6 +31177,21 @@ impl DesktopLauncher {
         }
         let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
         let point = RenderPoint::new(x, y);
+        if route == DesktopMenuRoute::Editor && self.editor_new_map_dialog_open {
+            let dialog = Self::editor_new_map_dialog_rect_for_panel(panel);
+            if Self::editor_new_map_name_field_rect(dialog).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::FocusEditorNewMapName);
+            }
+            if Self::editor_new_map_button_rect(dialog, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CancelEditorNewMap);
+            }
+            if !self.editor_new_map_name_text.is_empty()
+                && Self::editor_new_map_button_rect(dialog, 1).contains_point(point)
+            {
+                return Some(DesktopMenuRouteShellAction::ConfirmEditorNewMap);
+            }
+            return None;
+        }
         if self.map_list_planet_filter_dialog_open {
             let dialog = Self::map_list_planet_filter_dialog_rect_for_panel(panel);
             if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
@@ -32136,6 +32297,8 @@ impl DesktopLauncher {
                 self.map_list_planet_filter_dialog_open = false;
                 self.map_play_dialog_index = None;
                 self.editor_map_info_dialog_index = None;
+                self.clear_editor_new_map_dialog();
+                self.editor_import_map_dialog_open = false;
                 self.load_game_search_focused = false;
                 self.load_game_rename_dialog_slot = None;
                 self.load_game_pending_load = None;
@@ -32803,8 +32966,29 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::NewEditorMap => {
                 self.editor_new_map_dialog_open = true;
+                self.editor_new_map_name_text.clear();
+                self.editor_new_map_name_focused = true;
+                self.editor_new_map_error = None;
+                self.map_list_search_focused = false;
+                self.map_list_filter_dialog_open = false;
+                self.map_list_planet_filter_dialog_open = false;
+                self.map_play_dialog_index = None;
+                self.editor_map_info_dialog_index = None;
+            }
+            DesktopMenuRouteShellAction::FocusEditorNewMapName => {
+                if self.editor_new_map_dialog_open {
+                    self.editor_new_map_name_focused = true;
+                    self.map_list_search_focused = false;
+                }
+            }
+            DesktopMenuRouteShellAction::ConfirmEditorNewMap => {
+                self.commit_editor_new_map();
+            }
+            DesktopMenuRouteShellAction::CancelEditorNewMap => {
+                self.clear_editor_new_map_dialog();
             }
             DesktopMenuRouteShellAction::ImportEditorMap => {
+                self.clear_editor_new_map_dialog();
                 self.editor_import_map_dialog_open = true;
             }
             DesktopMenuRouteShellAction::OpenTechTreeSelect => {
@@ -37395,6 +37579,124 @@ impl DesktopLauncher {
         self.push_map_card_dialog(pass, panel, route);
         self.push_map_list_filter_dialog(pass, panel);
         self.push_map_list_planet_filter_dialog(pass, panel);
+        self.push_editor_new_map_dialog(pass, panel, route);
+    }
+
+    fn push_editor_new_map_dialog(
+        &self,
+        pass: &mut RenderPass,
+        panel: RenderRect,
+        route: DesktopMenuRoute,
+    ) {
+        if route != DesktopMenuRoute::Editor || !self.editor_new_map_dialog_open {
+            return;
+        }
+        let dialog = Self::editor_new_map_dialog_rect_for_panel(panel);
+        let field = Self::editor_new_map_name_field_rect(dialog);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.48],
+            Layer::END_PIXELED + 0.090,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.091,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.092,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text_or("@editor.newmap", "New Map"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.093,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text_or("@editor.mapname", "Map Name:"),
+            RenderPoint::new(field.x - 12.0, field.center().y),
+            [0.82, 0.90, 0.96, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::End)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.094,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_field_background_symbol(),
+            field,
+            if self.editor_new_map_name_focused {
+                [1.0, 1.0, 1.0, 0.96]
+            } else {
+                [1.0, 1.0, 1.0, 0.74]
+            },
+            0.0,
+            Layer::END_PIXELED + 0.095,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.editor_new_map_name_text.clone(),
+            RenderPoint::new(field.x + 12.0, field.center().y),
+            [0.90, 0.96, 1.0, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.096,
+        ));
+        if self.editor_new_map_name_focused {
+            let cursor_x =
+                (field.x + 12.0 + self.editor_new_map_name_text.chars().count() as f32 * 7.0)
+                    .min(field.right() - 10.0);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_text_field_cursor_symbol(),
+                RenderRect::new(cursor_x, field.y + 7.0, 2.0, field.height - 14.0),
+                [1.0, 1.0, 1.0, 0.95],
+                0.0,
+                Layer::END_PIXELED + 0.0965,
+            ));
+        }
+        if let Some(error) = self.editor_new_map_error.as_deref() {
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text(error),
+                RenderPoint::new(field.x, field.y - 16.0),
+                [1.0, 0.52, 0.48, 1.0],
+                9.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.097,
+            ));
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::editor_new_map_button_rect(dialog, 0),
+            self.localize_bundle_markup_text("@cancel"),
+            None,
+            Layer::END_PIXELED + 0.098,
+        );
+        self.push_settings_text_button_enabled(
+            pass,
+            Self::editor_new_map_button_rect(dialog, 1),
+            self.localize_bundle_markup_text("@ok"),
+            None,
+            Layer::END_PIXELED + 0.098,
+            !self.editor_new_map_name_text.is_empty(),
+        );
     }
 
     fn push_map_card_dialog(
@@ -39860,6 +40162,42 @@ impl DesktopLauncher {
                     self.commit_settings_keybind_rebind(key_code);
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Editor)
+                        && self.editor_new_map_dialog_open
+                        && matches!(key_code.as_str(), "Enter" | "enter" | "NumpadEnter") =>
+                {
+                    if !self.editor_new_map_name_text.is_empty() {
+                        self.dispatch_menu_route_shell_action(
+                            DesktopMenuRouteShellAction::ConfirmEditorNewMap,
+                        );
+                    }
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Editor)
+                        && self.editor_new_map_dialog_open
+                        && Self::is_menu_back_key(key_code) =>
+                {
+                    self.dispatch_menu_route_shell_action(
+                        DesktopMenuRouteShellAction::CancelEditorNewMap,
+                    );
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Editor)
+                        && self.editor_new_map_dialog_open
+                        && self.editor_new_map_name_focused
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.editor_new_map_name_text.pop();
+                    } else {
+                        self.editor_new_map_name_text.clear();
+                    }
+                    self.editor_new_map_error = None;
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed && Self::is_menu_back_key(key_code) =>
                 {
                     self.apply_menu_back_key();
@@ -40493,6 +40831,18 @@ impl DesktopLauncher {
                             }
                             self.join_search.push(ch);
                         }
+                    } else if self.active_menu_route == Some(DesktopMenuRoute::Editor)
+                        && self.editor_new_map_dialog_open
+                        && self.editor_new_map_name_focused
+                    {
+                        for ch in text.chars().filter(|ch| !ch.is_control()) {
+                            if self.editor_new_map_name_text.len() >= EDITOR_NEW_MAP_TEXT_MAX_LENGTH
+                            {
+                                break;
+                            }
+                            self.editor_new_map_name_text.push(ch);
+                        }
+                        self.editor_new_map_error = None;
                     } else if matches!(
                         self.active_menu_route,
                         Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
@@ -40926,6 +41276,16 @@ impl DesktopLauncher {
             ],
         );
         lines.push("map click: @editor.mapinfo".into());
+        if self.editor_new_map_dialog_open {
+            lines.push(format!(
+                "dialog: ui.showTextInput @editor.newmap prompt=@editor.mapname text={} allowEmpty=false error={}",
+                schematic_text_snippet(&self.editor_new_map_name_text, 32),
+                self.editor_new_map_error
+                    .as_deref()
+                    .unwrap_or("none")
+            ));
+            lines.push("event: MapMakeEvent hook -> editor map tags/name".into());
+        }
         lines
     }
 
@@ -62527,6 +62887,7 @@ version: "2.0.0"
             ),
         ] {
             let mut launcher = DesktopLauncher::new(Vec::new());
+            launcher.settings_locale = "en".into();
             let dispatch = launcher.dispatch_menu_action(role);
             assert_eq!(dispatch.route, Some(route));
             assert_eq!(launcher.active_menu_route, Some(route));
@@ -63779,6 +64140,7 @@ version: "2.0.0"
         assert_eq!(custom.active_menu_route, None);
 
         let mut editor = DesktopLauncher::new(Vec::new());
+        editor.settings_locale = "en".into();
         editor.dispatch_menu_action(MenuButtonRole::Editor);
         let editor_panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
             viewport,
@@ -63792,6 +64154,107 @@ version: "2.0.0"
         );
         editor.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::NewEditorMap);
         assert!(editor.editor_new_map_dialog_open);
+        assert!(editor.editor_new_map_name_focused);
+        assert!(!editor.map_list_search_focused);
+        let new_dialog = DesktopLauncher::editor_new_map_dialog_rect_for_panel(editor_panel);
+        let name_field = DesktopLauncher::editor_new_map_name_field_rect(new_dialog).center();
+        assert_eq!(
+            editor.active_menu_route_shell_action_at_surface_point(
+                surface,
+                name_field.x,
+                name_field.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::FocusEditorNewMapName)
+        );
+        let ok_empty = DesktopLauncher::editor_new_map_button_rect(new_dialog, 1).center();
+        assert_eq!(
+            editor.active_menu_route_shell_action_at_surface_point(surface, ok_empty.x, ok_empty.y),
+            None,
+            "Java UI.showTextInput disallows empty New Map names"
+        );
+        let new_dialog_frame = editor.menu_graphics_frame_for_surface(0, viewport);
+        let new_dialog_commands = new_dialog_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("editor new map dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let new_dialog_texts = new_dialog_commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(new_dialog_texts.contains(&"New Map"));
+        assert!(new_dialog_texts.contains(&"Map Name:"));
+        assert!(new_dialog_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, .. }
+                if symbol == &DesktopLauncher::settings_text_field_background_symbol()
+        )));
+        assert!(new_dialog_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, .. }
+                if symbol == &DesktopLauncher::settings_text_field_cursor_symbol()
+        )));
+
+        editor.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("Alpha".into())]);
+        assert_eq!(editor.editor_new_map_name_text, "Alpha");
+        let ok = DesktopLauncher::editor_new_map_button_rect(new_dialog, 1).center();
+        assert_eq!(
+            editor.active_menu_route_shell_action_at_surface_point(surface, ok.x, ok.y),
+            Some(super::DesktopMenuRouteShellAction::ConfirmEditorNewMap)
+        );
+        editor.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ConfirmEditorNewMap,
+        );
+        assert!(!editor.editor_new_map_dialog_open);
+        assert_eq!(editor.last_editor_new_map_name.as_deref(), Some("Alpha"));
+        assert!(editor
+            .map_list_cards
+            .iter()
+            .any(|map| map.name() == "Alpha" && map.custom));
+        assert!(editor.game_state.rules.editor);
+        assert!(editor.runtime.state.rules.editor);
+        assert_eq!(
+            editor
+                .last_service_trigger_apply_summary
+                .as_ref()
+                .map(|summary| summary.stat_additions),
+            Some(1),
+            "NewEditorMap should fire the Rust equivalent of Java MapMakeEvent"
+        );
+        assert!(editor
+            .editor_maps_route_lines()
+            .iter()
+            .any(|line| line.contains("card[") && line.contains("Alpha")));
+
+        editor.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::NewEditorMap);
+        editor.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("Alpha".into())]);
+        editor.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ConfirmEditorNewMap,
+        );
+        assert!(editor.editor_new_map_dialog_open);
+        assert_eq!(
+            editor.editor_new_map_error.as_deref(),
+            Some("@editor.exists")
+        );
+        assert_eq!(
+            editor
+                .map_list_cards
+                .iter()
+                .filter(|map| map.name() == "Alpha")
+                .count(),
+            1
+        );
+        editor.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CancelEditorNewMap,
+        );
+        assert!(!editor.editor_new_map_dialog_open);
 
         let import_map =
             DesktopLauncher::map_list_action_button_rect_for_panel(editor_panel, 1).center();

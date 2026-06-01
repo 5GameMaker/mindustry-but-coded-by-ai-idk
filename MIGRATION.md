@@ -17,6 +17,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 704. Editor New Map 接入原版 showTextInput 弹窗与 MapMakeEvent 钩子
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **83.5%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版，而不是只做主菜单或孤立模块。
+- Java 对照依据：
+  - `EditorMapsDialog` 的 `@editor.newmap` 按钮调用 `ui.showTextInput("@editor.newmap", "@editor.mapname", "", ...)`；
+  - 该 `showTextInput` 默认 `allowEmpty=false`，OK/Enter 在空字符串时不可提交；
+  - 确认后先检查 `maps.byName(text)`，重名走 `@editor.exists`，否则 `hide()`、`ui.editor.show()`、`editor.tags.put("name", text)` 并触发 `MapMakeEvent`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `NewEditorMap` 从单一 bool 壳扩展为可输入的 Java `showTextInput` 式 modal：标题 `@editor.newmap`、标签 `@editor.mapname`、Cancel/OK、文本框背景与 cursor 使用原版 text field skin；
+    - 新增 `FocusEditorNewMapName / ConfirmEditorNewMap / CancelEditorNewMap`，弹窗打开时阻塞底层 MapList 卡片、过滤器、返回按钮和滚动命中；
+    - 文本输入、Backspace/Delete、Enter、Escape/Back 全部接入 `apply_menu_input_events`，空名称不可提交；
+    - 确认唯一名称后创建 custom `MapDescriptor`，插入/排序 `map_list_cards`，设置 `game_state/runtime.rules.editor = true`，记录 `last_editor_new_map_name`，并通过 `map_make_plan()` 应用 Rust 侧 `MapMakeEvent` 等价统计钩子；
+    - 重名时保留弹窗并显示 `@editor.exists`，不新增重复地图卡；
+    - 关闭 route、切换 route、导入地图或取消时清理新建地图 modal 状态，避免 stale 输入状态污染其他子菜单。
+  - `core/src/mindustry/ui/mod.rs`
+    - 补充 `editor.exists` 的英/简中/繁中文案，保证重名错误不是裸 key。
+  - `README.md`
+    - 迁移百分比更新为 `83.5%`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_list_route_controls_dispatch_actions --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop editor --lib -- --nocapture`
+  - `cargo test -p mindustry-core ui --lib -- --nocapture`
+- 仍未完成：
+  - Editor New Map 目前已从 UI 壳推进到输入/校验/MapMakeEvent hook 与 map list 可见闭环，但完整 `ui.editor.show()`、真实地图编辑器、地图尺寸/生成/保存落盘仍需后续继续接入；
+  - Editor Import Map 仍需从 bool 壳推进到 file chooser、MapIO 解析、冲突处理、写回 `paths.map_dir` 与列表刷新；
+  - Save/Load 仍需真实 save snapshot round-trip；Mods Browser 安装、社区服务器 feed、Java↔Rust 联机 smoke test 仍未完成。
+
 ## 703. HostDialog 接入真实 Net::host 开服链路
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
