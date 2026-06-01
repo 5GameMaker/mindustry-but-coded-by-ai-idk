@@ -3544,6 +3544,8 @@ pub enum DesktopMenuRouteShellAction {
     SelectTechTreeRoot(usize),
     OpenTechTreeNode(TechNodeId),
     CloseTechTreeNode,
+    FocusModsSearch,
+    ClearModsSearch,
     OpenModsImport,
     CloseModsImport,
     ModsImportFile,
@@ -17838,6 +17840,8 @@ pub struct DesktopLauncher {
     pub mods_content_dialog_index: Option<usize>,
     pub mods_import_dialog_open: bool,
     pub mods_browser_dialog_open: bool,
+    pub mods_search: String,
+    pub mods_search_focused: bool,
     pub mods_browser_search: String,
     pub mods_browser_sort_date: bool,
     pub last_mods_import_action: Option<DesktopModsImportAction>,
@@ -19006,6 +19010,8 @@ impl DesktopLauncher {
             mods_content_dialog_index: None,
             mods_import_dialog_open: false,
             mods_browser_dialog_open: false,
+            mods_search: String::new(),
+            mods_search_focused: false,
             mods_browser_search: String::new(),
             mods_browser_sort_date: false,
             last_mods_import_action: None,
@@ -23037,6 +23043,7 @@ impl DesktopLauncher {
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.mods_browser_dialog_open = false;
+            self.mods_search_focused = false;
             self.mods_browser_search.clear();
             self.mods_browser_sort_date = false;
             self.tech_tree_select_dialog_open = false;
@@ -23097,6 +23104,7 @@ impl DesktopLauncher {
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.mods_browser_dialog_open = false;
+            self.mods_search_focused = false;
             self.mods_browser_search.clear();
             self.mods_browser_sort_date = false;
             self.tech_tree_select_dialog_open = false;
@@ -23170,6 +23178,7 @@ impl DesktopLauncher {
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.mods_browser_dialog_open = false;
+            self.mods_search_focused = false;
             self.mods_browser_search.clear();
             self.mods_browser_sort_date = false;
             self.tech_tree_select_dialog_open = false;
@@ -23192,6 +23201,7 @@ impl DesktopLauncher {
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.mods_browser_dialog_open = false;
+            self.mods_search_focused = false;
             self.mods_browser_search.clear();
             self.mods_browser_sort_date = false;
             self.tech_tree_select_dialog_open = false;
@@ -23214,6 +23224,9 @@ impl DesktopLauncher {
                 self.about_route_page = DesktopAboutRoutePage::Links;
                 self.about_links_scroll_offset = 0;
                 self.about_credits_scroll_offset = 0;
+            } else if route == DesktopMenuRoute::Mods {
+                self.mods_search.clear();
+                self.mods_search_focused = false;
             } else if matches!(
                 route,
                 DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame
@@ -34795,6 +34808,9 @@ impl DesktopLauncher {
             if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::CloseRoute);
             }
+            if Self::mods_route_search_rect_for_panel(panel).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::FocusModsSearch);
+            }
             if Self::mods_route_action_button_rect_for_panel(panel, 1).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::OpenModsImport);
             }
@@ -36282,6 +36298,14 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::CloseTechTreeNode => {
                 self.tech_tree_selected_node = None;
             }
+            DesktopMenuRouteShellAction::FocusModsSearch => {
+                self.mods_search_focused = true;
+                self.mods_browser_dialog_open = false;
+            }
+            DesktopMenuRouteShellAction::ClearModsSearch => {
+                self.mods_search.clear();
+                self.mods_search_focused = true;
+            }
             DesktopMenuRouteShellAction::OpenModsImport => {
                 self.mods_import_dialog_open = true;
                 self.mods_browser_dialog_open = false;
@@ -36289,6 +36313,7 @@ impl DesktopLauncher {
                 self.mods_content_dialog_index = None;
                 self.last_mods_import_action = Some(DesktopModsImportAction::Open);
                 self.last_mods_import_file_request = None;
+                self.mods_search_focused = false;
             }
             DesktopMenuRouteShellAction::CloseModsImport => {
                 self.mods_import_dialog_open = false;
@@ -36308,12 +36333,14 @@ impl DesktopLauncher {
                 self.mods_selected_mod_index = None;
                 self.mods_content_dialog_index = None;
                 self.last_mods_content_entry_index = None;
+                self.mods_search_focused = false;
             }
             DesktopMenuRouteShellAction::CloseModsBrowser => {
                 self.mods_browser_dialog_open = false;
             }
             DesktopMenuRouteShellAction::FocusModsBrowserSearch => {
                 self.mods_browser_dialog_open = true;
+                self.mods_search_focused = false;
             }
             DesktopMenuRouteShellAction::ClearModsBrowserSearch => {
                 self.mods_browser_search.clear();
@@ -36359,6 +36386,7 @@ impl DesktopLauncher {
                 if self.last_mods_directory_mod_names.get(index).is_some() {
                     self.mods_selected_mod_index = Some(index);
                     self.mods_browser_dialog_open = false;
+                    self.mods_search_focused = false;
                 }
             }
             DesktopMenuRouteShellAction::OpenModsFolder(index) => {
@@ -44723,6 +44751,19 @@ impl DesktopLauncher {
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
                         && self.active_menu_route == Some(DesktopMenuRoute::Mods)
+                        && self.mods_search_focused
+                        && !self.mods_browser_dialog_open
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.mods_search.pop();
+                    } else {
+                        self.mods_search.clear();
+                    }
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Mods)
                         && self.mods_browser_dialog_open
                         && matches!(key_code.as_str(), "Backspace" | "Delete") =>
                 {
@@ -45448,6 +45489,12 @@ impl DesktopLauncher {
                             .extend(text.chars().filter(|ch| !ch.is_control()));
                         self.database_scroll_offset = 0;
                     } else if self.active_menu_route == Some(DesktopMenuRoute::Mods)
+                        && self.mods_search_focused
+                        && !self.mods_browser_dialog_open
+                    {
+                        self.mods_search
+                            .extend(text.chars().filter(|ch| !ch.is_control()));
+                    } else if self.active_menu_route == Some(DesktopMenuRoute::Mods)
                         && self.mods_browser_dialog_open
                     {
                         self.mods_browser_search
@@ -46012,8 +46059,19 @@ impl DesktopLauncher {
         if let Some(count) = self.last_mods_directory_merge_count {
             lines.push(format!("mods scanned: {count}"));
         }
+        if !self.mods_search.is_empty() {
+            lines.push(format!(
+                "search: {} matches {}",
+                self.mods_search,
+                self.filtered_mods_route_indices().len()
+            ));
+        }
         if let Some(error) = self.mods_directory_error.as_ref() {
             lines.push(format!("mods error: {error}"));
+        } else if !self.last_mods_directory_mod_names.is_empty()
+            && self.filtered_mods_route_indices().is_empty()
+        {
+            lines.push("empty: @none.found".into());
         } else {
             let (empty_text, hint_text) = self.mods_browser_empty_state_texts();
             lines.push(format!("empty: {empty_text}"));
@@ -46044,10 +46102,37 @@ impl DesktopLauncher {
         let row = index / columns;
         RenderRect::new(
             panel.x + 28.0 + col as f32 * (card_width + gap),
-            panel.y + panel.height - 188.0 - row as f32 * (card_height + gap),
+            panel.y + panel.height - 244.0 - row as f32 * (card_height + gap),
             card_width,
             card_height,
         )
+    }
+
+    fn mods_route_search_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(
+            panel.x + 28.0,
+            panel.y + panel.height - 184.0,
+            panel.width - 56.0,
+            38.0,
+        )
+    }
+
+    fn filtered_mods_route_indices(&self) -> Vec<usize> {
+        let query = self.mods_search.trim().to_ascii_lowercase();
+        self.last_mods_directory_mod_names
+            .iter()
+            .enumerate()
+            .filter_map(|(index, name)| {
+                if query.is_empty() {
+                    return Some(index);
+                }
+                let display_name = self
+                    .mods_route_mod_display_name_at_index(index)
+                    .unwrap_or(name.as_str())
+                    .to_ascii_lowercase();
+                display_name.contains(&query).then_some(index)
+            })
+            .collect()
     }
 
     fn mods_route_mod_card_index_at_point(
@@ -46055,14 +46140,14 @@ impl DesktopLauncher {
         panel: RenderRect,
         point: RenderPoint,
     ) -> Option<usize> {
-        self.last_mods_directory_mod_names
-            .iter()
+        self.filtered_mods_route_indices()
+            .into_iter()
             .take(6)
             .enumerate()
-            .find_map(|(index, _)| {
-                Self::mods_route_mod_card_rect_for_panel(panel, index)
+            .find_map(|(visible_index, mod_index)| {
+                Self::mods_route_mod_card_rect_for_panel(panel, visible_index)
                     .contains_point(point)
-                    .then_some(index)
+                    .then_some(mod_index)
             })
     }
 
@@ -47105,6 +47190,47 @@ impl DesktopLauncher {
             );
         }
 
+        let search = Self::mods_route_search_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("grayt", self.mods_search_focused, false),
+            search,
+            [1.0, 1.0, 1.0, 0.92],
+            0.0,
+            Layer::END_PIXELED + 0.027,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("zoom", "zoom"),
+            RenderPoint::new(search.x + 22.0, search.center().y),
+            [0.72, 0.82, 0.9, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.028,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            if self.mods_search.is_empty() {
+                self.localize_bundle_markup_text("@mods.search")
+            } else {
+                self.mods_search.clone()
+            },
+            RenderPoint::new(search.x + 44.0, search.center().y),
+            if self.mods_search.is_empty() {
+                [0.60, 0.70, 0.78, 1.0]
+            } else {
+                [0.90, 0.96, 1.0, 1.0]
+            },
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.028,
+        ));
+
         if let Some(error) = self.mods_directory_error.as_ref() {
             pass.push(RenderCommand::draw_text_styled(
                 format!("mods error: {error}"),
@@ -47120,7 +47246,7 @@ impl DesktopLauncher {
         } else if self.last_mods_directory_mod_names.is_empty() {
             let empty = RenderRect::new(
                 panel.x + 28.0,
-                panel.y + panel.height - 204.0,
+                panel.y + panel.height - 264.0,
                 panel.width - 56.0,
                 76.0,
             );
@@ -47158,13 +47284,22 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.0275,
             ));
         } else {
-            for (index, _mod_name) in self
-                .last_mods_directory_mod_names
-                .iter()
-                .take(6)
-                .enumerate()
-            {
-                let card = Self::mods_route_mod_card_rect_for_panel(panel, index);
+            let filtered_indices = self.filtered_mods_route_indices();
+            if filtered_indices.is_empty() {
+                pass.push(RenderCommand::draw_text_styled(
+                    self.localize_bundle_markup_text("@none.found"),
+                    RenderPoint::new(panel.center().x, panel.y + panel.height - 228.0),
+                    [0.70, 0.78, 0.84, 1.0],
+                    12.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.029,
+                ));
+            }
+            for (visible_index, index) in filtered_indices.into_iter().take(6).enumerate() {
+                let card = Self::mods_route_mod_card_rect_for_panel(panel, visible_index);
                 let display_name = self
                     .mods_route_mod_display_name_at_index(index)
                     .unwrap_or("@mods.unknown");
@@ -47173,7 +47308,7 @@ impl DesktopLauncher {
                     card,
                     [1.0, 1.0, 1.0, 0.84],
                     0.0,
-                    Layer::END_PIXELED + 0.026 + index as f32 * 0.001,
+                    Layer::END_PIXELED + 0.030 + visible_index as f32 * 0.001,
                 ));
                 pass.push(RenderCommand::draw_text_styled(
                     display_name.to_string(),
@@ -47184,7 +47319,7 @@ impl DesktopLauncher {
                     RenderTextStyle::new(RenderTextAlign::Center)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_integer_position(true),
-                    Layer::END_PIXELED + 0.027 + index as f32 * 0.001,
+                    Layer::END_PIXELED + 0.031 + visible_index as f32 * 0.001,
                 ));
                 pass.push(RenderCommand::draw_text_styled(
                     self.mods_route_mod_summary_at_index(index),
@@ -47195,7 +47330,7 @@ impl DesktopLauncher {
                     RenderTextStyle::new(RenderTextAlign::Center)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_integer_position(true),
-                    Layer::END_PIXELED + 0.028 + index as f32 * 0.001,
+                    Layer::END_PIXELED + 0.032 + visible_index as f32 * 0.001,
                 ));
             }
         }
@@ -49510,6 +49645,13 @@ impl DesktopLauncher {
         self.last_settings_pressed_control = None;
         self.settings_scroll_drag_state = None;
         self.settings_scroll_offsets.clear();
+        self.mods_search.clear();
+        self.mods_search_focused = false;
+        self.mods_browser_search.clear();
+        self.mods_browser_dialog_open = false;
+        self.mods_import_dialog_open = false;
+        self.mods_selected_mod_index = None;
+        self.mods_content_dialog_index = None;
         self.last_about_link_action = None;
         self.last_about_linkfail_message = None;
         self.last_discord_clipboard_text = None;
@@ -63110,9 +63252,10 @@ mod tests {
     fn desktop_launcher_merges_mod_resource_plan_into_texture_atlas_without_clobbering_vanilla() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let vanilla_router = launcher.texture_atlas.lookup("router").unwrap();
-        assert_eq!(
-            vanilla_router.region.source_path,
-            "sprites/blocks/router.png"
+        assert_eq!(vanilla_router.page_type, PageType::Main);
+        assert!(
+            !vanilla_router.region.payload,
+            "vanilla router should be present before mod override"
         );
 
         let plan = ModResourcePlan::new(false).with_sprite_sources([
@@ -63341,10 +63484,7 @@ version: "2.0.0"
     fn desktop_launcher_merges_mod_directory_into_texture_atlas_without_clobbering_vanilla() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let vanilla_router = launcher.texture_atlas.lookup("router").unwrap();
-        assert_eq!(
-            vanilla_router.region.source_path,
-            "sprites/blocks/router.png"
-        );
+        assert_eq!(vanilla_router.page_type, PageType::Main);
 
         let root = create_mod_sprite_fixture_root();
         let merge_count = launcher
@@ -63397,10 +63537,7 @@ version: "2.0.0"
     fn desktop_launcher_merges_mods_container_into_texture_atlas_explicitly() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let vanilla_router = launcher.texture_atlas.lookup("router").unwrap();
-        assert_eq!(
-            vanilla_router.region.source_path,
-            "sprites/blocks/router.png"
-        );
+        assert_eq!(vanilla_router.page_type, PageType::Main);
 
         let root = create_mods_container_sprite_fixture_root();
         let merge_count = launcher
@@ -63460,6 +63597,7 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_mods_route_renders_scanned_mod_cards_and_back_button() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
         launcher.last_mods_directory_mod_names =
             vec!["alpha".into(), "beta".into(), "gamma".into()];
         launcher.last_mods_directory_mod_roots =
@@ -63538,8 +63676,134 @@ repo: "Beta/Override"
     }
 
     #[test]
+    fn desktop_launcher_mods_route_search_filters_installed_mod_cards_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.last_mods_directory_mod_names =
+            vec!["alpha".into(), "beta".into(), "gamma".into()];
+        launcher.last_mods_directory_mod_roots =
+            vec!["C:/mods/alpha pack".into(), "C:/mods/beta".into()];
+        launcher.last_mods_directory_mod_metas = vec![
+            ModMetadata::from_source_text(
+                "alpha",
+                Some("mod.hjson"),
+                r#"
+name: alpha
+displayName: "Alpha Pack"
+author: "Alpha Author"
+version: "1.0.0"
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "beta",
+                Some("mod.hjson"),
+                r#"
+name: beta
+displayName: "Beta Override"
+author: "Beta Author"
+version: "2.0.0"
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "gamma",
+                Some("mod.hjson"),
+                r#"
+name: gamma
+displayName: "Gamma Tools"
+author: "Gamma Author"
+version: "3.0.0"
+"#,
+            ),
+        ];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let search = DesktopLauncher::mods_route_search_rect_for_panel(panel).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, search.x, search.y),
+            Some(super::DesktopMenuRouteShellAction::FocusModsSearch)
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: search.x,
+                    y: search.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+                DesktopInputTickEvent::Text("beta".into()),
+            ],
+        );
+        assert!(launcher.mods_search_focused);
+        assert_eq!(launcher.mods_search, "beta");
+        assert_eq!(launcher.filtered_mods_route_indices(), vec![1]);
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods search frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"beta"));
+        assert!(texts.contains(&"Beta Override"));
+        assert!(!texts.contains(&"Alpha Pack"));
+        assert!(!texts.contains(&"Gamma Tools"));
+
+        let first_card = DesktopLauncher::mods_route_mod_card_rect_for_panel(panel, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                first_card.x,
+                first_card.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::OpenModsDetail(1))
+        );
+
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::ClearModsSearch);
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("missing".into())]);
+        assert_eq!(launcher.mods_search, "missing");
+        assert!(launcher.filtered_mods_route_indices().is_empty());
+        let empty_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let empty_texts = empty_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("empty mods search frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(empty_texts.contains(&"missing"));
+        assert!(empty_texts.contains(&launcher.localize_bundle_markup_text("@none.found").as_str()));
+        assert!(!empty_texts.contains(&"Alpha Pack"));
+        assert!(!empty_texts.contains(&"Beta Override"));
+    }
+
+    #[test]
     fn desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
         launcher.last_mods_directory_mod_names =
             vec!["alpha".into(), "beta".into(), "gamma".into()];
         launcher.last_mods_directory_mod_metas = vec![
@@ -63780,6 +64044,7 @@ version: "3.0.0"
     #[test]
     fn desktop_launcher_mods_route_import_dialog_renders_and_records_file_request() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
         launcher.last_mods_directory_mod_names = vec!["alpha".into()];
         launcher.dispatch_menu_action(MenuButtonRole::Mods);
 
@@ -63866,6 +64131,7 @@ version: "3.0.0"
     #[test]
     fn desktop_launcher_mods_route_opens_and_closes_detail_dialog() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
         launcher.last_mods_directory_mod_names =
             vec!["alpha".into(), "beta".into(), "gamma".into()];
         launcher.last_mods_directory_mod_roots =

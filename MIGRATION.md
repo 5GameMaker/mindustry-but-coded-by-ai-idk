@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 737. ModsDialog 主页面搜索过滤对齐原版
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **87.3%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `ModsDialog.setup()` 在已安装模组列表上方构建搜索栏；
+  - 列表重建时按 mod `displayName` 匹配搜索词过滤；
+  - 过滤后没有命中项时显示 `@none.found` 空态。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 Mods 主页面搜索文本与焦点状态；
+    - Mods 路由顶部新增搜索框，点击后接收文本输入，`Backspace/Delete` 支持删除/清空；
+    - 已安装 mod 卡片改为按搜索词过滤，并保持可见卡片命中映射到真实 mod index；
+    - 搜索无命中时显示本地化 `@none.found`；
+    - 修正 Mods 相关回归在不同系统 locale 下的稳定性，并放宽初始 vanilla atlas 来源路径断言以兼容当前真实资源加载方式。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_search_filters_installed_mod_cards_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop mods --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - ModsDialog 仍需继续补齐 Java 的启用/禁用、删除、导入 GitHub、错误详情与关闭后 reload 语义；
+  - 主页面搜索框还未完全复刻 Java Scene2D 的光标、选中文本和皮肤细节；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 736. LoadDialog 过滤空态文案对齐 `@save.none`
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
