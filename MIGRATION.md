@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 719. CustomRulesDialog Allow Editing Rules 接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **85.0%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - 原版 `CustomRulesDialog` 的 team 分类开头包含 `@rules.allowedit`；
+  - 该字段对应 Java `Rules.allowEditRules`，是自定义规则菜单的一部分，不能只存在于底层 `Rules` 默认值。
+- 本轮主改动：
+  - `core/src/mindustry/game/rules.rs`
+    - `Rules::apply_json_str` 支持 `allowEditRules`；
+    - 扩展 top-level rules JSON 测试。
+  - `desktop/src/lib.rs`
+    - `map_play_rules_clipboard_json(...)` 导出 `allowEditRules`；
+    - team rules 子弹窗顶部新增 `Allow Editing Rules` 开关；
+    - 新增 `ToggleAllowEditRules` action，点击后写回 `Rules.allow_edit_rules`；
+    - 扩展 CustomRules 回归，验证开关命中、copy/load 往返恢复。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core rules_apply_json -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore -- --nocapture`
+  - `git diff --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - CustomRulesDialog 仍缺 Java 同款滚动/搜索/rule info tooltip/text input；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 718. CustomRulesDialog 队伍规则字段扩展
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

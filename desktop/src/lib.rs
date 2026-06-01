@@ -1373,6 +1373,7 @@ pub enum DesktopMapCardActionKind {
     AdjustWeatherNumber(usize, DesktopWeatherNumber, i32),
     OpenTeamRules,
     CloseTeamRules,
+    ToggleAllowEditRules,
     SelectDefaultTeam(usize),
     SelectWaveTeam(usize),
     ToggleTeamRuleSection(usize),
@@ -30899,6 +30900,15 @@ impl DesktopLauncher {
         RenderRect::new(dialog.x + 18.0, dialog.y + 16.0, 112.0, 36.0)
     }
 
+    fn map_play_team_rules_allow_edit_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.right() - 194.0,
+            dialog.y + dialog.height - 46.0,
+            170.0,
+            26.0,
+        )
+    }
+
     fn map_play_team_rules_selector_rect(
         dialog: RenderRect,
         row_index: usize,
@@ -31137,6 +31147,7 @@ impl DesktopLauncher {
                 "\"waveTimer\":{},",
                 "\"winWave\":{},",
                 "\"infiniteResources\":{},",
+                "\"allowEditRules\":{},",
                 "\"schematicsAllowed\":{},",
                 "\"hideBannedBlocks\":{},",
                 "\"blockWhitelist\":{},",
@@ -31161,6 +31172,7 @@ impl DesktopLauncher {
             rules.wave_timer,
             rules.win_wave,
             rules.infinite_resources,
+            rules.allow_edit_rules,
             rules.schematics_allowed,
             rules.hide_banned_blocks,
             rules.block_whitelist,
@@ -33106,6 +33118,16 @@ impl DesktopLauncher {
                                     DesktopMapCardAction::new(
                                         index,
                                         DesktopMapCardActionKind::CloseTeamRules,
+                                    ),
+                                ));
+                            }
+                            if Self::map_play_team_rules_allow_edit_rect(team_dialog)
+                                .contains_point(point)
+                            {
+                                return Some(DesktopMenuRouteShellAction::MapCard(
+                                    DesktopMapCardAction::new(
+                                        index,
+                                        DesktopMapCardActionKind::ToggleAllowEditRules,
                                     ),
                                 ));
                             }
@@ -35187,6 +35209,14 @@ impl DesktopLauncher {
                         }
                         DesktopMapCardActionKind::CloseTeamRules => {
                             self.map_play_team_rules_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::ToggleAllowEditRules => {
+                            self.update_map_play_rules_for_team(action.index, |rules| {
+                                rules.allow_edit_rules = !rules.allow_edit_rules;
+                            });
+                            self.map_play_team_rules_dialog_open = true;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
                         }
                         DesktopMapCardActionKind::SelectDefaultTeam(team_id) => {
                             self.select_map_play_default_team(action.index, team_id);
@@ -41152,6 +41182,17 @@ impl DesktopLauncher {
                 .with_outline(true),
             layer + 0.004,
         ));
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_team_rules_allow_edit_rect(dialog),
+            format!(
+                "{} {}",
+                if rules.allow_edit_rules { "✓" } else { "□" },
+                self.localize_bundle_markup_text("@rules.allowedit")
+            ),
+            None,
+            layer + 0.005,
+        );
         for (row_index, (label, active_team)) in [
             ("@rules.playerteam", rules.default_team),
             ("@rules.enemyteam", rules.wave_team),
@@ -67543,6 +67584,27 @@ version: "2.0.0"
             .any(|text| text.contains("Enemy Team") || text.contains("rules.enemyteam")));
         assert!(team_texts.contains(&"sharded"));
         let team_dialog = DesktopLauncher::map_play_team_rules_dialog_rect(child);
+        let allow_edit_center =
+            DesktopLauncher::map_play_team_rules_allow_edit_rect(team_dialog).center();
+        let toggle_allow_edit =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::ToggleAllowEditRules,
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                allow_edit_center.x,
+                allow_edit_center.y
+            ),
+            Some(toggle_allow_edit)
+        );
+        launcher.dispatch_menu_route_shell_action(toggle_allow_edit);
+        assert!(launcher
+            .map_play_rules
+            .as_ref()
+            .map(|rules| rules.allow_edit_rules)
+            .unwrap_or(false));
         let select_default_malis_center =
             DesktopLauncher::map_play_team_rules_selector_rect(team_dialog, 0, 3).center();
         let select_default_malis =
@@ -67810,6 +67872,7 @@ version: "2.0.0"
             .expect("copy should store the rules JSON clipboard payload");
         assert!(copied_rules.contains("\"attackMode\":true"));
         assert!(copied_rules.contains("\"hideBannedBlocks\":true"));
+        assert!(copied_rules.contains("\"allowEditRules\":true"));
         assert!(copied_rules.contains("\"waveSpacing\":1200"));
         assert!(copied_rules.contains("\"weather\":[{"));
         assert!(copied_rules.contains(&format!("\"weather\":\"{}\"", weather_candidate)));
@@ -67876,6 +67939,14 @@ version: "2.0.0"
                 .map(|rules| (rules.default_team, rules.wave_team)),
             Some((3, 4)),
             "load should restore CustomRulesDialog default/wave teams from JSON"
+        );
+        assert!(
+            launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| rules.allow_edit_rules)
+                .unwrap_or(false),
+            "load should restore CustomRulesDialog allowEditRules from JSON"
         );
         assert_eq!(
             launcher.map_play_rules.as_ref().map(|rules| {

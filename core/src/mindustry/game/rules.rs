@@ -242,6 +242,7 @@ struct RulesJsonPatch {
     pvp: Option<bool>,
     editor: Option<bool>,
     infinite_resources: Option<bool>,
+    allow_edit_rules: Option<bool>,
     schematics_allowed: Option<bool>,
     hide_banned_blocks: Option<bool>,
     block_whitelist: Option<bool>,
@@ -402,6 +403,9 @@ impl RulesJsonPatch {
         if let Some(value) = self.infinite_resources {
             rules.infinite_resources = value;
         }
+        if let Some(value) = self.allow_edit_rules {
+            rules.allow_edit_rules = value;
+        }
         if let Some(value) = self.schematics_allowed {
             rules.schematics_allowed = value;
         }
@@ -500,6 +504,7 @@ impl<'a> RulesJsonParser<'a> {
                 "infiniteResources" => {
                     patch.infinite_resources = self.parse_optional_bool()?;
                 }
+                "allowEditRules" => patch.allow_edit_rules = self.parse_optional_bool()?,
                 "schematicsAllowed" => patch.schematics_allowed = self.parse_optional_bool()?,
                 "hideBannedBlocks" => patch.hide_banned_blocks = self.parse_optional_bool()?,
                 "blockWhitelist" => patch.block_whitelist = self.parse_optional_bool()?,
@@ -1586,6 +1591,7 @@ mod tests {
                     "pvp": true,
                     "editor": true,
                     "infiniteResources": true,
+                    "allowEditRules": true,
                     "schematicsAllowed": false,
                     "hideBannedBlocks": true,
                     "blockWhitelist": true,
@@ -1648,6 +1654,7 @@ mod tests {
         assert!(rules.pvp);
         assert!(rules.editor);
         assert!(rules.infinite_resources);
+        assert!(rules.allow_edit_rules);
         assert!(!rules.schematics_allowed);
         assert!(rules.hide_banned_blocks);
         assert!(rules.block_whitelist);
