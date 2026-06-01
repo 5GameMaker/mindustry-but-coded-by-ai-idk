@@ -24808,6 +24808,51 @@ impl DesktopLauncher {
         }
     }
 
+    fn setting_bool_text_matches_true(value: &str) -> bool {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "true" | "1" | "yes" | "on" | "!mobile"
+        )
+    }
+
+    fn settings_keyboard_enabled_like_java(&self) -> bool {
+        self.settings_overrides
+            .get("keyboard")
+            .map(|value| Self::setting_bool_text_matches_true(value))
+            .unwrap_or_else(|| {
+                settings_pref_spec("game", "keyboard")
+                    .map(|spec| self.setting_bool_effective_value(spec))
+                    .unwrap_or(false)
+            })
+    }
+
+    fn settings_controls_menu_entry_visible(&self) -> bool {
+        !self.menu_renderer_state.config.mobile || self.settings_keyboard_enabled_like_java()
+    }
+
+    fn settings_main_menu_entry_visible(&self, entry: &DesktopSettingsMenuEntry) -> bool {
+        entry.target != "controls-dialog" || self.settings_controls_menu_entry_visible()
+    }
+
+    fn settings_visible_main_menu_entries(&self) -> Vec<&'static DesktopSettingsMenuEntry> {
+        SETTINGS_MENU_ENTRIES
+            .iter()
+            .filter(|entry| self.settings_main_menu_entry_visible(entry))
+            .collect()
+    }
+
+    fn settings_data_action_visible(&self, action: &DesktopSettingsDataAction) -> bool {
+        action.action != DesktopSettingsAction::OpenDataFolder
+            || !self.menu_renderer_state.config.mobile
+    }
+
+    fn settings_visible_data_actions(&self) -> Vec<&'static DesktopSettingsDataAction> {
+        SETTINGS_DATA_ACTIONS
+            .iter()
+            .filter(|action| self.settings_data_action_visible(action))
+            .collect()
+    }
+
     fn setting_slider_effective_value(&self, spec: &DesktopSettingsPrefSpec) -> Option<i32> {
         self.setting_effective_value(spec.table, spec.key)
             .or_else(|| Some(spec.default_value.text()))
@@ -24986,7 +25031,8 @@ impl DesktopLauncher {
     }
 
     fn push_settings_main_menu_buttons(&self, pass: &mut RenderPass, panel: RenderRect) {
-        let container = Self::settings_main_menu_container_rect_for_panel(panel);
+        let entries = self.settings_visible_main_menu_entries();
+        let container = Self::settings_main_menu_container_rect_for_panel(panel, entries.len());
         pass.push(RenderCommand::draw_sprite(
             Self::settings_drawable_symbol("button"),
             container,
@@ -25000,10 +25046,10 @@ impl DesktopLauncher {
             1.0,
             Layer::END_PIXELED + 0.022,
         ));
-        let hovered_index = self
-            .last_menu_cursor
-            .and_then(|point| Self::settings_main_menu_entry_index_at_point(panel, point));
-        for (index, entry) in SETTINGS_MENU_ENTRIES.iter().enumerate() {
+        let hovered_index = self.last_menu_cursor.and_then(|point| {
+            Self::settings_main_menu_entry_index_at_point(panel, point, entries.len())
+        });
+        for (index, entry) in entries.iter().enumerate() {
             let rect = Self::settings_main_menu_button_rect_for_panel(panel, index);
             let hovered = hovered_index == Some(index);
             pass.push(RenderCommand::draw_sprite(
@@ -25229,7 +25275,9 @@ impl DesktopLauncher {
     }
 
     fn push_settings_data_page(&self, pass: &mut RenderPass, panel: RenderRect) {
-        let container = Self::settings_data_actions_container_rect_for_panel(panel);
+        let actions = self.settings_visible_data_actions();
+        let container =
+            Self::settings_data_actions_container_rect_for_panel_with_count(panel, actions.len());
         pass.push(RenderCommand::draw_sprite(
             Self::settings_drawable_symbol("button"),
             container,
@@ -25256,10 +25304,14 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.024,
             ));
         }
-        for (index, action) in SETTINGS_DATA_ACTIONS.iter().enumerate() {
+        for (index, action) in actions.iter().enumerate() {
             self.push_settings_text_button_with_style(
                 pass,
-                Self::settings_data_action_button_rect_for_panel(panel, index),
+                Self::settings_data_action_button_rect_for_panel_with_count(
+                    panel,
+                    index,
+                    actions.len(),
+                ),
                 self.localize_bundle_markup_text(action.label),
                 Some(action.icon),
                 Layer::END_PIXELED + 0.030 + index as f32 * 0.0001,
@@ -26326,8 +26378,9 @@ impl DesktopLauncher {
 
         match state.page {
             DesktopSettingsPage::Main => {
-                lines.push(format!("categories: {}", SETTINGS_MENU_ENTRIES.len()));
-                for entry in SETTINGS_MENU_ENTRIES {
+                let entries = self.settings_visible_main_menu_entries();
+                lines.push(format!("categories: {}", entries.len()));
+                for entry in entries {
                     lines.push(format!(
                         "category: {} {} target:{}",
                         entry.label,
@@ -26343,7 +26396,10 @@ impl DesktopLauncher {
                         ));
                     }
                 }
-                lines.push(format!("data actions: {}", SETTINGS_DATA_ACTIONS.len()));
+                lines.push(format!(
+                    "data actions: {}",
+                    self.settings_visible_data_actions().len()
+                ));
             }
             DesktopSettingsPage::Game
             | DesktopSettingsPage::Graphics
@@ -26363,7 +26419,7 @@ impl DesktopLauncher {
             }
             DesktopSettingsPage::Data => {
                 lines.push(format!("planet: {}", state.selected_planet));
-                for action in SETTINGS_DATA_ACTIONS {
+                for action in self.settings_visible_data_actions() {
                     lines.push(format!(
                         "data action: {} {}",
                         action.label,
@@ -26430,10 +26486,13 @@ impl DesktopLauncher {
         )
     }
 
-    fn settings_main_menu_container_rect_for_panel(panel: RenderRect) -> RenderRect {
+    fn settings_main_menu_container_rect_for_panel(
+        panel: RenderRect,
+        entry_count: usize,
+    ) -> RenderRect {
+        let entry_count = entry_count.max(1);
         let first = Self::settings_main_menu_button_rect_for_panel(panel, 0);
-        let last =
-            Self::settings_main_menu_button_rect_for_panel(panel, SETTINGS_MENU_ENTRIES.len() - 1);
+        let last = Self::settings_main_menu_button_rect_for_panel(panel, entry_count - 1);
         let pad = 14.0;
         RenderRect::new(
             first.x - pad,
@@ -26446,18 +26505,29 @@ impl DesktopLauncher {
     fn settings_main_menu_entry_index_at_point(
         panel: RenderRect,
         point: RenderPoint,
+        entry_count: usize,
     ) -> Option<usize> {
-        SETTINGS_MENU_ENTRIES
-            .iter()
-            .enumerate()
-            .find(|(index, _)| {
-                Self::settings_main_menu_button_rect_for_panel(panel, *index).contains_point(point)
-            })
-            .map(|(index, _)| index)
+        (0..entry_count).find(|index| {
+            Self::settings_main_menu_button_rect_for_panel(panel, *index).contains_point(point)
+        })
     }
 
+    #[cfg(test)]
     fn settings_data_action_button_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
-        let dialog = Self::settings_data_actions_container_rect_for_panel(panel);
+        Self::settings_data_action_button_rect_for_panel_with_count(
+            panel,
+            index,
+            SETTINGS_DATA_ACTIONS.len(),
+        )
+    }
+
+    fn settings_data_action_button_rect_for_panel_with_count(
+        panel: RenderRect,
+        index: usize,
+        action_count: usize,
+    ) -> RenderRect {
+        let dialog =
+            Self::settings_data_actions_container_rect_for_panel_with_count(panel, action_count);
         let columns = Self::settings_data_action_column_count_for_panel(panel);
         let column = index % columns;
         let row = index / columns;
@@ -26479,9 +26549,20 @@ impl DesktopLauncher {
         1
     }
 
+    #[cfg(test)]
     fn settings_data_actions_container_rect_for_panel(panel: RenderRect) -> RenderRect {
+        Self::settings_data_actions_container_rect_for_panel_with_count(
+            panel,
+            SETTINGS_DATA_ACTIONS.len(),
+        )
+    }
+
+    fn settings_data_actions_container_rect_for_panel_with_count(
+        panel: RenderRect,
+        action_count: usize,
+    ) -> RenderRect {
         let columns = Self::settings_data_action_column_count_for_panel(panel);
-        let rows = (SETTINGS_DATA_ACTIONS.len() + columns - 1) / columns;
+        let rows = (action_count + columns - 1) / columns;
         let content_width = columns as f32 * SETTINGS_DATA_BUTTON_WIDTH
             + columns.saturating_sub(1) as f32 * SETTINGS_DATA_BUTTON_GAP;
         let content_height = rows as f32 * SETTINGS_DATA_BUTTON_HEIGHT
@@ -26510,31 +26591,40 @@ impl DesktopLauncher {
         )
     }
 
-    fn settings_action_for_main_entry(index: usize) -> Option<DesktopSettingsAction> {
-        match index {
-            0 => Some(DesktopSettingsAction::OpenPage(DesktopSettingsPage::Game)),
-            1 => Some(DesktopSettingsAction::OpenPage(
+    fn settings_action_for_main_menu_entry(
+        entry: &DesktopSettingsMenuEntry,
+    ) -> Option<DesktopSettingsAction> {
+        match entry.target {
+            "game" => Some(DesktopSettingsAction::OpenPage(DesktopSettingsPage::Game)),
+            "graphics" => Some(DesktopSettingsAction::OpenPage(
                 DesktopSettingsPage::Graphics,
             )),
-            2 => Some(DesktopSettingsAction::OpenPage(DesktopSettingsPage::Sound)),
-            3 => Some(DesktopSettingsAction::OpenLanguageDialog),
-            4 => Some(DesktopSettingsAction::OpenControlsDialog),
-            5 => Some(DesktopSettingsAction::OpenPage(DesktopSettingsPage::Data)),
+            "sound" => Some(DesktopSettingsAction::OpenPage(DesktopSettingsPage::Sound)),
+            "language-dialog" => Some(DesktopSettingsAction::OpenLanguageDialog),
+            "controls-dialog" => Some(DesktopSettingsAction::OpenControlsDialog),
+            "data-dialog" => Some(DesktopSettingsAction::OpenPage(DesktopSettingsPage::Data)),
             _ => None,
         }
+    }
+
+    fn settings_action_for_main_entry(&self, index: usize) -> Option<DesktopSettingsAction> {
+        self.settings_visible_main_menu_entries()
+            .get(index)
+            .and_then(|entry| Self::settings_action_for_main_menu_entry(entry))
     }
 
     fn settings_route_action_for_line(&self, line_index: usize) -> Option<DesktopSettingsAction> {
         match self.settings_dialog_state.page {
             DesktopSettingsPage::Main => line_index
                 .checked_sub(3)
-                .and_then(Self::settings_action_for_main_entry),
+                .and_then(|index| self.settings_action_for_main_entry(index)),
             DesktopSettingsPage::Data => {
+                let actions = self.settings_visible_data_actions();
                 if let Some(action_index) = line_index.checked_sub(3) {
-                    if let Some(action) = SETTINGS_DATA_ACTIONS.get(action_index) {
+                    if let Some(action) = actions.get(action_index) {
                         return Some(action.action);
                     }
-                    if action_index == SETTINGS_DATA_ACTIONS.len() {
+                    if action_index == actions.len() {
                         return Some(DesktopSettingsAction::BackToMain);
                     }
                 }
@@ -27265,8 +27355,12 @@ impl DesktopLauncher {
             return self.settings_child_dialog_action_at_point(panel, point);
         }
         if self.settings_dialog_state.page == DesktopSettingsPage::Main {
-            if let Some(index) = Self::settings_main_menu_entry_index_at_point(panel, point) {
-                return Self::settings_action_for_main_entry(index)
+            let entries = self.settings_visible_main_menu_entries();
+            if let Some(index) =
+                Self::settings_main_menu_entry_index_at_point(panel, point, entries.len())
+            {
+                return self
+                    .settings_action_for_main_entry(index)
                     .map(DesktopMenuRouteShellAction::Settings);
             }
             if Self::settings_back_button_rect_for_panel(panel).contains_point(point) {
@@ -27292,9 +27386,14 @@ impl DesktopLauncher {
             ));
         }
         if self.settings_dialog_state.page == DesktopSettingsPage::Data {
-            for (index, action) in SETTINGS_DATA_ACTIONS.iter().enumerate() {
-                if Self::settings_data_action_button_rect_for_panel(panel, index)
-                    .contains_point(point)
+            let actions = self.settings_visible_data_actions();
+            for (index, action) in actions.iter().enumerate() {
+                if Self::settings_data_action_button_rect_for_panel_with_count(
+                    panel,
+                    index,
+                    actions.len(),
+                )
+                .contains_point(point)
                 {
                     return Some(DesktopMenuRouteShellAction::Settings(action.action));
                 }
@@ -75850,7 +75949,10 @@ version: "2.0.0"
             super::DesktopMenuRoute::Settings,
         );
         let game_button = DesktopLauncher::settings_main_menu_button_rect_for_panel(panel, 0);
-        let menu_container = DesktopLauncher::settings_main_menu_container_rect_for_panel(panel);
+        let menu_container = DesktopLauncher::settings_main_menu_container_rect_for_panel(
+            panel,
+            launcher.settings_visible_main_menu_entries().len(),
+        );
         let back = DesktopLauncher::settings_back_button_rect_for_panel(panel);
         assert_eq!(game_button.width, super::SETTINGS_MENU_BUTTON_WIDTH);
         assert_eq!(game_button.height, super::SETTINGS_MENU_BUTTON_HEIGHT);
@@ -75956,6 +76058,167 @@ version: "2.0.0"
             ],
         );
         assert_eq!(launcher.active_menu_route, None);
+    }
+
+    #[test]
+    fn desktop_launcher_settings_controls_entry_visibility_matches_upstream_mobile_keyboard() {
+        let surface = DesktopSurfaceSize::new(1280, 720);
+
+        let mut desktop = DesktopLauncher::new(Vec::new());
+        desktop.dispatch_menu_action(MenuButtonRole::Settings);
+        assert!(!desktop.menu_renderer_state.config.mobile);
+        assert!(desktop
+            .settings_visible_main_menu_entries()
+            .iter()
+            .any(|entry| entry.target == "controls-dialog"));
+
+        let mut mobile = DesktopLauncher::new(Vec::new());
+        mobile.menu_renderer_state.config.mobile = true;
+        mobile.dispatch_menu_action(MenuButtonRole::Settings);
+        let mobile_entries = mobile.settings_visible_main_menu_entries();
+        assert_eq!(mobile_entries.len(), super::SETTINGS_MENU_ENTRIES.len() - 1);
+        assert!(!mobile_entries
+            .iter()
+            .any(|entry| entry.target == "controls-dialog"));
+        assert_eq!(mobile_entries[4].target, "data-dialog");
+
+        let mobile_lines = mobile.active_menu_route_shell_lines(super::DesktopMenuRoute::Settings);
+        assert!(mobile_lines.contains(&format!(
+            "categories: {}",
+            super::SETTINGS_MENU_ENTRIES.len() - 1
+        )));
+        assert!(!mobile_lines
+            .iter()
+            .any(|line| line.contains("@settings.controls")));
+
+        let mobile_viewport = mobile.default_render_viewport_for_surface(surface);
+        let mobile_panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            mobile_viewport,
+            super::DesktopMenuRoute::Settings,
+        );
+        let shifted_data =
+            DesktopLauncher::settings_main_menu_button_rect_for_panel(mobile_panel, 4).center();
+        assert_eq!(
+            mobile.active_menu_route_shell_action_at_surface_point(
+                surface,
+                shifted_data.x,
+                shifted_data.y,
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::OpenPage(super::DesktopSettingsPage::Data)
+            )),
+            "hiding Controls must not leave Data mapped to the old Java desktop index"
+        );
+
+        let frame = mobile.menu_graphics_frame_for_surface(0, mobile_viewport);
+        let labels = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mobile settings frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!labels.contains(
+            &mobile
+                .localize_bundle_markup_text("@settings.controls")
+                .as_str()
+        ));
+        assert!(labels.contains(
+            &mobile
+                .localize_bundle_markup_text("@settings.data")
+                .as_str()
+        ));
+
+        mobile.set_setting_override("game", "keyboard", "true");
+        let keyboard_entries = mobile.settings_visible_main_menu_entries();
+        assert!(keyboard_entries
+            .iter()
+            .any(|entry| entry.target == "controls-dialog"));
+        let controls =
+            DesktopLauncher::settings_main_menu_button_rect_for_panel(mobile_panel, 4).center();
+        assert_eq!(
+            mobile.active_menu_route_shell_action_at_surface_point(surface, controls.x, controls.y),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::OpenControlsDialog
+            ))
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_settings_data_openfolder_visibility_matches_upstream_mobile() {
+        let surface = DesktopSurfaceSize::new(1280, 720);
+
+        let mut desktop = DesktopLauncher::new(Vec::new());
+        desktop.dispatch_menu_action(MenuButtonRole::Settings);
+        desktop.settings_dialog_state.page = super::DesktopSettingsPage::Data;
+        let desktop_actions = desktop.settings_visible_data_actions();
+        assert_eq!(desktop_actions.len(), super::SETTINGS_DATA_ACTIONS.len());
+        assert!(desktop_actions
+            .iter()
+            .any(|action| action.action == super::DesktopSettingsAction::OpenDataFolder));
+        assert!(desktop
+            .settings_route_lines()
+            .iter()
+            .any(|line| line.contains("@data.openfolder")));
+
+        let mut mobile = DesktopLauncher::new(Vec::new());
+        mobile.menu_renderer_state.config.mobile = true;
+        mobile.dispatch_menu_action(MenuButtonRole::Settings);
+        mobile.settings_dialog_state.page = super::DesktopSettingsPage::Data;
+        let mobile_actions = mobile.settings_visible_data_actions();
+        assert_eq!(mobile_actions.len(), super::SETTINGS_DATA_ACTIONS.len() - 1);
+        assert!(!mobile_actions
+            .iter()
+            .any(|action| action.action == super::DesktopSettingsAction::OpenDataFolder));
+        assert!(mobile_actions
+            .iter()
+            .any(|action| action.action == super::DesktopSettingsAction::ExportCrashLogs));
+
+        let mobile_lines = mobile.active_menu_route_shell_lines(super::DesktopMenuRoute::Settings);
+        assert!(!mobile_lines
+            .iter()
+            .any(|line| line.contains("@data.openfolder")));
+        assert!(mobile_lines
+            .iter()
+            .any(|line| line.contains("@crash.export")));
+
+        let viewport = mobile.default_render_viewport_for_surface(surface);
+        let frame = mobile.menu_graphics_frame_for_surface(0, viewport);
+        let labels = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mobile data settings frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!labels.contains(
+            &mobile
+                .localize_bundle_markup_text("@data.openfolder")
+                .as_str()
+        ));
+        assert!(labels.contains(&mobile.localize_bundle_markup_text("@crash.export").as_str()));
+
+        let crash_index = mobile_actions
+            .iter()
+            .position(|action| action.action == super::DesktopSettingsAction::ExportCrashLogs)
+            .expect("mobile data page should keep crash export after hiding openfolder");
+        assert_eq!(
+            mobile.settings_route_action_for_line(3 + crash_index),
+            Some(super::DesktopSettingsAction::ExportCrashLogs),
+            "hiding @data.openfolder on mobile must not shift @crash.export line mapping"
+        );
     }
 
     #[test]

@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 722. SettingsMenuDialog mobile 条件可见性
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **85.4%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `SettingsMenuDialog.rebuildMenu()` 中 controls 按钮只在 `!mobile || Core.settings.getBool("keyboard")` 时加入；
+  - controls 被隐藏时，后续 `@settings.data` 必须前移，点击命中不能继续使用固定桌面索引。
+  - `SettingsMenuDialog` Data 页中 `@data.openfolder` 仅在 `!mobile` 时显示，`@crash.export` 仍保留。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 settings 主菜单可见 entry helper；
+    - main menu 渲染、route-lines、命中检测、action 映射全部改为基于可见 entries；
+    - mobile 且 `game.keyboard=false` 时隐藏 `@settings.controls`，mobile 且 `game.keyboard=true` 或桌面时显示；
+    - 保留 Java 原始 `keyboard` key 作为过渡兼容读取。
+    - 新增 Data 页可见 action helper，mobile 过滤 `@data.openfolder`，并同步渲染、route-lines、line action 映射和容器高度。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_controls_entry_visibility_matches_upstream_mobile_keyboard --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_data_openfolder_visibility_matches_upstream_mobile --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop settings --lib -- --nocapture`
+- 仍未完成：
+  - SettingsMenuDialog 仍需继续补 `addCategory(...)` 扩展分类、文本设置项、更多 child dialog 视觉细节；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 721. LoadDialog runLoadSave 坏档回退与状态清理
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
