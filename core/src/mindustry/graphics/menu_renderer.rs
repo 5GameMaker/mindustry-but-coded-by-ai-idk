@@ -567,6 +567,7 @@ pub enum MenuBlockKind {
     StoneWall,
     SporeWall,
     Salt,
+    SaltWall,
     CopperOre,
     LeadOre,
     ScrapOre,
@@ -603,6 +604,7 @@ impl MenuBlockKind {
             Self::StoneWall => Some("stone-wall"),
             Self::SporeWall => Some("spore-wall"),
             Self::Salt => Some("salt"),
+            Self::SaltWall => Some("salt-wall"),
             Self::CopperOre => Some("ore-copper"),
             Self::LeadOre => Some("ore-lead"),
             Self::ScrapOre => Some("ore-scrap"),
@@ -639,6 +641,7 @@ impl MenuBlockKind {
             Self::StoneWall => Some([0.31, 0.31, 0.30, 1.0]),
             Self::SporeWall => Some([0.34, 0.22, 0.38, 1.0]),
             Self::Salt => Some([0.68, 0.66, 0.58, 1.0]),
+            Self::SaltWall => Some([0.49, 0.47, 0.40, 1.0]),
             Self::CopperOre => Some([0.90, 0.55, 0.30, 1.0]),
             Self::LeadOre => Some([0.55, 0.60, 0.76, 1.0]),
             Self::ScrapOre => Some([0.64, 0.50, 0.40, 1.0]),
@@ -2013,9 +2016,14 @@ fn menu_interp_fade(progress: f32) -> f32 {
 pub fn generate_menu_world(config: MenuRendererConfig) -> MenuWorldPlan {
     let width = config.width();
     let height = config.height();
-    let selected = terrain_pair(config.seed, true);
-    let selected2 = terrain_pair(config.seed.rotate_left(13), false);
-    let ores = [
+    let mut random = MenuArcRand::with_seed(config.seed as i64);
+    let offset = random.random_int_inclusive(100_000) as u64;
+    let s1 = offset;
+    let s2 = offset + 1;
+    let s3 = offset + 2;
+    let selected = terrain_pair_from_random(&mut random, true);
+    let selected2 = terrain_pair_from_random(&mut random, false);
+    let mut ores = vec![
         MenuBlockKind::CopperOre,
         MenuBlockKind::LeadOre,
         MenuBlockKind::ScrapOre,
@@ -2023,15 +2031,13 @@ pub fn generate_menu_world(config: MenuRendererConfig) -> MenuWorldPlan {
         MenuBlockKind::TitaniumOre,
         MenuBlockKind::ThoriumOre,
     ];
-    let ore1_index = (hash_u64(config.seed ^ 0x51) as usize) % ores.len();
-    let ore1 = ores[ore1_index];
-    let ore2 = ores[(ore1_index + 1 + (hash_u64(config.seed ^ 0x52) as usize % (ores.len() - 1)))
-        % ores.len()];
-    let tr1 = 0.65 + noise01(config.seed, 7, 0, 0) as f64 * 0.20;
-    let tr2 = 0.65 + noise01(config.seed, 8, 0, 0) as f64 * 0.20;
-    let do_heat = chance(config.seed, 11, 0.25);
-    let tendrils = chance(config.seed, 12, 0.25);
-    let tech = chance(config.seed, 13, 0.25);
+    let ore1 = ores.remove(random.random_index(ores.len()));
+    let ore2 = ores[random.random_index(ores.len())];
+    let tr1 = random.random_between(0.65, 0.85) as f64;
+    let tr2 = random.random_between(0.65, 0.85) as f64;
+    let do_heat = random.chance(0.25);
+    let tendrils = random.chance(0.25);
+    let tech = random.chance(0.25);
     let sec_size = 10usize;
 
     let mut tiles = Vec::with_capacity(width * height);
@@ -2041,26 +2047,26 @@ pub fn generate_menu_world(config: MenuRendererConfig) -> MenuWorldPlan {
             let mut ore = MenuBlockKind::Air;
             let mut wall = MenuBlockKind::Air;
 
-            if octave_noise(config.seed, 3, 0.5, 1.0 / 20.0, x, y, 1) > 0.5 {
+            if octave_noise(s1, 3, 0.5, 1.0 / 20.0, x, y, 0) > 0.5 {
                 wall = selected.1;
             }
 
-            if octave_noise(config.seed, 3, 0.5, 1.0 / 20.0, x, y, 3) > 0.5 {
+            if octave_noise(s3, 3, 0.5, 1.0 / 20.0, x, y, 0) > 0.5 {
                 floor = selected2.0;
                 if wall != MenuBlockKind::Air {
                     wall = selected2.1;
                 }
             }
 
-            if octave_noise(config.seed, 3, 0.3, 1.0 / 30.0, x, y, 2) > tr1 {
+            if octave_noise(s2, 3, 0.3, 1.0 / 30.0, x, y, 0) > tr1 {
                 ore = ore1;
             }
-            if octave_noise(config.seed, 2, 0.2, 1.0 / 15.0, x, y + 99_999, 2) > tr2 {
+            if octave_noise(s2, 2, 0.2, 1.0 / 15.0, x, y + 99_999, 0) > tr2 {
                 ore = ore2;
             }
 
             if do_heat {
-                let heat = octave_noise(config.seed, 4, 0.6, 1.0 / 50.0, x, y + 9_999, 3);
+                let heat = octave_noise(s3, 4, 0.6, 1.0 / 50.0, x, y + 9_999, 0);
                 let base = 0.65;
                 if heat > base {
                     ore = MenuBlockKind::Air;
@@ -2081,7 +2087,7 @@ pub fn generate_menu_world(config: MenuRendererConfig) -> MenuWorldPlan {
                 let sclx = x / sec_size;
                 let scly = y / sec_size;
                 let on_border = mx == 0 || my == 0 || mx == sec_size - 1 || my == sec_size - 1;
-                if octave_noise(config.seed, 2, 0.1, 0.5, sclx, scly, 1) > 0.4 && on_border {
+                if octave_noise(s1, 2, 0.1, 0.5, sclx, scly, 0) > 0.4 && on_border {
                     floor = MenuBlockKind::DarkPanel3;
                     if distance(
                         mx as f32,
@@ -2092,16 +2098,14 @@ pub fn generate_menu_world(config: MenuRendererConfig) -> MenuWorldPlan {
                     {
                         floor = MenuBlockKind::DarkPanel4;
                     }
-                    if wall != MenuBlockKind::Air
-                        && chance(config.seed ^ ((x as u64) << 32 | y as u64), 21, 0.7)
-                    {
+                    if wall != MenuBlockKind::Air && random.chance(0.7) {
                         wall = MenuBlockKind::DarkMetal;
                     }
                 }
             }
 
-            if tendrils && ridged_noise(config.seed.wrapping_add(1), x, y, 1.0 / 17.0) > 0.0 {
-                floor = if chance(config.seed ^ ((x as u64) << 16 | y as u64), 31, 0.2) {
+            if tendrils && ridged_noise(offset.wrapping_add(1), x, y, 1.0 / 17.0) > 0.0 {
+                floor = if random.chance(0.2) {
                     MenuBlockKind::SporeMoss
                 } else {
                     MenuBlockKind::Moss
@@ -2131,8 +2135,8 @@ pub fn generate_menu_world(config: MenuRendererConfig) -> MenuWorldPlan {
     }
 }
 
-fn terrain_pair(seed: u64, primary: bool) -> (MenuBlockKind, MenuBlockKind) {
-    let primary_pairs = [
+fn primary_terrain_pairs() -> &'static [(MenuBlockKind, MenuBlockKind)] {
+    &[
         (MenuBlockKind::Sand, MenuBlockKind::SandWall),
         (MenuBlockKind::Shale, MenuBlockKind::ShaleWall),
         (MenuBlockKind::Ice, MenuBlockKind::IceWall),
@@ -2142,21 +2146,30 @@ fn terrain_pair(seed: u64, primary: bool) -> (MenuBlockKind, MenuBlockKind) {
         (MenuBlockKind::Moss, MenuBlockKind::SporePine),
         (MenuBlockKind::Dirt, MenuBlockKind::DirtWall),
         (MenuBlockKind::Dacite, MenuBlockKind::DaciteWall),
-    ];
-    let secondary_pairs = [
+    ]
+}
+
+fn secondary_terrain_pairs() -> &'static [(MenuBlockKind, MenuBlockKind)] {
+    &[
         (MenuBlockKind::Basalt, MenuBlockKind::DuneWall),
         (MenuBlockKind::Basalt, MenuBlockKind::DuneWall),
         (MenuBlockKind::Stone, MenuBlockKind::StoneWall),
         (MenuBlockKind::Stone, MenuBlockKind::StoneWall),
         (MenuBlockKind::Moss, MenuBlockKind::SporeWall),
-        (MenuBlockKind::Salt, MenuBlockKind::StoneWall),
-    ];
+        (MenuBlockKind::Salt, MenuBlockKind::SaltWall),
+    ]
+}
+
+fn terrain_pair_from_random(
+    random: &mut MenuArcRand,
+    primary: bool,
+) -> (MenuBlockKind, MenuBlockKind) {
     let pairs = if primary {
-        &primary_pairs[..]
+        primary_terrain_pairs()
     } else {
-        &secondary_pairs[..]
+        secondary_terrain_pairs()
     };
-    pairs[(hash_u64(seed) as usize) % pairs.len()]
+    pairs[random.random_index(pairs.len())]
 }
 
 fn flyer_count_for_seed(seed: u64) -> usize {
@@ -2186,6 +2199,82 @@ fn flyer_speed(unit_name: &str) -> f32 {
         "gamma" => 2.2,
         _ => 3.0,
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MenuArcRand {
+    seed0: u64,
+    seed1: u64,
+}
+
+impl MenuArcRand {
+    fn with_seed(seed: i64) -> Self {
+        let mut random = Self { seed0: 0, seed1: 0 };
+        random.set_seed(seed);
+        random
+    }
+
+    fn set_seed(&mut self, seed: i64) {
+        let seed = if seed == 0 {
+            0x8000_0000_0000_0000
+        } else {
+            seed as u64
+        };
+        let hashed = murmur_hash3(seed);
+        self.seed0 = hashed;
+        self.seed1 = murmur_hash3(hashed);
+    }
+
+    fn next_long(&mut self) -> u64 {
+        let mut seed0 = self.seed0;
+        let seed1 = self.seed1;
+        self.seed0 = seed1;
+        seed0 ^= seed0 << 23;
+        self.seed1 = seed0 ^ seed1 ^ (seed0 >> 17) ^ (seed1 >> 26);
+        self.seed1.wrapping_add(seed1)
+    }
+
+    fn next_long_bound(&mut self, bound: u64) -> u64 {
+        assert!(bound > 0, "bound must be positive");
+        loop {
+            let bits = self.next_long() >> 1;
+            let value = bits % bound;
+            if bits.wrapping_sub(value).wrapping_add(bound - 1) <= i64::MAX as u64 {
+                return value;
+            }
+        }
+    }
+
+    fn next_float(&mut self) -> f32 {
+        ((self.next_long() >> 40) as f64 * (1.0 / (1u64 << 24) as f64)) as f32
+    }
+
+    fn random_index(&mut self, len: usize) -> usize {
+        assert!(len > 0, "random index requires a non-empty slice");
+        self.next_long_bound(len as u64) as usize
+    }
+
+    fn random_int_inclusive(&mut self, max: i32) -> i32 {
+        assert!(max >= 0, "inclusive random max must be non-negative");
+        self.next_long_bound(max as u64 + 1) as i32
+    }
+
+    fn random_between(&mut self, min: f32, max: f32) -> f32 {
+        min + self.next_float() * (max - min)
+    }
+
+    fn chance(&mut self, probability: f32) -> bool {
+        self.next_float() < probability
+    }
+}
+
+fn murmur_hash3(mut value: u64) -> u64 {
+    value ^= value >> 33;
+    value = value.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    value ^= value >> 33;
+    value = value.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    value ^= value >> 33;
+    value
 }
 
 fn octave_noise(
@@ -2383,6 +2472,7 @@ fn menu_block_variant_sprite_name(block: MenuBlockKind, tile: &MenuTile) -> Opti
         MenuBlockKind::StoneWall => menu_numbered_sprite("stone-wall", tile, 2),
         MenuBlockKind::SporeWall => menu_numbered_sprite("spore-wall", tile, 2),
         MenuBlockKind::Salt => "salt".to_string(),
+        MenuBlockKind::SaltWall => menu_numbered_sprite("salt-wall", tile, 2),
         MenuBlockKind::CopperOre => menu_numbered_sprite("ore-copper", tile, 3),
         MenuBlockKind::LeadOre => menu_numbered_sprite("ore-lead", tile, 3),
         MenuBlockKind::ScrapOre => menu_numbered_sprite("ore-scrap", tile, 3),
@@ -2897,6 +2987,19 @@ mod tests {
     }
 
     #[test]
+    fn menu_secondary_terrain_pairs_use_java_salt_wall_pair() {
+        assert!(
+            secondary_terrain_pairs().contains(&(MenuBlockKind::Salt, MenuBlockKind::SaltWall)),
+            "Java MenuRenderer pairs Blocks.salt with Blocks.saltWall"
+        );
+        assert!(
+            !secondary_terrain_pairs().contains(&(MenuBlockKind::Salt, MenuBlockKind::StoneWall)),
+            "salt terrain must not fall back to stoneWall"
+        );
+        assert_eq!(MenuBlockKind::SaltWall.sprite_name(), Some("salt-wall"));
+    }
+
+    #[test]
     fn generate_menu_world_creates_full_tile_grid() {
         let config = MenuRendererConfig::new(false, 42);
         let world = generate_menu_world(config);
@@ -3304,9 +3407,12 @@ mod tests {
             MenuScreenTransform::new(0.0, 0.0, 1.0),
         );
 
-        assert!(commands
-            .iter()
-            .any(|command| matches!(command, RenderCommand::DrawTriangle { .. })));
+        assert!(
+            !commands
+                .iter()
+                .any(|command| matches!(command, RenderCommand::DrawTriangle { .. })),
+            "Java flyer path draws shadow + unit sprite, not a native debug triangle"
+        );
         assert!(
             commands.iter().any(|command| matches!(
                 command,
@@ -3421,10 +3527,12 @@ mod tests {
                 if *rect == RenderRect::new(0.0, 0.0, MENU_TILE_SIZE * 3.0, MENU_TILE_SIZE)
         ));
         assert!(
-            floor
-                .iter()
-                .all(|command| !matches!(command, RenderCommand::DrawSprite { .. })),
-            "screen render path should not allocate tile sprites until native ordering can preserve UI over the menu world"
+            floor.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, layer, .. }
+                    if symbol.starts_with("sand-floor") && (*layer + 0.1).abs() < f32::EPSILON
+            )),
+            "screen render path should preserve the upstream floor sprite over the batched color fallback"
         );
 
         let wall = MenuRenderCommand::DrawCache {
@@ -4356,19 +4464,17 @@ mod tests {
             )
         }));
         assert!(commands.iter().any(|command| {
+            let icon_center = RenderPoint::new(
+                rect.x + MENU_DESKTOP_BUTTON_MARGIN_LEFT + MENU_DESKTOP_BUTTON_ICON_X,
+                rect.center().y,
+            );
+            let icon_rect =
+                menu_icon_sprite_rect(icon_center, MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE, false);
             matches!(
                 command,
-                RenderCommand::DrawText { text, position, style, layer, .. }
-                    if *text == upstream_ui_icon_glyph_string("play").unwrap()
-                        && style.font == RenderFontId::Icon
-                        && !style.outline
-                        && (position.x
-                            - (rect.x
-                                + MENU_DESKTOP_BUTTON_MARGIN_LEFT
-                                + MENU_DESKTOP_BUTTON_ICON_X))
-                            .abs()
-                            < f32::EPSILON
-                        && (position.y - rect.center().y).abs() < f32::EPSILON
+                RenderCommand::DrawSprite { symbol, rect: sprite_rect, layer, .. }
+                    if symbol == "menu-icon-play"
+                        && *sprite_rect == icon_rect
                         && (*layer
                             - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
                                 + MENU_BUTTON_ICON_LAYER_OFFSET))

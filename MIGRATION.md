@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 700. 主菜单背景随机流继续贴近 Java MenuRenderer
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **82.8%**，仍未达到完整可玩；继续优先原版 UI/前端还原。
+- Java 对照依据：
+  - `core/src/mindustry/graphics/MenuRenderer.java` 的 `generate()` 按同一条 `Mathf.random` 流顺序抽取 offset、主/副地形、矿物、阈值、heat/tendrils/tech，并将 `Blocks.salt` 与 `Blocks.saltWall` 配对。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增 `MenuArcRand`，让菜单背景的地形/矿物/阈值/heat/tendrils/tech 抽样按 Java 随机流顺序推进；
+    - 将噪声种子拆为 Java 的 `s1/s2/s3 = offset/offset+1/offset+2`；
+    - 新增并接入 `MenuBlockKind::SaltWall`，修正副地形 `(Salt, SaltWall)` 配对。
+  - `desktop/src/lib.rs`
+    - 默认 atlas 菜单环境资源补入 `salt-wall1/2`；
+    - 菜单环境块不再保留 direct raw PNG source，统一回落到上游 `sprites2.png` packed environment atlas 页，避免 raw 透明调试像素在 native OpenGL 路径中暴露成 magenta/checker。
+- 已验证：
+  - `cargo test -p mindustry-core menu_renderer --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_atlas_resolves_menu_background_tile_symbols --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_menu_renders_logo_and_version_overlay -- --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+  - Native 截图复核：`D:/MDT/.codex-tmp/rust-ui/rust_ui_after_environment_atlas_page_20260601.png`，确认本轮 magenta/checker 缺失纹理已消失。
+- 仍未完成：
+  - 主菜单背景噪声仍是 Rust 侧等价实现，后续还要继续收敛到 Arc `Simplex/Ridged` 的逐像素输出；
+  - 完整前端、world runtime、save/load、Java↔Rust 联机兼容均未完成，不能宣告目标完成。
+
 ## 699. Mods View Content 推进为可点击内容网格
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

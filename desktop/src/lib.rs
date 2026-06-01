@@ -4445,6 +4445,8 @@ fn desktop_menu_environment_sprite_virtual_source_paths() -> impl Iterator<Item 
         "spore-wall1",
         "spore-wall2",
         "salt",
+        "salt-wall1",
+        "salt-wall2",
         "ore-copper1",
         "ore-copper2",
         "ore-copper3",
@@ -17809,9 +17811,7 @@ fn desktop_parse_packed_atlas_regions(path: &Path) -> io::Result<Vec<DesktopPack
 
 fn desktop_should_preserve_direct_sprite_source_for_packed_region(source_path: &str) -> bool {
     let normalized = source_path.trim().replace('\\', "/").to_ascii_lowercase();
-    normalized == "sprites/logo.png"
-        || normalized.contains("sprites/ui/")
-        || normalized.contains("sprites/blocks/environment/")
+    normalized == "sprites/logo.png" || normalized.contains("sprites/ui/")
 }
 
 fn desktop_merge_packed_atlas_regions(atlas: &mut TextureAtlasPlan<bool>) {
@@ -46028,12 +46028,8 @@ mod tests {
             "menu background terrain sprites should resolve in the upstream environment page"
         );
         assert!(
-            sand_floor
-                .region
-                .source_path
-                .replace('\\', "/")
-                .contains("sprites/blocks/environment/sand-floor1.png"),
-            "native menu rendering should keep direct terrain sprite sources until atlas UV/upload parity is visually verified"
+            sand_floor.region.source_path.is_empty(),
+            "native menu rendering should use the packed upstream environment atlas page; direct raw terrain PNGs expose transparent debug pixels in OpenGL"
         );
     }
 
