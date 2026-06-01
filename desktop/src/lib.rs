@@ -309,6 +309,7 @@ pub struct DesktopConnectTarget {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DesktopJoinRouteServerSnapshot {
+    name: String,
     address: String,
     source: String,
     status: String,
@@ -333,6 +334,23 @@ impl DesktopJoinRouteServerSnapshot {
     fn matches_query(&self, query: &str) -> bool {
         let query = query.trim().to_lowercase();
         query.is_empty() || self.search_terms.contains(&query)
+    }
+
+    fn refresh_search_terms(&mut self) {
+        self.search_terms = [
+            self.name.clone(),
+            self.address.clone(),
+            self.source.clone(),
+            self.status.clone(),
+            self.version.clone(),
+            self.description.clone(),
+            self.players.clone(),
+            self.map.clone(),
+            self.mode.clone(),
+            self.ping.clone(),
+        ]
+        .join(" ")
+        .to_lowercase();
     }
 }
 
@@ -27576,7 +27594,7 @@ impl DesktopLauncher {
                         .mode_name
                         .clone()
                         .unwrap_or_else(|| format!("@{}", host.mode.name_bundle_key()));
-                    return Self::join_route_server_snapshot_from_parts(
+                    let mut snapshot = Self::join_route_server_snapshot_from_parts(
                         address,
                         "saved",
                         "online",
@@ -27587,6 +27605,11 @@ impl DesktopLauncher {
                         mode,
                         format!("{}ms", host.ping.max(0)),
                     );
+                    if !host.name.trim().is_empty() {
+                        snapshot.name = host.name.replace('\n', " ");
+                        snapshot.refresh_search_terms();
+                    }
+                    return snapshot;
                 }
                 DesktopJoinSavedServerRefreshState::Failed(_) => {
                     return Self::join_route_server_snapshot_from_parts(
@@ -27651,7 +27674,9 @@ impl DesktopLauncher {
         } else {
             "--ms".into()
         };
+        let name = address.clone();
         let search_terms = [
+            name.clone(),
             address.clone(),
             source.clone(),
             status.clone(),
@@ -27665,6 +27690,7 @@ impl DesktopLauncher {
         .join(" ")
         .to_lowercase();
         DesktopJoinRouteServerSnapshot {
+            name,
             address,
             source,
             status,
@@ -27698,7 +27724,9 @@ impl DesktopLauncher {
         let map = map.into();
         let mode = mode.into();
         let ping = ping.into();
+        let name = address.clone();
         let search_terms = [
+            name.clone(),
             address.clone(),
             source.clone(),
             status.clone(),
@@ -27712,6 +27740,7 @@ impl DesktopLauncher {
         .join(" ")
         .to_lowercase();
         DesktopJoinRouteServerSnapshot {
+            name,
             address,
             source,
             status,
@@ -34010,24 +34039,9 @@ impl DesktopLauncher {
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Start)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_markup(true)
                     .with_integer_position(true)
                     .with_outline(true),
-                layer + 0.003,
-            ));
-            pass.push(RenderCommand::draw_text_styled(
-                format!(
-                    "{}:{}  {}",
-                    host.address,
-                    host.port,
-                    self.localize_bundle_markup_text(self.join_route_local_section_label())
-                ),
-                RenderPoint::new(card.x + 14.0, card.y + card.height - 58.0),
-                [0.66, 0.78, 0.86, 1.0],
-                11.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Start)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
                 layer + 0.003,
             ));
             let description = host
@@ -34035,33 +34049,60 @@ impl DesktopLauncher {
                 .lines()
                 .map(str::trim)
                 .find(|line| !line.is_empty())
-                .unwrap_or("@server.description");
-            for (index, line) in [
-                format!("@server.description: {}", description),
-                format!("players: {}/{}", host.players, host.player_limit),
+                .unwrap_or_default();
+            let players_value = if host.player_limit > 0 {
                 format!(
-                    "save.map: {} / {}",
-                    host.mapname,
-                    self.localize_bundle_markup_text(
-                        host.mode_name.as_deref().unwrap_or("@unknown")
-                    )
+                    "[accent]{}[lightgray]/[accent]{}[lightgray]",
+                    host.players.max(0),
+                    host.player_limit.max(0)
+                )
+            } else {
+                format!("[accent]{}[lightgray]", host.players.max(0))
+            };
+            let players_key = if host.players == 1 && host.player_limit <= 0 {
+                "players.single"
+            } else {
+                "players"
+            };
+            let mode_name = self.localize_bundle_markup_text(
+                host.mode_name
+                    .as_deref()
+                    .unwrap_or("@unknown")
+                    .replace('\n', " "),
+            );
+            let mut lines = Vec::new();
+            if !description.is_empty() {
+                lines.push(format!("[gray]{}", description.replace('\n', " ")));
+            }
+            lines.extend([
+                format!(
+                    "[lightgray]{}",
+                    self.format_bundle_text(players_key, &[players_value.as_str()])
                 ),
-                format!("ping: {}ms", host.ping),
-            ]
-            .into_iter()
-            .enumerate()
-            {
+                format!(
+                    "[lightgray]{}[lightgray] / {}",
+                    self.format_bundle_text("save.map", &[host.mapname.as_str()]),
+                    mode_name
+                ),
+                format!(
+                    "{} {}ms",
+                    desktop_ui_icon_glyph_or_label("chartBar", "ping"),
+                    host.ping
+                ),
+            ]);
+            for (index, line) in lines.into_iter().enumerate() {
                 pass.push(RenderCommand::draw_text_styled(
                     self.localize_bundle_markup_text(line),
                     RenderPoint::new(
                         card.x + 14.0,
-                        card.y + card.height - 76.0 - index as f32 * 16.0,
+                        card.y + card.height - 58.0 - index as f32 * 16.0,
                     ),
                     [0.74, 0.84, 0.90, 1.0],
                     10.0,
                     0.0,
                     RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_markup(true)
                         .with_integer_position(true),
                     layer + 0.003 + index as f32 * 0.0001,
                 ));
@@ -34155,7 +34196,7 @@ impl DesktopLauncher {
                 pass.push(RenderCommand::draw_text_styled(
                     format!(
                         "{}   {}",
-                        snapshot.address,
+                        snapshot.name,
                         self.format_bundle_text("server.version", &[snapshot.version.as_str(), ""])
                     ),
                     RenderPoint::new(card.x + 14.0, header.center().y),
@@ -34164,6 +34205,7 @@ impl DesktopLauncher {
                     0.0,
                     RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_markup(true)
                         .with_integer_position(true)
                         .with_outline(true),
                     layer + 0.003,
@@ -34189,20 +34231,42 @@ impl DesktopLauncher {
                     ));
                 }
                 pass.push(RenderCommand::draw_text_styled(
-                    snapshot.description.clone(),
+                    self.localize_bundle_markup_text(format!(
+                        "[gray]{}",
+                        snapshot.description.replace('\n', " ")
+                    )),
                     RenderPoint::new(card.x + 14.0, card.y + card.height - 58.0),
                     [0.62, 0.72, 0.82, 1.0],
                     11.0,
                     0.0,
                     RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_markup(true)
                         .with_integer_position(true),
                     layer + 0.003,
                 ));
+                let players_value = if let Some((players, limit)) = snapshot.players.split_once('/')
+                {
+                    format!("[accent]{players}[lightgray]/[accent]{limit}[lightgray]")
+                } else {
+                    format!("[accent]{}[lightgray]", snapshot.players)
+                };
+                let mode = self.localize_bundle_markup_text(snapshot.mode.replace('\n', " "));
                 for (index, line) in [
-                    format!("players: {}", snapshot.players),
-                    format!("save.map: {} / {}", snapshot.map, snapshot.mode),
-                    format!("ping: {}", snapshot.ping),
+                    format!(
+                        "[lightgray]{}",
+                        self.format_bundle_text("players", &[players_value.as_str()])
+                    ),
+                    format!(
+                        "[lightgray]{}[lightgray] / {}",
+                        self.format_bundle_text("save.map", &[snapshot.map.as_str()]),
+                        mode
+                    ),
+                    format!(
+                        "{} {}",
+                        desktop_ui_icon_glyph_or_label("chartBar", "ping"),
+                        snapshot.ping
+                    ),
                 ]
                 .into_iter()
                 .enumerate()
@@ -34218,6 +34282,7 @@ impl DesktopLauncher {
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Start)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_markup(true)
                             .with_integer_position(true),
                         layer + 0.003 + index as f32 * 0.0001,
                     ));
@@ -71088,10 +71153,14 @@ version: "2.0.0"
         assert!(texts
             .iter()
             .any(|text| text.contains("example.org") && text.contains("v")));
-        assert!(texts.contains(&"@server.refreshing"));
-        assert!(texts.contains(&"players: 0"));
-        assert!(texts.contains(&"save.map: Unknown / Survival"));
-        assert!(texts.contains(&"ping: --ms"));
+        assert!(texts.iter().any(|text| text.contains("Refreshing server")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("0") && text.contains("players")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("Map: Unknown") && text.contains("Survival")));
+        assert!(texts.iter().any(|text| text.contains("--ms")));
         assert!(texts.contains(&"Search:"));
         assert!(texts.contains(&"@servers.showhidden"));
         assert!(texts.contains(&"[lightgray]No local games found!"));
@@ -71415,13 +71484,16 @@ version: "2.0.0"
             .collect::<Vec<_>>();
         assert!(texts
             .iter()
-            .any(|text| text.contains("cached.example") && text.contains("[gray]v158")));
-        assert!(texts.contains(&"cached description"));
-        assert!(texts.contains(&"players: 3/16"));
-        assert!(texts.contains(&"save.map: custom map / Attack"));
-        assert!(texts.contains(&"ping: 31ms"));
-        assert!(texts.contains(&"@server.refreshing"));
-        assert!(texts.contains(&"@host.invalid"));
+            .any(|text| text.contains("Cached server") && text.contains("[gray]v158")));
+        assert!(texts.iter().any(|text| text.contains("cached description")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("3") && text.contains("16") && text.contains("players")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("Map: custom map") && text.contains("Attack")));
+        assert!(texts.iter().any(|text| text.contains("31ms")));
+        assert!(texts.iter().any(|text| text.contains("Refreshing server")));
     }
 
     #[test]
@@ -71593,12 +71665,16 @@ version: "2.0.0"
         assert!(texts
             .iter()
             .any(|text| text.contains("LAN host") && text.contains("[gray]v158")));
-        assert!(texts
+        assert!(!texts
             .iter()
             .any(|text| text.contains("127.0.0.1") && text.contains("Local Servers")));
-        assert!(texts.contains(&"players: 2/8"));
-        assert!(texts.contains(&"save.map: local map / Survival"));
-        assert!(texts.contains(&"ping: 42ms"));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("2") && text.contains("8") && text.contains("players")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("Map: local map") && text.contains("Survival")));
+        assert!(texts.iter().any(|text| text.contains("42ms")));
         assert!(!texts.contains(&"tap to connect"));
 
         launcher.dispatch_menu_route_shell_action(
