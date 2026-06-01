@@ -15,6 +15,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 676. SettingsMenuDialog 主菜单与子弹窗标题接入 bundle locale
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **78.9%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是减少 SettingsMenuDialog 中最显眼的 `@settings.*` 裸显。
+- Java 对照依据：
+  - `SettingsMenuDialog` 主菜单按钮使用 `@settings.game`、`@settings.graphics`、`@settings.sound`、`@settings.language`、`@settings.controls`、`@settings.data`；
+  - `bundle.properties` / `bundle_zh_CN.properties` / `bundle_zh_TW.properties` 提供对应设置页标题与数据页标题；
+  - `SettingsMenuDialog` 的 Language/Controls/Data 子弹窗标题应通过当前 `Core.bundle` 解析。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 补 `settings.game/graphics/sound/language/controls/data/reset` 的 EN/简中/繁中 bundle fallback；
+  - `desktop/src/lib.rs`
+    - `push_settings_main_menu_buttons(...)` 渲染入口按钮时按 `settings_locale` 解析 label；
+    - `push_settings_child_dialog(...)` 的 Language/Controls/PlanetData 标题按 locale 解析；
+    - `push_settings_data_page(...)` 顶部 `@settings.data` 标题改为 locale 文案；
+    - 同步更新相关 UI 回归测试，避免测试继续锁死裸 `@settings.*` 文本。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_main_page_renders_upstream_menu_buttons --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_pages_render_reset_and_back_buttons --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - Settings 的 data action、planet data、keybind 和确认弹窗仍有若干 `@settings.*` raw key，下一轮继续按 Java bundle 与专用 dialog 壳补齐；
+  - 完整 bundle 文件加载/参数格式化仍未完成；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 675. route/dialog 标题与 JoinDialog 可见文案接入 bundle locale
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

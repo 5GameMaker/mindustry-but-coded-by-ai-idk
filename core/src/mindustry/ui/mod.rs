@@ -57,6 +57,13 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("workshop", "Workshop"),
     ("mods", "Mods"),
     ("settings", "Settings"),
+    ("settings.game", "Game"),
+    ("settings.graphics", "Graphics"),
+    ("settings.sound", "Sound"),
+    ("settings.language", "Language"),
+    ("settings.controls", "Controls"),
+    ("settings.data", "Game Data"),
+    ("settings.reset", "Reset to Defaults"),
     ("quit", "Quit"),
 ];
 
@@ -107,6 +114,13 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES: &[(&str, &str)] = &[
     ("workshop", "创意工坊"),
     ("mods", "模组"),
     ("settings", "设置"),
+    ("settings.game", "游戏"),
+    ("settings.graphics", "图形"),
+    ("settings.sound", "声音"),
+    ("settings.language", "语言"),
+    ("settings.controls", "控制"),
+    ("settings.data", "数据"),
+    ("settings.reset", "全部恢复默认"),
     ("quit", "退出"),
 ];
 
@@ -157,6 +171,13 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
     ("workshop", "工作坊"),
     ("mods", "模組"),
     ("settings", "設定"),
+    ("settings.game", "遊戲"),
+    ("settings.graphics", "圖形"),
+    ("settings.sound", "音效"),
+    ("settings.language", "語言"),
+    ("settings.controls", "控制"),
+    ("settings.data", "遊戲資料"),
+    ("settings.reset", "重設為預設設定"),
     ("quit", "退出"),
 ];
 
@@ -258,6 +279,8 @@ mod tests {
             ("ok", "OK"),
             ("back", "Back"),
             ("settings", "Settings"),
+            ("settings.game", "Game"),
+            ("settings.language", "Language"),
             ("quit", "Quit"),
         ] {
             assert_eq!(upstream_bundle_en_value(key), Some(expected));
@@ -294,6 +317,10 @@ mod tests {
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "servers.local"),
             Some("本地服务器")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "settings.language"),
+            Some("语言")
         );
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh-TW", "joingame"),

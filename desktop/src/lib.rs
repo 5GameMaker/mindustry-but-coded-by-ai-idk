@@ -23527,7 +23527,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.032 + index as f32 * 0.0001,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                entry.label,
+                self.localize_bundle_markup_text(entry.label),
                 RenderPoint::new(
                     icon_center.x
                         + SETTINGS_MENU_BUTTON_ICON_SIZE * 0.5
@@ -23726,7 +23726,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.022,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@settings.data",
+            self.localize_bundle_markup_text("@settings.data"),
             RenderPoint::new(container.center().x, container.y + container.height - 24.0),
             [0.94, 0.98, 1.0, 1.0],
             14.0,
@@ -23772,7 +23772,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.092,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            Self::settings_child_dialog_title(child),
+            self.localize_bundle_markup_text(Self::settings_child_dialog_title(child)),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 36.0),
             [0.94, 0.98, 1.0, 1.0],
             15.0,
@@ -66459,7 +66459,11 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(language_texts.contains(&"@settings.language"));
+        assert!(language_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@settings.language")
+                .as_str()
+        ));
         assert!(language_texts.contains(&"English"));
         assert!(!language_texts.contains(&"简体中文"));
         assert!(
@@ -66693,7 +66697,11 @@ version: "2.0.0"
         assert!(controls_sprites
             .iter()
             .any(|(symbol, _)| *symbol == text_field_cursor.as_str()));
-        assert!(controls_texts.contains(&"@settings.controls"));
+        assert!(controls_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@settings.controls")
+                .as_str()
+        ));
         assert!(controls_texts.contains(&"keybind search"));
         assert!(controls_texts.contains(&"@category.general.name"));
         assert!(controls_texts.contains(&"@keybind.move_x.name"));
@@ -67158,7 +67166,11 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(planet_texts.contains(&"@settings.data"));
+        assert!(planet_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@settings.data")
+                .as_str()
+        ));
         assert!(planet_texts.contains(&"@settings.planetselect: serpulo"));
         assert!(
             !planet_texts.contains(&"planet: serpulo"),
@@ -67423,7 +67435,11 @@ version: "2.0.0"
                 if symbol == &data_button_symbol && *rect == first_data_button
         )));
         assert!(texts.contains(&"upstream: SettingsMenuDialog"));
-        assert!(texts.contains(&"@settings.data"));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@settings.data")
+                .as_str()
+        ));
         assert!(
             !texts.contains(&"planet: erekir"),
             "Java dataDialog itself is a data-action button table; selected planet is shown inside PlanetDataDialog"
@@ -67770,7 +67786,7 @@ version: "2.0.0"
             .collect::<Vec<_>>();
         assert!(labels.contains(&"@back"));
         for entry in super::SETTINGS_MENU_ENTRIES {
-            assert!(labels.contains(&entry.label));
+            assert!(labels.contains(&launcher.localize_bundle_markup_text(entry.label).as_str()));
             let glyph = super::desktop_ui_icon_glyph_or_label(entry.icon, entry.icon);
             assert!(labels.contains(&glyph.as_str()));
             assert!(
