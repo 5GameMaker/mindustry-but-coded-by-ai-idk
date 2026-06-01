@@ -116,7 +116,7 @@ use mindustry_core::mindustry::ui::{
 };
 #[cfg(test)]
 use mindustry_core::mindustry::vars::SERVER_CACHE_FILE_NAME;
-use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
+use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS, TILE_SIZE};
 use mindustry_core::mindustry::world::draw::{
     draw_block_dispatch_icons, DrawBlockParticleBlendMode, DrawBlockParticleRenderKind,
 };
@@ -812,6 +812,85 @@ impl DesktopCustomRulesToggle {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopCustomRulesNumber {
+    WinWave,
+    WaveSpacing,
+    InitialWaveSpacing,
+    DropZoneRadius,
+}
+
+impl DesktopCustomRulesNumber {
+    const ALL: [Self; 4] = [
+        Self::WinWave,
+        Self::WaveSpacing,
+        Self::InitialWaveSpacing,
+        Self::DropZoneRadius,
+    ];
+
+    fn label_key(self) -> &'static str {
+        match self {
+            Self::WinWave => "@rules.wavelimit",
+            Self::WaveSpacing => "@rules.wavespacing",
+            Self::InitialWaveSpacing => "@rules.initialwavespacing",
+            Self::DropZoneRadius => "@rules.dropzoneradius",
+        }
+    }
+
+    fn enabled(self, rules: &Rules) -> bool {
+        match self {
+            Self::WaveSpacing | Self::InitialWaveSpacing => rules.waves && rules.wave_timer,
+            Self::WinWave | Self::DropZoneRadius => rules.waves,
+        }
+    }
+
+    fn value_text(self, rules: &Rules) -> String {
+        match self {
+            Self::WinWave => rules.win_wave.to_string(),
+            Self::WaveSpacing => format_custom_rules_number(rules.wave_spacing / 60.0),
+            Self::InitialWaveSpacing => {
+                format_custom_rules_number(rules.initial_wave_spacing / 60.0)
+            }
+            Self::DropZoneRadius => {
+                format_custom_rules_number(rules.drop_zone_radius / TILE_SIZE as f32)
+            }
+        }
+    }
+
+    fn adjust(self, rules: &mut Rules, direction: i32) {
+        let direction = direction.signum();
+        if direction == 0 || !self.enabled(rules) {
+            return;
+        }
+        match self {
+            Self::WinWave => {
+                rules.win_wave = (rules.win_wave + direction).max(0);
+            }
+            Self::WaveSpacing => {
+                let seconds = (rules.wave_spacing / 60.0 + direction as f32 * 10.0).max(1.0);
+                rules.wave_spacing = seconds * 60.0;
+            }
+            Self::InitialWaveSpacing => {
+                let seconds =
+                    (rules.initial_wave_spacing / 60.0 + direction as f32 * 10.0).max(0.0);
+                rules.initial_wave_spacing = seconds * 60.0;
+            }
+            Self::DropZoneRadius => {
+                let tiles = (rules.drop_zone_radius / TILE_SIZE as f32 + direction as f32).max(0.0);
+                rules.drop_zone_radius = tiles * TILE_SIZE as f32;
+            }
+        }
+    }
+}
+
+fn format_custom_rules_number(value: f32) -> String {
+    if (value - value.round()).abs() < 0.01 {
+        format!("{}", value.round() as i32)
+    } else {
+        format!("{value:.1}")
+    }
+}
+
 const MAP_PLAY_CUSTOM_RULE_WAVE_TOGGLES: &[DesktopCustomRulesToggle] = &[
     DesktopCustomRulesToggle::Waves,
     DesktopCustomRulesToggle::WaveSending,
@@ -844,6 +923,7 @@ pub enum DesktopMapCardActionKind {
     Customize,
     ShowModeHelp,
     ToggleCustomRule(DesktopCustomRulesToggle),
+    AdjustCustomRuleNumber(DesktopCustomRulesNumber, i32),
     OpenCustomRulesEdit,
     CloseCustomRulesEdit,
     CopyCustomRules,
@@ -30157,6 +30237,27 @@ impl DesktopLauncher {
         rects
     }
 
+    fn map_play_customize_number_row_rect(content: RenderRect, index: usize) -> RenderRect {
+        let width = (content.width - 40.0).clamp(260.0, 390.0);
+        RenderRect::new(
+            content.right() - width - 16.0,
+            content.y + 20.0 + (DesktopCustomRulesNumber::ALL.len() - 1 - index) as f32 * 27.0,
+            width,
+            23.0,
+        )
+    }
+
+    fn map_play_customize_number_button_rect(row: RenderRect, increase: bool) -> RenderRect {
+        let width = 24.0;
+        let gap = 4.0;
+        let x = if increase {
+            row.right() - width
+        } else {
+            row.right() - width * 2.0 - gap
+        };
+        RenderRect::new(x, row.y + 1.0, width, row.height - 2.0)
+    }
+
     fn toggle_map_play_custom_rule(&mut self, index: usize, toggle: DesktopCustomRulesToggle) {
         let Some(map) = self.map_list_cards.get(index) else {
             return;
@@ -30171,6 +30272,26 @@ impl DesktopLauncher {
         }
     }
 
+    fn adjust_map_play_custom_rule_number(
+        &mut self,
+        index: usize,
+        number: DesktopCustomRulesNumber,
+        direction: i32,
+    ) {
+        let Some(map) = self.map_list_cards.get(index) else {
+            return;
+        };
+        let mut rules = self
+            .map_play_rules
+            .clone()
+            .unwrap_or_else(|| Self::map_play_rules_for_mode(map, self.map_play_selected_mode));
+        if number.enabled(&rules) {
+            number.adjust(&mut rules, direction);
+            self.map_play_rules = Some(rules);
+            self.map_play_rules_error = None;
+        }
+    }
+
     fn map_play_rules_clipboard_json(rules: &Rules) -> String {
         let mode_name = rules.mode_name.as_deref().unwrap_or("custom");
         format!(
@@ -30179,22 +30300,30 @@ impl DesktopLauncher {
                 "\"waves\":{},",
                 "\"waveSending\":{},",
                 "\"waveTimer\":{},",
+                "\"winWave\":{},",
                 "\"infiniteResources\":{},",
                 "\"schematicsAllowed\":{},",
                 "\"attackMode\":{},",
                 "\"pvp\":{},",
                 "\"coreCapture\":{},",
+                "\"waveSpacing\":{},",
+                "\"initialWaveSpacing\":{},",
+                "\"dropZoneRadius\":{},",
                 "\"modeName\":\"{}\"",
                 "}}"
             ),
             rules.waves,
             rules.wave_sending,
             rules.wave_timer,
+            rules.win_wave,
             rules.infinite_resources,
             rules.schematics_allowed,
             rules.attack_mode,
             rules.pvp,
             rules.core_capture,
+            rules.wave_spacing,
+            rules.initial_wave_spacing,
+            rules.drop_zone_radius,
             mode_name.replace('"', "\\\"")
         )
     }
@@ -31918,6 +32047,35 @@ impl DesktopLauncher {
                                 })
                             })
                             .unwrap_or_default();
+                        for (number_index, number) in
+                            DesktopCustomRulesNumber::ALL.into_iter().enumerate()
+                        {
+                            if !number.enabled(&rules) {
+                                continue;
+                            }
+                            let row =
+                                Self::map_play_customize_number_row_rect(content, number_index);
+                            let decrease = Self::map_play_customize_number_button_rect(row, false);
+                            if decrease.contains_point(point) {
+                                return Some(DesktopMenuRouteShellAction::MapCard(
+                                    DesktopMapCardAction::new(
+                                        index,
+                                        DesktopMapCardActionKind::AdjustCustomRuleNumber(
+                                            number, -1,
+                                        ),
+                                    ),
+                                ));
+                            }
+                            let increase = Self::map_play_customize_number_button_rect(row, true);
+                            if increase.contains_point(point) {
+                                return Some(DesktopMenuRouteShellAction::MapCard(
+                                    DesktopMapCardAction::new(
+                                        index,
+                                        DesktopMapCardActionKind::AdjustCustomRuleNumber(number, 1),
+                                    ),
+                                ));
+                            }
+                        }
                         for (toggle, rect) in Self::map_play_customize_toggle_rects(content) {
                             if rect.contains_point(point) && toggle.enabled(&rules) {
                                 return Some(DesktopMenuRouteShellAction::MapCard(
@@ -33611,6 +33769,16 @@ impl DesktopLauncher {
                             self.toggle_map_play_custom_rule(action.index, toggle);
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::AdjustCustomRuleNumber(number, direction) => {
+                            self.adjust_map_play_custom_rule_number(
+                                action.index,
+                                number,
+                                direction,
+                            );
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                            self.map_play_rules_edit_dialog_open = false;
                         }
                         DesktopMapCardActionKind::OpenCustomRulesEdit => {
                             self.map_play_rules_edit_dialog_open = true;
@@ -38822,6 +38990,79 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_map_play_customize_number_rows(
+        &self,
+        pass: &mut RenderPass,
+        content: RenderRect,
+        rules: &Rules,
+        layer: f32,
+    ) {
+        for (index, number) in DesktopCustomRulesNumber::ALL.into_iter().enumerate() {
+            let row = Self::map_play_customize_number_row_rect(content, index);
+            let enabled = number.enabled(rules);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("button"),
+                row,
+                if enabled {
+                    [1.0, 1.0, 1.0, 0.34]
+                } else {
+                    [1.0, 1.0, 1.0, 0.14]
+                },
+                0.0,
+                layer + index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text(number.label_key()),
+                RenderPoint::new(row.x + 8.0, row.center().y),
+                if enabled {
+                    [0.80, 0.90, 0.98, 1.0]
+                } else {
+                    [0.52, 0.58, 0.64, 0.70]
+                },
+                9.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_markup(true)
+                    .with_wrap_width((row.width - 104.0).max(80.0))
+                    .with_integer_position(true),
+                layer + 0.002 + index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                number.value_text(rules),
+                RenderPoint::new(row.right() - 60.0, row.center().y),
+                if enabled {
+                    [0.96, 0.98, 1.0, 1.0]
+                } else {
+                    [0.56, 0.62, 0.68, 0.76]
+                },
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::End)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.003 + index as f32 * 0.001,
+            ));
+            self.push_settings_text_button_enabled(
+                pass,
+                Self::map_play_customize_number_button_rect(row, false),
+                "-",
+                None,
+                layer + 0.004 + index as f32 * 0.001,
+                enabled,
+            );
+            self.push_settings_text_button_enabled(
+                pass,
+                Self::map_play_customize_number_button_rect(row, true),
+                "+",
+                None,
+                layer + 0.005 + index as f32 * 0.001,
+                enabled,
+            );
+        }
+    }
+
     fn push_map_play_customize_dialog(
         &self,
         pass: &mut RenderPass,
@@ -38957,6 +39198,7 @@ impl DesktopLauncher {
             }
             y -= 10.0;
         }
+        self.push_map_play_customize_number_rows(pass, content, &rules, layer + 0.030);
         if y >= content.y + 18.0 {
             for row in [
                 self.localize_bundle_markup_text("@rules.title.planet"),
@@ -64771,6 +65013,17 @@ version: "2.0.0"
         );
         launcher.dispatch_menu_route_shell_action(customize);
         assert!(launcher.map_play_customize_dialog_open);
+        let mut editable_rules = DesktopLauncher::map_play_rules_for_mode(
+            &launcher.map_list_cards[0],
+            launcher.map_play_selected_mode,
+        );
+        editable_rules.waves = true;
+        editable_rules.wave_timer = true;
+        editable_rules.win_wave = 5;
+        editable_rules.wave_spacing = 600.0;
+        editable_rules.initial_wave_spacing = 300.0;
+        editable_rules.drop_zone_radius = 5.0 * mindustry_core::mindustry::vars::TILE_SIZE as f32;
+        launcher.map_play_rules = Some(editable_rules);
 
         let customize_frame = launcher.menu_graphics_frame_for_surface(2, render_viewport);
         let customize_texts = customize_frame
@@ -64798,9 +65051,40 @@ version: "2.0.0"
         assert!(customize_texts.contains(&"✓ Waves"));
         assert!(customize_texts.contains(&"□ Attack Mode"));
         assert!(customize_texts.contains(&"□ PvP"));
+        assert!(customize_texts.contains(&"Map Ends After Wave"));
+        assert!(customize_texts.contains(&"Wave Spacing:[lightgray] (sec)"));
+        assert!(customize_texts.contains(&"Initial Wave Spacing:[lightgray] (sec)"));
+        assert!(customize_texts.contains(&"Drop Zone Radius:[lightgray] (tiles)"));
 
         let child = DesktopLauncher::map_play_child_dialog_rect(dialog);
         let content = DesktopLauncher::map_play_customize_content_rect(child);
+        let wave_spacing_row = DesktopLauncher::map_play_customize_number_row_rect(content, 1);
+        let wave_spacing_plus =
+            DesktopLauncher::map_play_customize_number_button_rect(wave_spacing_row, true).center();
+        let increase_wave_spacing =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::AdjustCustomRuleNumber(
+                    super::DesktopCustomRulesNumber::WaveSpacing,
+                    1,
+                ),
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                wave_spacing_plus.x,
+                wave_spacing_plus.y
+            ),
+            Some(increase_wave_spacing)
+        );
+        launcher.dispatch_menu_route_shell_action(increase_wave_spacing);
+        assert_eq!(
+            launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| rules.wave_spacing),
+            Some(1200.0)
+        );
         let attack_toggle = DesktopLauncher::map_play_customize_toggle_rects(content)
             .into_iter()
             .find(|(toggle, _)| *toggle == super::DesktopCustomRulesToggle::AttackMode)
@@ -64905,6 +65189,7 @@ version: "2.0.0"
             .clone()
             .expect("copy should store the rules JSON clipboard payload");
         assert!(copied_rules.contains("\"attackMode\":true"));
+        assert!(copied_rules.contains("\"waveSpacing\":1200"));
 
         let reset_center =
             DesktopLauncher::map_play_rules_edit_button_rect(edit_dialog, 2).center();

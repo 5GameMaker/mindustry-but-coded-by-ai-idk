@@ -17,6 +17,37 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 708. CustomRulesDialog waves 数值字段最小编辑闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **83.9%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版，而不是只做主菜单或孤立模块。
+- Java 对照依据：
+  - `CustomRulesDialog.setupMain()` 的 waves 分类包含 `numberi("@rules.wavelimit")`、`number("@rules.wavespacing")`、`number("@rules.initialwavespacing")`、`number("@rules.dropzoneradius")`；
+  - Java 数值项会按条件启用/禁用，并写回 `Rules`，copy/load 也应覆盖这些字段。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopCustomRulesNumber`，把 `winWave / waveSpacing / initialWaveSpacing / dropZoneRadius` 接入 `MapPlayDialog -> @customize` 的可见数值行；
+    - 数值行展示原版 key 文案与当前值，并提供最小 `- / +` 步进编辑闭环；`waveSpacing/initialWaveSpacing` 以秒显示、写回 ticks，`dropZoneRadius` 以 tile 显示、写回 world units；
+    - 数值按钮命中分发 `AdjustCustomRuleNumber(...)`，直接修改当前 `map_play_rules`，并保持 custom rules 弹窗打开；
+    - copy/load JSON 现在包含 `winWave / waveSpacing / initialWaveSpacing / dropZoneRadius`，避免数值编辑后复制丢字段；
+    - 现有 map play/custom rules 测试扩展为验证数值文案可见、按钮命中、`waveSpacing` 写回与 copy/load 往返。
+  - `core/src/mindustry/game/rules.rs`
+    - `Rules::apply_json_str` 支持 `initialWaveSpacing`、`dropZoneRadius`、`winWave`。
+  - `core/src/mindustry/ui/mod.rs`
+    - 补齐 `rules.wavelimit`、`rules.wavespacing`、`rules.initialwavespacing`、`rules.dropzoneradius` 的英/简中/繁中 fallback 文案与测试断言。
+  - `README.md`
+    - 迁移百分比更新为 `83.9%`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore -- --nocapture`
+  - `cargo test -p mindustry-core rules_apply_json_str_updates_supported_top_level_fields --lib -- --nocapture`
+  - `cargo test -p mindustry-core upstream_menu_bundle_entries_cover_menu_fragment_buttons --lib -- --nocapture`
+  - `cargo test -p mindustry-core upstream_menu_bundle_locale_entries_cover_chinese_menu_fragment_buttons --lib -- --nocapture`
+- 仍未完成：
+  - 当前数值编辑还是最小步进闭环，未完全还原 Java `showTextInput`/精确文本输入、tooltip/info 与所有数值字段；
+  - `CustomRulesDialog` 的天气编辑、单位/方块 ban 列表、队伍规则仍需继续迁移；
+  - `Open In Editor` 仍需从 route shell 推进到真实 `beginEditMap`/地图编辑器状态。
+
 ## 707. CustomRulesDialog waves edit 二级弹层 copy/load/reset 可见闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

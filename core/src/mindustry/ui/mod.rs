@@ -229,6 +229,13 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("rules.waves", "Waves"),
     ("rules.wavesending", "Wave Sending"),
     ("rules.wavetimer", "Wave Timer"),
+    ("rules.wavelimit", "Map Ends After Wave"),
+    ("rules.wavespacing", "Wave Spacing:[lightgray] (sec)"),
+    (
+        "rules.initialwavespacing",
+        "Initial Wave Spacing:[lightgray] (sec)",
+    ),
+    ("rules.dropzoneradius", "Drop Zone Radius:[lightgray] (tiles)"),
     ("rules.waitForWaveToEnd", "Waves Wait for Enemies"),
     ("rules.attack", "Attack Mode"),
     ("rules.corecapture", "Capture Core On Destruction"),
@@ -615,6 +622,10 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES: &[(&str, &str)] = &[
     ("rules.waves", "波次"),
     ("rules.wavesending", "可跳过波次"),
     ("rules.wavetimer", "波次计时器"),
+    ("rules.wavelimit", "波数到达后结束地图"),
+    ("rules.wavespacing", "波次间隔：[lightgray]（秒）"),
+    ("rules.initialwavespacing", "初始波次间隔：[lightgray]（秒）"),
+    ("rules.dropzoneradius", "空降区半径：[lightgray]（格）"),
     ("rules.waitForWaveToEnd", "等待波次结束"),
     ("rules.attack", "进攻模式"),
     ("rules.corecapture", "摧毁后占领核心"),
@@ -980,6 +991,10 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
     ("rules.waves", "波次"),
     ("rules.wavesending", "Wave Sending"),
     ("rules.wavetimer", "波次時間"),
+    ("rules.wavelimit", "到達指定波次後結束地圖"),
+    ("rules.wavespacing", "波次間隔：[lightgray]（秒）"),
+    ("rules.initialwavespacing", "初始波次間隔：[lightgray]（秒）"),
+    ("rules.dropzoneradius", "空降區半徑：[lightgray]（格）"),
     ("rules.waitForWaveToEnd", "等待所有敵人毀滅才開始下一波次"),
     ("rules.attack", "攻擊模式"),
     ("rules.corecapture", "佔領摧毀的核心"),
@@ -1303,6 +1318,22 @@ mod tests {
             upstream_bundle_en_value("rules.invaliddata"),
             Some("Invalid clipboard data.")
         );
+        assert_eq!(
+            upstream_bundle_en_value("rules.wavelimit"),
+            Some("Map Ends After Wave")
+        );
+        assert_eq!(
+            upstream_bundle_en_value("rules.wavespacing"),
+            Some("Wave Spacing:[lightgray] (sec)")
+        );
+        assert_eq!(
+            upstream_bundle_en_value("rules.initialwavespacing"),
+            Some("Initial Wave Spacing:[lightgray] (sec)")
+        );
+        assert_eq!(
+            upstream_bundle_en_value("rules.dropzoneradius"),
+            Some("Drop Zone Radius:[lightgray] (tiles)")
+        );
         assert_eq!(upstream_bundle_en_value("missing.menu.key"), None);
     }
 
@@ -1400,6 +1431,22 @@ mod tests {
             Some("剪贴板数据无效。")
         );
         assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "rules.wavelimit"),
+            Some("波数到达后结束地图")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "rules.wavespacing"),
+            Some("波次间隔：[lightgray]（秒）")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "rules.initialwavespacing"),
+            Some("初始波次间隔：[lightgray]（秒）")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "rules.dropzoneradius"),
+            Some("空降区半径：[lightgray]（格）")
+        );
+        assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "keybind.chat.name"),
             Some("聊天")
         );
@@ -1446,6 +1493,22 @@ mod tests {
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_TW", "rules.invaliddata"),
             Some("無效的剪貼板數據")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "rules.wavelimit"),
+            Some("到達指定波次後結束地圖")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "rules.wavespacing"),
+            Some("波次間隔：[lightgray]（秒）")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "rules.initialwavespacing"),
+            Some("初始波次間隔：[lightgray]（秒）")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "rules.dropzoneradius"),
+            Some("空降區半徑：[lightgray]（格）")
         );
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_TW", "server.invalidaddress"),

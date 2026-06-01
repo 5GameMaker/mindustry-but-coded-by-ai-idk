@@ -241,6 +241,9 @@ struct RulesJsonPatch {
     schematics_allowed: Option<bool>,
     core_capture: Option<bool>,
     wave_spacing: Option<f32>,
+    initial_wave_spacing: Option<f32>,
+    drop_zone_radius: Option<f32>,
+    win_wave: Option<i32>,
     default_team: Option<i32>,
     wave_team: Option<i32>,
     mode_name: Option<Option<String>>,
@@ -283,6 +286,15 @@ impl RulesJsonPatch {
         }
         if let Some(value) = self.wave_spacing {
             rules.wave_spacing = value;
+        }
+        if let Some(value) = self.initial_wave_spacing {
+            rules.initial_wave_spacing = value;
+        }
+        if let Some(value) = self.drop_zone_radius {
+            rules.drop_zone_radius = value;
+        }
+        if let Some(value) = self.win_wave {
+            rules.win_wave = value;
         }
         if let Some(value) = self.default_team {
             rules.default_team = value;
@@ -344,6 +356,9 @@ impl<'a> RulesJsonParser<'a> {
                 "schematicsAllowed" => patch.schematics_allowed = self.parse_optional_bool()?,
                 "coreCapture" => patch.core_capture = self.parse_optional_bool()?,
                 "waveSpacing" => patch.wave_spacing = self.parse_optional_f32()?,
+                "initialWaveSpacing" => patch.initial_wave_spacing = self.parse_optional_f32()?,
+                "dropZoneRadius" => patch.drop_zone_radius = self.parse_optional_f32()?,
+                "winWave" => patch.win_wave = self.parse_optional_i32()?,
                 "defaultTeam" => patch.default_team = self.parse_optional_i32()?,
                 "waveTeam" => patch.wave_team = self.parse_optional_i32()?,
                 "modeName" => patch.mode_name = self.parse_optional_nullable_string()?,
@@ -1042,7 +1057,12 @@ mod tests {
                     "pvp": true,
                     "editor": true,
                     "infiniteResources": true,
+                    "schematicsAllowed": false,
+                    "coreCapture": true,
                     "waveSpacing": 7200.5,
+                    "initialWaveSpacing": 600.25,
+                    "dropZoneRadius": 48.0,
+                    "winWave": 25,
                     "defaultTeam": 6,
                     "waveTeam": 7,
                     "modeName": "duel",
@@ -1061,7 +1081,12 @@ mod tests {
         assert!(rules.pvp);
         assert!(rules.editor);
         assert!(rules.infinite_resources);
+        assert!(!rules.schematics_allowed);
+        assert!(rules.core_capture);
         assert_eq!(rules.wave_spacing, 7200.5);
+        assert_eq!(rules.initial_wave_spacing, 600.25);
+        assert_eq!(rules.drop_zone_radius, 48.0);
+        assert_eq!(rules.win_wave, 25);
         assert_eq!(rules.default_team, 6);
         assert_eq!(rules.wave_team, 7);
         assert_eq!(rules.mode_name.as_deref(), Some("duel"));
