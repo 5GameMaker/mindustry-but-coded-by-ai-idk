@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 657. JoinDialog section 折叠持久化
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **76.9%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是补齐 Java `JoinDialog.section(label, servers, eye)` 的 section 级折叠入口、可见 body gate 与 `collapsed-<label>` 持久化语义。
+- Java 对照依据：
+  - `JoinDialog.section(...)` 使用 `new Collapser(servers, Core.settings.getBool("collapsed-" + label, false))`；
+  - 点击右侧 `Icon.downOpen/upOpen` 会 `coll.toggle(false)` 并 `Core.settings.put("collapsed-" + label, coll.isCollapsed())`；
+  - local、remote、global 三个 section 的 header 保持可见，折叠时隐藏对应 body；global 的 eye/show-hidden 仍是独立过滤开关。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopJoinSection::{Local, Remote, Global}` 与 `ToggleJoinSectionCollapsed(...)` route shell action；
+    - 新增 section label、header y、toggle rect、collapsed 读取/写回 helper，settings key 按当前显示 label 写为 `collapsed-@servers.local` / `collapsed-@servers.local.steam` / `collapsed-@servers.remote` / `collapsed-@servers.global`，贴近 Java label key 行为；
+    - local/remote header 右侧箭头从纯视觉变为可点击折叠按钮，并按 collapsed 状态切换 `upOpen/downOpen`；
+    - local 折叠时隐藏 local host body，remote 折叠时隐藏 saved server body，global 折叠时保留 `@servers.global` header 并隐藏 search/show-hidden/community group body；
+    - shell lines 输出 `section-state: ... collapsed:true/false`，折叠状态下不再输出对应 body 行，便于后续回归。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+  - `cargo test -p mindustry-desktop menu_frame --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 当前只实现即时折叠显隐，没有 Java `Collapser.setDuration(0.1f)` 的动画；
+  - JoinDialog 仍缺完整 ScrollPane 滚动、saved server 独立 `pingHost` 刷新、community 远端 fetch/cache、`safeConnect(..., version)` 版本门禁；
+  - mobile JoinDialog 的整体布局仍需继续贴近原版；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 656. JoinDialog 平台条件入口对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -2745,6 +2745,13 @@ impl CampaignPlanetDialogState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopJoinSection {
+    Local,
+    Remote,
+    Global,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopMenuRouteShellAction {
     CloseRoute,
     LaunchCampaign,
@@ -2752,6 +2759,7 @@ pub enum DesktopMenuRouteShellAction {
     FocusJoinSearch,
     ClearJoinSearch,
     ToggleJoinShowHidden,
+    ToggleJoinSectionCollapsed(DesktopJoinSection),
     FocusHostName,
     FocusHostPort,
     ToggleHostFriendsOnly,
@@ -27058,6 +27066,51 @@ impl DesktopLauncher {
         }
     }
 
+    fn join_route_section_label(&self, section: DesktopJoinSection) -> &'static str {
+        match section {
+            DesktopJoinSection::Local => self.join_route_local_section_label(),
+            DesktopJoinSection::Remote => "@servers.remote",
+            DesktopJoinSection::Global => "@servers.global",
+        }
+    }
+
+    fn join_route_section_header_y_for_panel(
+        panel: RenderRect,
+        section: DesktopJoinSection,
+    ) -> f32 {
+        match section {
+            DesktopJoinSection::Local => panel.y + panel.height - 158.0,
+            DesktopJoinSection::Remote => panel.y + panel.height - 192.0,
+            DesktopJoinSection::Global => {
+                let global_card = Self::join_route_server_card_rect_for_panel(
+                    panel,
+                    Self::join_route_server_card_visible_slots_for_panel(panel).saturating_sub(1),
+                );
+                global_card.y - 30.0
+            }
+        }
+    }
+
+    fn join_route_section_toggle_rect_for_panel(
+        panel: RenderRect,
+        section: DesktopJoinSection,
+    ) -> RenderRect {
+        let y = Self::join_route_section_header_y_for_panel(panel, section);
+        RenderRect::new(panel.x + panel.width - 64.0, y - 18.0, 40.0, 36.0)
+    }
+
+    fn join_route_section_collapsed(&self, section: DesktopJoinSection) -> bool {
+        let key = format!("collapsed-{}", self.join_route_section_label(section));
+        self.settings_overrides
+            .get(&key)
+            .is_some_and(|value| matches!(value.as_str(), "true" | "1"))
+    }
+
+    fn set_join_route_section_collapsed(&mut self, section: DesktopJoinSection, collapsed: bool) {
+        let key = format!("collapsed-{}", self.join_route_section_label(section));
+        self.settings_overrides.insert(key, collapsed.to_string());
+    }
+
     fn join_route_info_button_available_for_platform(&self) -> bool {
         !self.host_steam_enabled()
     }
@@ -27486,6 +27539,9 @@ impl DesktopLauncher {
     }
 
     fn join_route_visible_local_host_count_for_panel(&self, panel: RenderRect) -> usize {
+        if self.join_route_section_collapsed(DesktopJoinSection::Local) {
+            return 0;
+        }
         self.join_local_hosts
             .len()
             .min(JOIN_LOCAL_HOST_VISIBLE_CARDS)
@@ -27493,6 +27549,9 @@ impl DesktopLauncher {
     }
 
     fn join_route_visible_saved_server_card_capacity_for_panel(&self, panel: RenderRect) -> usize {
+        if self.join_route_section_collapsed(DesktopJoinSection::Remote) {
+            return 0;
+        }
         Self::join_route_server_card_visible_slots_for_panel(panel)
             .saturating_sub(self.join_route_visible_local_host_count_for_panel(panel))
     }
@@ -29367,7 +29426,25 @@ impl DesktopLauncher {
         if Self::join_route_refresh_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::RefreshJoinServers);
         }
+        for section in [DesktopJoinSection::Local, DesktopJoinSection::Remote] {
+            if Self::join_route_section_toggle_rect_for_panel(panel, section).contains_point(point)
+            {
+                return Some(DesktopMenuRouteShellAction::ToggleJoinSectionCollapsed(
+                    section,
+                ));
+            }
+        }
         if self.join_community_servers_enabled() {
+            if Self::join_route_section_toggle_rect_for_panel(panel, DesktopJoinSection::Global)
+                .contains_point(point)
+            {
+                return Some(DesktopMenuRouteShellAction::ToggleJoinSectionCollapsed(
+                    DesktopJoinSection::Global,
+                ));
+            }
+            if self.join_route_section_collapsed(DesktopJoinSection::Global) {
+                return None;
+            }
             if Self::join_route_search_rect_for_panel(panel).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::FocusJoinSearch);
             }
@@ -30690,6 +30767,10 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::ToggleJoinShowHidden => {
                 self.join_show_hidden = !self.join_show_hidden;
+            }
+            DesktopMenuRouteShellAction::ToggleJoinSectionCollapsed(section) => {
+                let collapsed = !self.join_route_section_collapsed(section);
+                self.set_join_route_section_collapsed(section, collapsed);
             }
             DesktopMenuRouteShellAction::FocusHostName => {
                 self.host_name_focused = true;
@@ -33049,7 +33130,9 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.034,
         );
 
-        let local_detail = if self.join_local_discovering {
+        let local_detail = if self.join_route_section_collapsed(DesktopJoinSection::Local) {
+            "@collapsed".to_string()
+        } else if self.join_local_discovering {
             "@hosts.discovering.any".to_string()
         } else if self.join_local_hosts.is_empty() {
             "@hosts.none".to_string()
@@ -33060,14 +33143,16 @@ impl DesktopLauncher {
                 first.name, first.players, first.player_limit, first.ping
             )
         };
-        for (index, (label, detail)) in [
-            (self.join_route_local_section_label(), local_detail.as_str()),
-            ("@servers.remote", "@server.saved"),
+        for (index, (section, detail)) in [
+            (DesktopJoinSection::Local, local_detail.as_str()),
+            (DesktopJoinSection::Remote, "@server.saved"),
         ]
         .into_iter()
         .enumerate()
         {
-            let y = panel.y + panel.height - 158.0 - index as f32 * 34.0;
+            let label = self.join_route_section_label(section);
+            let collapsed = self.join_route_section_collapsed(section);
+            let y = Self::join_route_section_header_y_for_panel(panel, section);
             pass.push(RenderCommand::draw_text_styled(
                 label,
                 RenderPoint::new(panel.x + 36.0, y),
@@ -33103,7 +33188,10 @@ impl DesktopLauncher {
                 ));
             }
             pass.push(RenderCommand::draw_text_styled(
-                desktop_ui_icon_glyph_or_label("upOpen", "^"),
+                desktop_ui_icon_glyph_or_label(
+                    if collapsed { "downOpen" } else { "upOpen" },
+                    if collapsed { "v" } else { "^" },
+                ),
                 RenderPoint::new(panel.x + panel.width - 48.0, y),
                 [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.92],
                 13.0,
@@ -33219,7 +33307,9 @@ impl DesktopLauncher {
             .filter(|(_, snapshot)| snapshot.matches_query(&self.join_search))
             .take(saved_card_capacity)
             .collect::<Vec<_>>();
-        if visible_saved.is_empty() && !saved_snapshots.is_empty() {
+        if self.join_route_section_collapsed(DesktopJoinSection::Remote) {
+            // Java Collapser keeps the section header visible and removes the body.
+        } else if visible_saved.is_empty() && !saved_snapshots.is_empty() {
             let card = Self::join_route_server_card_rect_for_panel(panel, local_card_count);
             pass.push(RenderCommand::draw_sprite(
                 Self::settings_drawable_symbol("pane"),
@@ -33407,6 +33497,7 @@ impl DesktopLauncher {
                 Self::join_route_server_card_visible_slots_for_panel(panel).saturating_sub(1),
             );
             let global_y = global_card.y - 30.0;
+            let global_collapsed = self.join_route_section_collapsed(DesktopJoinSection::Global);
             pass.push(RenderCommand::draw_text_styled(
                 "@servers.global",
                 RenderPoint::new(panel.x + 36.0, global_y),
@@ -33419,6 +33510,44 @@ impl DesktopLauncher {
                     .with_outline(true),
                 Layer::END_PIXELED + 0.036,
             ));
+            let divider_start = RenderPoint::new(panel.x + 148.0, global_y - 1.0);
+            let divider_end = RenderPoint::new(panel.x + panel.width - 76.0, global_y - 1.0);
+            if divider_end.x > divider_start.x {
+                pass.push(RenderCommand::draw_line(
+                    divider_start,
+                    divider_end,
+                    3.0,
+                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.72],
+                    Layer::END_PIXELED + 0.0362,
+                ));
+            }
+            pass.push(RenderCommand::draw_text_styled(
+                desktop_ui_icon_glyph_or_label(
+                    if global_collapsed {
+                        "downOpen"
+                    } else {
+                        "upOpen"
+                    },
+                    if global_collapsed { "v" } else { "^" },
+                ),
+                RenderPoint::new(panel.x + panel.width - 48.0, global_y),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.92],
+                13.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_font(RenderFontId::Icon)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.0363,
+            ));
+            if global_collapsed {
+                self.push_join_add_server_dialog(pass, panel);
+                self.push_join_delete_dialog(pass, panel);
+                self.push_join_server_disclaimer_dialog(pass, panel);
+                self.push_join_info_dialog(pass, panel);
+                return;
+            }
             pass.push(RenderCommand::draw_text_styled(
                 "@servers.community",
                 RenderPoint::new(panel.x + 36.0, global_y - 18.0),
@@ -38424,6 +38553,13 @@ impl DesktopLauncher {
                 if self.join_route_info_button_available_for_platform() {
                     lines.push("button: ? @join.info".into());
                 }
+                for section in [DesktopJoinSection::Local, DesktopJoinSection::Remote] {
+                    lines.push(format!(
+                        "section-state: {} collapsed:{}",
+                        self.join_route_section_label(section),
+                        self.join_route_section_collapsed(section)
+                    ));
+                }
                 if community_servers_enabled {
                     lines.extend([
                         format!(
@@ -38440,42 +38576,52 @@ impl DesktopLauncher {
                             if self.join_show_hidden { "on" } else { "off" }
                         ),
                     ]);
+                    lines.push(format!(
+                        "section-state: @servers.global collapsed:{}",
+                        self.join_route_section_collapsed(DesktopJoinSection::Global)
+                    ));
                 }
-                for (index, host) in self.join_local_hosts.iter().enumerate() {
-                    lines.extend([
-                        format!(
-                            "local[{index}]: {} {}:{}",
-                            host.name, host.address, host.port
-                        ),
-                        format!(
-                            "local[{index}] players: {}/{}",
-                            host.players, host.player_limit
-                        ),
-                        format!("local[{index}] map: {}", host.mapname),
-                        format!(
-                            "local[{index}] mode: {}",
-                            host.mode_name.as_deref().unwrap_or("@unknown")
-                        ),
-                        format!("local[{index}] ping: {}ms", host.ping),
-                        format!("local[{index}] actions: connect"),
-                    ]);
+                if !self.join_route_section_collapsed(DesktopJoinSection::Local) {
+                    for (index, host) in self.join_local_hosts.iter().enumerate() {
+                        lines.extend([
+                            format!(
+                                "local[{index}]: {} {}:{}",
+                                host.name, host.address, host.port
+                            ),
+                            format!(
+                                "local[{index}] players: {}/{}",
+                                host.players, host.player_limit
+                            ),
+                            format!("local[{index}] map: {}", host.mapname),
+                            format!(
+                                "local[{index}] mode: {}",
+                                host.mode_name.as_deref().unwrap_or("@unknown")
+                            ),
+                            format!("local[{index}] ping: {}ms", host.ping),
+                            format!("local[{index}] actions: connect"),
+                        ]);
+                    }
                 }
-                for (index, group) in visible_community_groups {
-                    let favorite = self.join_community_group_favorite(group);
-                    let hidden = self.join_community_group_hidden(group);
-                    lines.extend([
-                        format!(
-                            "community[{index}]: {} addresses:{} prioritized:{} favorite:{} hidden:{} hosts:{}",
-                            group.name,
-                            group.addresses.len(),
-                            group.prioritized,
-                            favorite,
-                            hidden,
-                            group.hosts.len()
-                        ),
-                        format!("community[{index}] key: {}", group.key()),
-                        format!("community[{index}] actions: favorite hidden save connect"),
-                    ]);
+                if community_servers_enabled
+                    && !self.join_route_section_collapsed(DesktopJoinSection::Global)
+                {
+                    for (index, group) in visible_community_groups {
+                        let favorite = self.join_community_group_favorite(group);
+                        let hidden = self.join_community_group_hidden(group);
+                        lines.extend([
+                            format!(
+                                "community[{index}]: {} addresses:{} prioritized:{} favorite:{} hidden:{} hosts:{}",
+                                group.name,
+                                group.addresses.len(),
+                                group.prioritized,
+                                favorite,
+                                hidden,
+                                group.hosts.len()
+                            ),
+                            format!("community[{index}] key: {}", group.key()),
+                            format!("community[{index}] actions: favorite hidden save connect"),
+                        ]);
+                    }
                 }
                 if self.join_info_dialog_open {
                     lines.extend(["dialog: @join.info".into(), "button: @ok".into()]);
@@ -38514,7 +38660,9 @@ impl DesktopLauncher {
                     ]);
                 }
                 let snapshots = self.join_saved_server_snapshots();
-                if snapshots.is_empty() {
+                if self.join_route_section_collapsed(DesktopJoinSection::Remote) {
+                    lines.push("server: collapsed".into());
+                } else if snapshots.is_empty() {
                     lines.extend([
                         "server: not selected".into(),
                         "server status: missing".into(),
@@ -69091,6 +69239,201 @@ version: "2.0.0"
         assert!(texts.iter().any(|text| text.contains("one.example")));
         assert!(texts.iter().any(|text| text.contains("two.example")));
         assert!(texts.iter().any(|text| text.contains("three.example")));
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_persists_section_collapse_state_like_java() {
+        let port = super::DEFAULT_MINDUSTRY_PORT;
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
+        launcher
+            .join_local_hosts
+            .push(mindustry_core::mindustry::net::Host::new(
+                18,
+                "LAN host",
+                "127.0.0.1",
+                port.into(),
+                "local map",
+                3,
+                2,
+                158,
+                "official",
+                Gamemode::Survival,
+                8,
+                "local description",
+                Some("@mode.survival.name".into()),
+            ));
+        launcher
+            .join_saved_servers
+            .push(super::DesktopConnectTarget {
+                host: "one.example".into(),
+                port,
+            });
+        launcher
+            .join_community_groups
+            .push(super::DesktopJoinCommunityGroup::new(
+                "Official",
+                vec!["community.example:6567".into()],
+                true,
+            ));
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Join,
+        );
+        let local_toggle = DesktopLauncher::join_route_section_toggle_rect_for_panel(
+            panel,
+            super::DesktopJoinSection::Local,
+        )
+        .center();
+        let remote_toggle = DesktopLauncher::join_route_section_toggle_rect_for_panel(
+            panel,
+            super::DesktopJoinSection::Remote,
+        )
+        .center();
+        let global_toggle = DesktopLauncher::join_route_section_toggle_rect_for_panel(
+            panel,
+            super::DesktopJoinSection::Global,
+        )
+        .center();
+
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                local_toggle.x,
+                local_toggle.y
+            ),
+            Some(
+                super::DesktopMenuRouteShellAction::ToggleJoinSectionCollapsed(
+                    super::DesktopJoinSection::Local
+                )
+            )
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ToggleJoinSectionCollapsed(
+                super::DesktopJoinSection::Local,
+            ),
+        );
+        assert_eq!(
+            launcher.settings_overrides.get("collapsed-@servers.local"),
+            Some(&"true".to_string())
+        );
+        let local_lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(local_lines.contains(&"section-state: @servers.local collapsed:true".to_string()));
+        assert!(!local_lines.iter().any(|line| line.starts_with("local[0]")));
+        let local_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let local_texts = local_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("collapsed local join frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(local_texts.contains(&"@servers.local"));
+        assert!(!local_texts.iter().any(|text| text.contains("LAN host")));
+
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                remote_toggle.x,
+                remote_toggle.y
+            ),
+            Some(
+                super::DesktopMenuRouteShellAction::ToggleJoinSectionCollapsed(
+                    super::DesktopJoinSection::Remote
+                )
+            )
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ToggleJoinSectionCollapsed(
+                super::DesktopJoinSection::Remote,
+            ),
+        );
+        assert_eq!(
+            launcher.settings_overrides.get("collapsed-@servers.remote"),
+            Some(&"true".to_string())
+        );
+        let remote_lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(remote_lines.contains(&"section-state: @servers.remote collapsed:true".to_string()));
+        assert!(remote_lines.contains(&"server: collapsed".to_string()));
+        let remote_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let remote_texts = remote_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("collapsed remote join frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(remote_texts.contains(&"@servers.remote"));
+        assert!(!remote_texts.iter().any(|text| text.contains("one.example")));
+
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                global_toggle.x,
+                global_toggle.y
+            ),
+            Some(
+                super::DesktopMenuRouteShellAction::ToggleJoinSectionCollapsed(
+                    super::DesktopJoinSection::Global
+                )
+            )
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ToggleJoinSectionCollapsed(
+                super::DesktopJoinSection::Global,
+            ),
+        );
+        assert_eq!(
+            launcher.settings_overrides.get("collapsed-@servers.global"),
+            Some(&"true".to_string())
+        );
+        let global_lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(global_lines.contains(&"section-state: @servers.global collapsed:true".to_string()));
+        assert!(!global_lines
+            .iter()
+            .any(|line| line.starts_with("community[0]")));
+        let show_hidden = DesktopLauncher::join_route_show_hidden_button_rect_for_panel(panel);
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                show_hidden.center().x,
+                show_hidden.center().y
+            ),
+            None
+        );
+        let global_frame = launcher.menu_graphics_frame_for_surface(2, viewport);
+        let global_texts = global_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("collapsed global join frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(global_texts.contains(&"@servers.global"));
+        assert!(!global_texts.contains(&"@servers.community"));
+        assert!(!global_texts.contains(&"@servers.showhidden"));
+        assert!(!global_texts.contains(&"Official"));
     }
 
     #[test]
