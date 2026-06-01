@@ -27975,12 +27975,18 @@ impl DesktopLauncher {
     }
 
     fn visible_join_community_groups(&self) -> Vec<(usize, &DesktopJoinCommunityGroup)> {
-        self.join_community_groups
+        let mut groups = self
+            .join_community_groups
             .iter()
             .enumerate()
             .filter(|(_, group)| self.join_show_hidden || !self.join_community_group_hidden(group))
             .filter(|(_, group)| group.matches_query(&self.join_search))
-            .collect()
+            .collect::<Vec<_>>();
+        if groups.len() > 1 {
+            let java_half_column_offset = groups.len() / 2;
+            groups.rotate_left(java_half_column_offset);
+        }
+        groups
     }
 
     fn join_community_group_connect_target(
@@ -72288,6 +72294,50 @@ version: "2.0.0"
         assert!(lines
             .iter()
             .any(|line| line.contains("community[2]: Alpha")));
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_rotates_community_group_display_order_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.join_community_groups = ["A", "B", "C", "D"]
+            .into_iter()
+            .map(|name| {
+                super::DesktopJoinCommunityGroup::new(
+                    name,
+                    vec![format!("{}.example:6567", name.to_ascii_lowercase())],
+                    false,
+                )
+            })
+            .collect();
+
+        let visible = launcher
+            .visible_join_community_groups()
+            .into_iter()
+            .map(|(index, group)| (index, group.name.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(visible, vec![(2, "C"), (3, "D"), (0, "A"), (1, "B")]);
+
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        let community_lines = lines
+            .iter()
+            .filter(|line| line.starts_with("community[") && line.contains(" addresses:"))
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            community_lines
+                .iter()
+                .map(|line| line
+                    .split(':')
+                    .nth(1)
+                    .unwrap()
+                    .trim()
+                    .split(' ')
+                    .next()
+                    .unwrap())
+                .collect::<Vec<_>>(),
+            vec!["C", "D", "A", "B"],
+            "Java JoinDialog renders server groups as servers[(i + size/2) % size]"
+        );
     }
 
     #[test]
