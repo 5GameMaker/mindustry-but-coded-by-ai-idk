@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 669. Native OpenGL shader 资产缺失时保持可见 fallback
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **78.1%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是降低 native OpenGL 启动后“命令链看似成功但用户只看到黑屏”的概率。
+- 问题依据：
+  - native runtime 初始化时已能发现 shader 资产目录缺失，但后续 submit diagnostic 可能被清空；
+  - `submit_resolving_executor(...)` 每帧先清 backbuffer，如果 shader 资产不可用但未触发 native error，可能只留下近黑清屏。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - `desktop_native_opengl_submit_needs_visible_fallback(...)` 增加 shader 资产可用性判断；
+    - shader 资产缺失时强制绘制 native visible fallback overlay，而不是仅依赖 draw/invalid 计数；
+    - `desktop_native_opengl_submit_diagnostic(...)` 保留 `shader assets unavailable` 诊断，避免首帧 submit 后把窗口标题诊断清掉；
+    - 扩展 native fallback/diagnostic 单测。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop native_opengl_visible_fallback --bin mindustry-desktop`
+  - `cargo test -p mindustry-desktop native_opengl_submit_diagnostic --bin mindustry-desktop`
+- 仍未完成：
+  - 仍需继续做真实 native 像素级 smoke，统计非 clear 可见 draw，并继续还原 UI 背景/chrome；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 668. 主菜单 submenu 动画对齐 Interp.fade
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

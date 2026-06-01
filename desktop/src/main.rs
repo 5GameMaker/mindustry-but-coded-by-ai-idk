@@ -125,6 +125,7 @@ fn desktop_native_opengl_submit_diagnostic(
     driver_state: &mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState,
     invalid_draw_commands: usize,
     native_errors: &[String],
+    shader_assets_available: bool,
 ) -> Option<String> {
     let total_commands = driver_state.framebuffer_attachment_plans
         + driver_state.texture_upload_commands
@@ -136,6 +137,10 @@ fn desktop_native_opengl_submit_diagnostic(
         + driver_state.resolve_commands;
 
     let mut reasons = Vec::new();
+
+    if !shader_assets_available {
+        reasons.push("shader assets unavailable".to_string());
+    }
 
     if total_commands == 0 {
         reasons.push("empty render frame: no GPU commands were recorded".to_string());
@@ -196,7 +201,11 @@ fn desktop_native_opengl_submit_needs_visible_fallback(
     driver_state: &mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState,
     invalid_draw_commands: usize,
     native_errors: &[String],
+    shader_assets_available: bool,
 ) -> bool {
+    if !shader_assets_available {
+        return true;
+    }
     if !native_errors.is_empty() {
         return true;
     }
@@ -2888,6 +2897,7 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
             &driver_state,
             invalid_draw_commands,
             frame_native_errors,
+            self.shader_asset_root_shaders_dir_exists,
         ) {
             desktop_native_trace_summary("runtime.submit: drawing native visible fallback overlay");
             self.draw_visible_fallback_overlay();
@@ -2896,6 +2906,7 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
             &driver_state,
             invalid_draw_commands,
             frame_native_errors,
+            self.shader_asset_root_shaders_dir_exists,
         );
         if let Some(diagnostic) = diagnostic {
             desktop_native_trace_summary(format!("runtime.submit: diagnosis={diagnostic}"));
@@ -3380,6 +3391,7 @@ mod tests {
             &[String::from(
                 "failed to compile native OpenGL shader source: boom",
             )],
+            true,
         )
         .expect("empty frame with shader failure should yield a diagnostic");
 
@@ -3394,7 +3406,7 @@ mod tests {
             draw_commands: 2,
             ..Default::default()
         };
-        let diagnostic = desktop_native_opengl_submit_diagnostic(&driver_state, 2, &[])
+        let diagnostic = desktop_native_opengl_submit_diagnostic(&driver_state, 2, &[], true)
             .expect("skipped draw commands should yield a diagnostic");
 
         assert!(diagnostic.contains("no valid draw commands"));
@@ -3407,7 +3419,8 @@ mod tests {
         assert!(desktop_native_opengl_submit_needs_visible_fallback(
             &empty,
             0,
-            &[]
+            &[],
+            true,
         ));
 
         let invalid = mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState {
@@ -3417,18 +3430,31 @@ mod tests {
         assert!(desktop_native_opengl_submit_needs_visible_fallback(
             &invalid,
             3,
-            &[]
+            &[],
+            true,
         ));
         assert!(!desktop_native_opengl_submit_needs_visible_fallback(
             &invalid,
             1,
-            &[]
+            &[],
+            true,
         ));
         assert!(desktop_native_opengl_submit_needs_visible_fallback(
             &invalid,
             1,
-            &["shader program link failed".into()]
+            &["shader program link failed".into()],
+            true,
         ));
+        assert!(desktop_native_opengl_submit_needs_visible_fallback(
+            &invalid,
+            1,
+            &[],
+            false,
+        ));
+        let shader_asset_diagnostic =
+            desktop_native_opengl_submit_diagnostic(&invalid, 1, &[], false)
+                .expect("missing shader assets should stay visible in native diagnostics");
+        assert!(shader_asset_diagnostic.contains("shader assets unavailable"));
 
         let rects = desktop_native_visible_fallback_rects(
             mindustry_desktop::DesktopSurfaceSize::new(1280, 720),
