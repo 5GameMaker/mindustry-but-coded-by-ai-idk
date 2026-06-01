@@ -18901,6 +18901,16 @@ impl DesktopLauncher {
         localized
     }
 
+    fn localize_bundle_markup_text_or(&self, text: impl AsRef<str>, fallback: &str) -> String {
+        let text = text.as_ref();
+        let localized = self.localize_bundle_markup_text(text);
+        if localized == text && text.starts_with('@') {
+            fallback.to_string()
+        } else {
+            localized
+        }
+    }
+
     fn format_bundle_text(&self, key: &str, args: &[&str]) -> String {
         upstream_menu_bundle_format_for_locale(&self.settings_locale, key, args)
             .or_else(|| upstream_menu_bundle_format_for_locale("en", key, args))
@@ -23871,17 +23881,19 @@ impl DesktopLauncher {
             1.0,
             Layer::END_PIXELED + 0.022,
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            self.localize_bundle_markup_text("@settings.data"),
-            RenderPoint::new(container.center().x, container.y + container.height - 24.0),
-            [0.94, 0.98, 1.0, 1.0],
-            14.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.024,
-        ));
+        if self.settings_child_dialog != Some(DesktopSettingsChildDialog::PlanetData) {
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text("@settings.data"),
+                RenderPoint::new(container.center().x, container.y + container.height - 24.0),
+                [0.94, 0.98, 1.0, 1.0],
+                14.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.024,
+            ));
+        }
         for (index, action) in SETTINGS_DATA_ACTIONS.iter().enumerate() {
             self.push_settings_text_button_with_style(
                 pass,
@@ -27522,8 +27534,11 @@ impl DesktopLauncher {
     }
 
     fn join_route_show_hidden_button_rect_for_panel(panel: RenderRect) -> RenderRect {
-        let search = Self::join_route_search_rect_for_panel(panel);
-        RenderRect::new(search.right() + 10.0, search.y, 150.0, search.height)
+        let header_y =
+            Self::join_route_section_header_y_for_panel(panel, DesktopJoinSection::Global);
+        let toggle =
+            Self::join_route_section_toggle_rect_for_panel(panel, DesktopJoinSection::Global);
+        RenderRect::new(toggle.x - 44.0, header_y - 18.0, 40.0, 36.0)
     }
 
     fn join_route_community_group_row_rect_for_panel(
@@ -30189,14 +30204,14 @@ impl DesktopLauncher {
                     DesktopJoinSection::Global,
                 ));
             }
+            if Self::join_route_show_hidden_button_rect_for_panel(panel).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::ToggleJoinShowHidden);
+            }
             if self.join_route_section_collapsed(DesktopJoinSection::Global) {
                 return None;
             }
             if Self::join_route_search_rect_for_panel(panel).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::FocusJoinSearch);
-            }
-            if Self::join_route_show_hidden_button_rect_for_panel(panel).contains_point(point) {
-                return Some(DesktopMenuRouteShellAction::ToggleJoinShowHidden);
             }
             for (visible_index, (group_index, _)) in self
                 .visible_join_community_groups()
@@ -34004,7 +34019,6 @@ impl DesktopLauncher {
         }
 
         let search_rect = Self::join_route_search_rect_for_panel(panel);
-        let show_hidden_rect = Self::join_route_show_hidden_button_rect_for_panel(panel);
         let visible_local_hosts = self
             .join_local_hosts
             .iter()
@@ -34346,6 +34360,7 @@ impl DesktopLauncher {
                 Self::join_route_server_card_visible_slots_for_panel(panel).saturating_sub(1),
             );
             let global_y = global_card.y - 30.0;
+            let show_hidden_rect = Self::join_route_show_hidden_button_rect_for_panel(panel);
             let global_collapsed = self.join_route_section_collapsed(DesktopJoinSection::Global);
             pass.push(RenderCommand::draw_text_styled(
                 self.localize_bundle_markup_text("@servers.global"),
@@ -34370,6 +34385,45 @@ impl DesktopLauncher {
                     Layer::END_PIXELED + 0.0362,
                 ));
             }
+            let show_hidden_hovered = self
+                .last_menu_cursor
+                .map(|point| show_hidden_rect.contains_point(point))
+                .unwrap_or(false);
+            let show_hidden_symbol =
+                Self::settings_image_button_symbol("defaulti", show_hidden_hovered, false);
+            if show_hidden_symbol != "clear" {
+                pass.push(RenderCommand::draw_sprite(
+                    show_hidden_symbol,
+                    show_hidden_rect,
+                    [1.0, 1.0, 1.0, 0.88],
+                    0.0,
+                    Layer::END_PIXELED + 0.03625,
+                ));
+            }
+            pass.push(RenderCommand::draw_text_styled(
+                desktop_ui_icon_glyph_or_label(
+                    if self.join_show_hidden {
+                        "eyeSmall"
+                    } else {
+                        "eyeOffSmall"
+                    },
+                    if self.join_show_hidden {
+                        "eyeSmall"
+                    } else {
+                        "eyeOffSmall"
+                    },
+                ),
+                show_hidden_rect.center(),
+                [0.78, 0.86, 0.92, 1.0],
+                14.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_font(RenderFontId::Icon)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.03626,
+            ));
             pass.push(RenderCommand::draw_text_styled(
                 desktop_ui_icon_glyph_or_label(
                     if global_collapsed {
@@ -34391,6 +34445,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.0363,
             ));
             if global_collapsed {
+                self.push_join_route_hover_tooltip(pass, panel);
                 self.push_join_add_server_dialog(pass, panel);
                 self.push_join_delete_dialog(pass, panel);
                 self.push_join_server_disclaimer_dialog(pass, panel);
@@ -34450,17 +34505,6 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.037,
             ));
-            self.push_settings_text_button(
-                pass,
-                show_hidden_rect,
-                "@servers.showhidden",
-                Some(if self.join_show_hidden {
-                    "eyeSmall"
-                } else {
-                    "eyeOffSmall"
-                }),
-                Layer::END_PIXELED + 0.036,
-            );
             let visible_community_groups = self.visible_join_community_groups();
             if visible_community_groups.is_empty() {
                 pass.push(RenderCommand::draw_text_styled(
@@ -34687,10 +34731,95 @@ impl DesktopLauncher {
                 }
             }
         }
+        self.push_join_route_hover_tooltip(pass, panel);
         self.push_join_add_server_dialog(pass, panel);
         self.push_join_delete_dialog(pass, panel);
         self.push_join_server_disclaimer_dialog(pass, panel);
         self.push_join_info_dialog(pass, panel);
+    }
+
+    fn join_route_hover_tooltip_text(&self, panel: RenderRect) -> Option<String> {
+        let cursor = self.last_menu_cursor?;
+        if self.join_community_servers_enabled() {
+            let show_hidden = Self::join_route_show_hidden_button_rect_for_panel(panel);
+            if show_hidden.contains_point(cursor) {
+                return Some(self.localize_bundle_markup_text("@servers.showhidden"));
+            }
+            if !self.join_route_section_collapsed(DesktopJoinSection::Global) {
+                for (visible_index, (_, group)) in self
+                    .visible_join_community_groups()
+                    .into_iter()
+                    .take(JOIN_COMMUNITY_GROUP_VISIBLE_CARDS)
+                    .enumerate()
+                {
+                    let row =
+                        Self::join_route_community_group_row_rect_for_panel(panel, visible_index);
+                    if !row.contains_point(cursor) {
+                        continue;
+                    }
+                    let favorite_button =
+                        Self::join_route_community_group_action_button_rect(row, 0);
+                    if favorite_button.contains_point(cursor) {
+                        return Some(self.localize_bundle_markup_text("@server.favorite"));
+                    }
+                    let hidden_button = Self::join_route_community_group_action_button_rect(row, 1);
+                    if hidden_button.contains_point(cursor) {
+                        return Some(self.localize_bundle_markup_text(
+                            if self.join_community_group_hidden(group) {
+                                "@server.hidden"
+                            } else {
+                                "@server.shown"
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn push_join_route_hover_tooltip(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(label) = self.join_route_hover_tooltip_text(panel) else {
+            return;
+        };
+        let Some(cursor) = self.last_menu_cursor else {
+            return;
+        };
+        let tooltip_width = (label.len() as f32 * 7.0 + 28.0).clamp(92.0, 260.0);
+        let tooltip_height = 32.0;
+        let tooltip_x = (cursor.x + 14.0)
+            .min(panel.right() - tooltip_width - 4.0)
+            .max(panel.x + 4.0);
+        let tooltip_y = (cursor.y + 14.0)
+            .min(panel.y + panel.height - tooltip_height - 4.0)
+            .max(panel.y + 4.0);
+        let tooltip = RenderRect::new(tooltip_x, tooltip_y, tooltip_width, tooltip_height);
+
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            tooltip,
+            [1.0, 1.0, 1.0, 0.96],
+            0.0,
+            Layer::END_PIXELED + 0.078,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            tooltip,
+            [0.42, 0.58, 0.70, 0.94],
+            1.0,
+            Layer::END_PIXELED + 0.079,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            label,
+            RenderPoint::new(tooltip.x + 12.0, tooltip.center().y),
+            [0.94, 0.98, 1.0, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.080,
+        ));
     }
 
     fn push_schematics_card(
@@ -36349,7 +36478,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::route_back_button_rect_for_panel(panel),
-            self.localize_bundle_markup_text("@back"),
+            self.localize_bundle_markup_text_or("@back", "Back"),
             Some("left"),
             Layer::END_PIXELED + 0.024,
         );
@@ -36358,14 +36487,14 @@ impl DesktopLauncher {
             self.push_settings_text_button(
                 pass,
                 Self::map_list_action_button_rect_for_panel(panel, 0),
-                self.localize_bundle_markup_text("@editor.newmap"),
+                self.localize_bundle_markup_text_or("@editor.newmap", "New Map"),
                 Some("add"),
                 Layer::END_PIXELED + 0.025,
             );
             self.push_settings_text_button(
                 pass,
                 Self::map_list_action_button_rect_for_panel(panel, 1),
-                self.localize_bundle_markup_text("@editor.importmap"),
+                self.localize_bundle_markup_text_or("@editor.importmap", "Import Map"),
                 Some("upload"),
                 Layer::END_PIXELED + 0.026,
             );
@@ -36394,7 +36523,7 @@ impl DesktopLauncher {
         ));
         pass.push(RenderCommand::draw_text_styled(
             if self.map_list_search.is_empty() {
-                self.localize_bundle_markup_text("@editor.search")
+                self.localize_bundle_markup_text_or("@editor.search", "Search maps...")
             } else {
                 self.map_list_search.clone()
             },
@@ -37080,7 +37209,7 @@ impl DesktopLauncher {
         map: &MapDescriptor,
     ) {
         pass.push(RenderCommand::draw_text_styled(
-            self.localize_bundle_markup_text("@editor.mapinfo"),
+            self.localize_bundle_markup_text_or("@editor.mapinfo", "Map Info"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
             [0.94, 0.98, 1.0, 1.0],
             17.0,
@@ -37119,17 +37248,17 @@ impl DesktopLauncher {
         ));
         let mut fields = vec![
             (
-                self.localize_bundle_markup_text("@editor.mapname"),
+                self.localize_bundle_markup_text_or("@editor.mapname", "Map Name:"),
                 map.plain_name(),
             ),
             (
-                self.localize_bundle_markup_text("@editor.author"),
+                self.localize_bundle_markup_text_or("@editor.author", "Author:"),
                 map.plain_author(),
             ),
         ];
         if !map.plain_description().trim().is_empty() {
             fields.push((
-                self.localize_bundle_markup_text("@editor.description"),
+                self.localize_bundle_markup_text_or("@editor.description", "Description:"),
                 map.plain_description(),
             ));
         }
@@ -37162,7 +37291,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::map_editor_action_button_rect(dialog, 0),
-            self.localize_bundle_markup_text("@editor.openin"),
+            self.localize_bundle_markup_text_or("@editor.openin", "Open In Editor"),
             Some("export"),
             Layer::END_PIXELED + 0.072,
         );
@@ -37171,9 +37300,9 @@ impl DesktopLauncher {
             pass,
             Self::map_editor_action_button_rect(dialog, 1),
             if map.workshop {
-                self.localize_bundle_markup_text("@view.workshop")
+                self.localize_bundle_markup_text_or("@view.workshop", "View In Workshop")
             } else {
-                self.localize_bundle_markup_text("@delete")
+                self.localize_bundle_markup_text_or("@delete", "Delete")
             },
             Some(if map.workshop { "link" } else { "trash" }),
             Layer::END_PIXELED + 0.073,
@@ -37182,7 +37311,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::map_card_dialog_close_rect(dialog),
-            self.localize_bundle_markup_text("@back"),
+            self.localize_bundle_markup_text_or("@back", "Back"),
             Some("left"),
             Layer::END_PIXELED + 0.074,
         );
@@ -37338,14 +37467,24 @@ impl DesktopLauncher {
             .enumerate()
         {
             if Self::map_list_filter_mode_rect(dialog, index).contains_point(cursor) {
-                return Some(
-                    self.localize_bundle_markup_text(format!("@mode.{}.name", mode.wire_name())),
-                );
+                return Some(self.localize_bundle_markup_text_or(
+                    format!("@mode.{}.name", mode.wire_name()),
+                    match mode {
+                        Gamemode::Survival => "Survival",
+                        Gamemode::Sandbox => "Sandbox",
+                        Gamemode::Attack => "Attack",
+                        Gamemode::Pvp => "PvP",
+                        Gamemode::Editor => "Editor",
+                    },
+                ));
             }
         }
         for (index, label) in [
-            self.localize_bundle_markup_text("@editor.filters.prioritizecustom"),
-            self.localize_bundle_markup_text("@editor.filters.prioritizemod"),
+            self.localize_bundle_markup_text_or(
+                "@editor.filters.prioritizecustom",
+                "Custom Priority",
+            ),
+            self.localize_bundle_markup_text_or("@editor.filters.prioritizemod", "Mod Priority"),
         ]
         .into_iter()
         .enumerate()
@@ -37355,7 +37494,10 @@ impl DesktopLauncher {
             }
         }
         if Self::map_list_filter_planet_button_rect(dialog).contains_point(cursor) {
-            return Some(self.localize_bundle_markup_text("@editor.filters.planetselect"));
+            return Some(self.localize_bundle_markup_text_or(
+                "@editor.filters.planetselect",
+                "Planet Selection",
+            ));
         }
         None
     }
@@ -37431,7 +37573,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.072,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            self.localize_bundle_markup_text("@editor.filters"),
+            self.localize_bundle_markup_text_or("@editor.filters", "Filter Maps"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 34.0),
             [0.94, 0.98, 1.0, 1.0],
             15.0,
@@ -37474,20 +37616,20 @@ impl DesktopLauncher {
         );
         let group_specs = [
             (
-                self.localize_bundle_markup_text("@editor.filters.mode"),
+                self.localize_bundle_markup_text_or("@editor.filters.mode", "Gamemodes:"),
                 mode_group,
             ),
             (
-                self.localize_bundle_markup_text("@editor.filters.priorities"),
+                self.localize_bundle_markup_text_or("@editor.filters.priorities", "Priorities:"),
                 priority_group,
             ),
             ("".to_string(), planet_group),
             (
-                self.localize_bundle_markup_text("@editor.filters.type"),
+                self.localize_bundle_markup_text_or("@editor.filters.type", "Map Type:"),
                 type_group,
             ),
             (
-                self.localize_bundle_markup_text("@editor.filters.search"),
+                self.localize_bundle_markup_text_or("@editor.filters.search", "Search In:"),
                 search_group,
             ),
         ];
@@ -37552,19 +37694,10 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.088 + index as f32 * 0.001,
             );
         }
-        for (index, (label, checked)) in [
-            (
-                self.localize_bundle_markup_text("@custom"),
-                self.map_list_filter_show_custom,
-            ),
-            (
-                self.localize_bundle_markup_text("@builtin"),
-                self.map_list_filter_show_builtin,
-            ),
-            (
-                self.localize_bundle_markup_text("@modded"),
-                self.map_list_filter_show_modded,
-            ),
+        for (index, (key, fallback, checked)) in [
+            ("@custom", "Custom", self.map_list_filter_show_custom),
+            ("@builtin", "Built-In", self.map_list_filter_show_builtin),
+            ("@modded", "Modded", self.map_list_filter_show_modded),
         ]
         .into_iter()
         .enumerate()
@@ -37572,23 +37705,26 @@ impl DesktopLauncher {
             self.push_map_list_filter_toggle(
                 pass,
                 Self::map_list_filter_type_rect(dialog, index),
-                label,
+                self.localize_bundle_markup_text_or(key, fallback),
                 checked,
                 true,
                 Layer::END_PIXELED + 0.092 + index as f32 * 0.001,
             );
         }
-        for (index, (label, checked)) in [
+        for (index, (key, fallback, checked)) in [
             (
-                self.localize_bundle_markup_text("@editor.filters.author"),
+                "@editor.filters.author",
+                "Author",
                 self.map_list_filter_search_author,
             ),
             (
-                self.localize_bundle_markup_text("@editor.filters.description"),
+                "@editor.filters.description",
+                "Description",
                 self.map_list_filter_search_description,
             ),
             (
-                self.localize_bundle_markup_text("@editor.filters.modname"),
+                "@editor.filters.modname",
+                "Mod Name",
                 self.map_list_filter_search_mod_name,
             ),
         ]
@@ -37598,14 +37734,14 @@ impl DesktopLauncher {
             self.push_map_list_filter_toggle(
                 pass,
                 Self::map_list_filter_search_scope_rect(dialog, index),
-                label,
+                self.localize_bundle_markup_text_or(key, fallback),
                 checked,
                 true,
                 Layer::END_PIXELED + 0.096 + index as f32 * 0.001,
             );
         }
         let planet_summary = if self.map_list_filter_planets.is_empty() {
-            self.localize_bundle_markup_text("@rules.anyenv")
+            self.localize_bundle_markup_text_or("@rules.anyenv", "<Any>")
         } else {
             self.map_list_filter_planets.join(", ")
         };
@@ -37634,7 +37770,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
-            self.localize_bundle_markup_text("@back"),
+            self.localize_bundle_markup_text_or("@back", "Back"),
             Some("left"),
             Layer::END_PIXELED + 0.103,
         );
@@ -37665,7 +37801,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.108,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            self.localize_bundle_markup_text("@editor.filters.planetselect"),
+            self.localize_bundle_markup_text_or("@editor.filters.planetselect", "Planet Selection"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 32.0),
             [0.94, 0.98, 1.0, 1.0],
             15.0,
@@ -37700,7 +37836,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
-            self.localize_bundle_markup_text("@back"),
+            self.localize_bundle_markup_text_or("@back", "Back"),
             Some("left"),
             Layer::END_PIXELED + 0.120,
         );
@@ -41477,7 +41613,10 @@ impl DesktopLauncher {
             2.0,
             Layer::END_PIXELED + 0.01,
         ));
-        if desktop_show_upstream_route_debug() {
+        if desktop_show_upstream_route_debug()
+            && !(route == DesktopMenuRoute::Settings
+                && self.settings_dialog_state.page == DesktopSettingsPage::Data)
+        {
             pass.push(RenderCommand::draw_text_styled(
                 format!("upstream: {}", route.upstream_dialog()),
                 RenderPoint::new(panel.x + panel.width * 0.5, panel.y + panel.height - 84.0),
@@ -61399,6 +61538,24 @@ version: "2.0.0"
         );
         custom.workshop = true;
 
+        let mut modded_tags = BTreeMap::new();
+        modded_tags.insert("name".to_string(), "Modded Arena".to_string());
+        modded_tags.insert("author".to_string(), "Modder".to_string());
+        modded_tags.insert(
+            "description".to_string(),
+            "Community mod map battleground".to_string(),
+        );
+        let mut modded = MapDescriptor::new(
+            "maps/modded/arena.msav",
+            220,
+            220,
+            modded_tags,
+            false,
+            1,
+            157,
+        );
+        modded.mod_name = Some("Example Mod".to_string());
+
         for (role, route) in [
             (
                 MenuButtonRole::CustomGame,
@@ -61407,7 +61564,8 @@ version: "2.0.0"
             (MenuButtonRole::Editor, super::DesktopMenuRoute::Editor),
         ] {
             let mut launcher = DesktopLauncher::new(Vec::new());
-            launcher.map_list_cards = vec![builtin.clone(), custom.clone()];
+            launcher.settings_locale = "en".into();
+            launcher.map_list_cards = vec![builtin.clone(), custom.clone(), modded.clone()];
             launcher.dispatch_menu_action(role);
 
             let viewport =
@@ -61447,6 +61605,8 @@ version: "2.0.0"
                 super::DesktopMenuRoute::Editor => {
                     assert!(texts.contains(&"Built-In"));
                     assert!(texts.contains(&"Workshop"));
+                    assert!(texts.contains(&"Example Mod"));
+                    assert!(!texts.contains(&"@mods"));
                 }
                 _ => unreachable!(),
             }
@@ -61912,6 +62072,7 @@ version: "2.0.0"
 
         let viewport = DesktopSurfaceSize::new(1280, 720);
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
         launcher.map_list_cards = vec![builtin];
         launcher.dispatch_menu_action(MenuButtonRole::Editor);
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
@@ -61960,6 +62121,14 @@ version: "2.0.0"
         assert_eq!(portrait_preview.width, 160.0);
         assert_eq!(portrait_preview.height, 160.0);
         assert_eq!(
+            (
+                DesktopLauncher::map_list_action_button_rect_for_panel(panel, 0).width,
+                DesktopLauncher::map_list_action_button_rect_for_panel(panel, 0).height
+            ),
+            (210.0, 64.0),
+            "Java EditorMapsDialog top action buttons use 210f x 64f buttons"
+        );
+        assert_eq!(
             DesktopLauncher::map_editor_action_button_rect(dialog, 0).height,
             54.0
         );
@@ -62001,10 +62170,15 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
+        assert!(dialog_texts.contains(&"Map Info"));
+        assert!(dialog_texts.contains(&"Map Name:"));
+        assert!(dialog_texts.contains(&"Author:"));
+        assert!(dialog_texts.contains(&"Open In Editor"));
         assert!(!dialog_texts.contains(&"size"));
         assert!(!dialog_texts.contains(&"160x160"));
         assert!(!dialog_texts.contains(&"source"));
         assert!(!dialog_texts.contains(&"@builtin"));
+        assert!(!dialog_texts.iter().any(|text| text.starts_with('@')));
     }
 
     #[test]
@@ -62368,6 +62542,7 @@ version: "2.0.0"
         let surface = DesktopSurfaceSize::new(1280, 720);
 
         let mut custom = DesktopLauncher::new(Vec::new());
+        custom.settings_locale = "en".into();
         custom.dispatch_menu_action(MenuButtonRole::CustomGame);
         let viewport = custom.default_render_viewport_for_surface(surface);
         let custom_panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
@@ -62456,6 +62631,14 @@ version: "2.0.0"
             ),
             (150.0, 60.0),
             "Java MapListDialog search filters use 150f x 60f buttons"
+        );
+        assert_eq!(
+            (
+                DesktopLauncher::map_list_action_button_rect_for_panel(custom_panel, 0).width,
+                DesktopLauncher::map_list_action_button_rect_for_panel(custom_panel, 0).height
+            ),
+            (210.0, 64.0),
+            "Java EditorMapsDialog top action buttons use 210f x 64f buttons"
         );
         for glyph in [
             DesktopLauncher::map_list_card_mode_badge_text(Gamemode::Survival),
@@ -62579,6 +62762,7 @@ version: "2.0.0"
 
         let surface = DesktopSurfaceSize::new(1280, 720);
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
         launcher.map_list_cards = vec![
             map_card("Alpha Builtin", "Vanilla", false, None),
             map_card("Zulu Custom", "Mapper", true, None),
@@ -68694,6 +68878,15 @@ version: "2.0.0"
                 .localize_bundle_markup_text("@settings.data")
                 .as_str()
         ));
+        let planet_data_title = launcher.localize_bundle_markup_text("@settings.data");
+        assert_eq!(
+            planet_texts
+                .iter()
+                .filter(|text| **text == planet_data_title)
+                .count(),
+            1,
+            "PlanetData dialog should not duplicate the data title behind the modal"
+        );
         assert!(planet_texts.contains(
             &launcher
                 .format_bundle_text(
@@ -68716,6 +68909,10 @@ version: "2.0.0"
                 .localize_bundle_markup_text("@settings.clearplanetcampaignsaves")
                 .as_str()
         ));
+        assert!(
+            !planet_texts.contains(&"upstream: SettingsMenuDialog"),
+            "Data page should not expose the raw upstream class name while the modal is open"
+        );
         let planet_button_symbol =
             DesktopLauncher::settings_text_button_symbol("flatt", false, false);
         let planet_select_button =
@@ -68976,12 +69173,21 @@ version: "2.0.0"
             RenderCommand::DrawSprite { symbol, rect, .. }
                 if symbol == &data_button_symbol && *rect == first_data_button
         )));
-        assert!(texts.contains(&"upstream: SettingsMenuDialog"));
         assert!(texts.contains(
             &launcher
                 .localize_bundle_markup_text("@settings.data")
                 .as_str()
         ));
+        let data_title = launcher.localize_bundle_markup_text("@settings.data");
+        assert_eq!(
+            texts.iter().filter(|text| **text == data_title).count(),
+            1,
+            "Settings data page should render a single data title"
+        );
+        assert!(
+            !texts.contains(&"upstream: SettingsMenuDialog"),
+            "Settings data page should not expose the raw upstream dialog class name"
+        );
         assert!(
             !texts.contains(&"planet: erekir"),
             "Java dataDialog itself is a data-action button table; selected planet is shown inside PlanetDataDialog"
@@ -68991,7 +69197,11 @@ version: "2.0.0"
                 .localize_bundle_markup_text("@settings.cleardata")
                 .as_str()
         ));
-        assert!(texts.contains(&"@data.export"));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@data.export")
+                .as_str()
+        ));
         assert!(
             !texts.contains(&"settings page: data"),
             "Data page should render Java-like action buttons instead of the diagnostic route-line shell"
@@ -71196,7 +71406,7 @@ version: "2.0.0"
             .any(|text| text.contains("Map: Unknown") && text.contains("Survival")));
         assert!(texts.iter().any(|text| text.contains("--ms")));
         assert!(texts.contains(&"Search:"));
-        assert!(texts.contains(&"@servers.showhidden"));
+        assert!(!texts.contains(&"@servers.showhidden"));
         assert!(texts.contains(&"[lightgray]No local games found!"));
         assert!(!texts.contains(&"@joingame.title"));
         assert!(texts.contains(&"Address:"));
@@ -72048,7 +72258,7 @@ version: "2.0.0"
                 show_hidden.center().x,
                 show_hidden.center().y
             ),
-            None
+            Some(super::DesktopMenuRouteShellAction::ToggleJoinShowHidden)
         );
         let global_frame = launcher.menu_graphics_frame_for_surface(2, viewport);
         let global_texts = global_frame
@@ -72068,6 +72278,35 @@ version: "2.0.0"
         assert!(!global_texts.contains(&"@servers.community"));
         assert!(!global_texts.contains(&"@servers.showhidden"));
         assert!(!global_texts.contains(&"Official"));
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: show_hidden.center().x,
+                y: show_hidden.center().y,
+            }],
+        );
+        let hovered_global_frame = launcher.menu_graphics_frame_for_surface(2, viewport);
+        let hovered_global_texts = hovered_global_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("collapsed global hover frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            hovered_global_texts
+                .iter()
+                .filter(|text| **text == "Show Hidden Servers")
+                .count()
+                >= 1
+        );
     }
 
     #[test]
@@ -72110,13 +72349,15 @@ version: "2.0.0"
         let hidden_lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
         assert!(hidden_lines.contains(&"section: @servers.global groups: 0".to_string()));
         launcher.join_show_hidden = true;
+        launcher.join_search = "survival".into();
         let shown_lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(shown_lines
+            .contains(&"section: @servers.community search:survival hidden:on".to_string()));
         assert!(shown_lines.contains(
             &"community[0]: Official addresses:1 prioritized:true favorite:true hidden:true hosts:1"
                 .to_string()
         ));
 
-        launcher.join_search = "survival".into();
         let surface = DesktopSurfaceSize::new(1280, 720);
         let viewport = launcher.default_render_viewport_for_surface(surface);
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
@@ -72145,6 +72386,8 @@ version: "2.0.0"
                     && text.contains("players: 12/24"))
         );
         assert!(texts.contains(&"save.map: sector map / Survival"));
+        assert!(shown_lines
+            .contains(&"section: @servers.community search:survival hidden:on".to_string()));
 
         let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
             viewport,
@@ -72190,6 +72433,28 @@ version: "2.0.0"
             ),
             Some(super::DesktopMenuRouteShellAction::ConnectJoinCommunityGroup(0))
         );
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: favorite_button.x,
+                y: favorite_button.y,
+            }],
+        );
+        let hovered_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let hovered_texts = hovered_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("join community hover frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(hovered_texts.contains(&"Favorite"));
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::ToggleJoinCommunityFavorite(0),
         );
@@ -72366,6 +72631,7 @@ version: "2.0.0"
         assert!(!texts.contains(&"@servers.global"));
         assert!(!texts.contains(&"@servers.community"));
         assert!(!texts.contains(&"@servers.showhidden"));
+        assert!(!texts.contains(&"Show Hidden Servers"));
         assert!(!texts.iter().any(|text| text.contains("community.example")));
     }
 
