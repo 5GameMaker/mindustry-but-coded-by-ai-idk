@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 726. LoadDialog loading 提升为全屏 LoadingFragment 遮罩
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **85.8%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `UI.loadAnd(...)` 通过全局 `loadfrag.show(text)` 延迟执行加载，不是由 `LoadDialog` 自己画局部面板；
+  - `LoadingFragment.build(...)` 使用 `Styles.black8` 全屏遮罩、上下 `WarningBar`、`@loading` 标签，并接管输入；
+  - `LoadDialog.runLoadSave(...)` 进入加载后不应让底层存档按钮或主菜单按钮继续响应。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_load_game_loading_overlay(...)` 从 LoadGame 面板内 54% 黑色小遮罩改为 viewport 全屏 80% 黑色遮罩；
+    - 复用 `WarningBar` draw plan 输出上下全宽警示条，保留 `@loading`、旋转 refresh 图标和 pending status line；
+    - pending load/save 期间 `apply_menu_input_events(...)` 作为全屏模态层吞掉鼠标/滚轮/文本等输入，back 只消费不关闭路由；
+    - LoadGame 页面渲染链传入 `RenderViewport`，让 loading 层可按整屏定位。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop load_game --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - LoadDialog 加载开始时内部仍保留 route 状态用于 pending/测试审计，视觉已由全屏遮罩覆盖；后续可继续把 Java `hide()` / `ui.paused.hide()` 的退场动画补齐；
+  - 真实完整 `SaveIO.load(file, context)` world/entities 恢复仍需继续迁移到底层 runtime；
+  - JoinDialog `@connecting/@reconnecting` loadfrag 与版本不匹配 modal 仍需继续前端收口。
+
 ## 725. Join 连接中状态栏只认真实 connecting
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

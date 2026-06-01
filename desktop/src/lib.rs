@@ -113,7 +113,8 @@ use mindustry_core::mindustry::ui::{
     upstream_scroll_pane_style_skin, upstream_slider_style_skin, upstream_text_button_style_skin,
     upstream_text_field_style_skin, upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, Bar,
     BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw, UpstreamContentIcon, UpstreamFontRole,
-    UpstreamUiIconGlyph, UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH, UPSTREAM_UI_ICON_GLYPHS,
+    UpstreamUiIconGlyph, WarningBar, WarningBarDrawCommand, WarningBarLayout,
+    UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH, UPSTREAM_UI_ICON_GLYPHS,
 };
 #[cfg(test)]
 use mindustry_core::mindustry::vars::SERVER_CACHE_FILE_NAME;
@@ -200,6 +201,12 @@ const LOAD_RENAME_TEXT_MAX_LENGTH: usize = 32;
 const SAVE_NEW_TEXT_MAX_LENGTH: usize = 30;
 const EDITOR_NEW_MAP_TEXT_MAX_LENGTH: usize = 32;
 const LOAD_GAME_LOADING_DELAY_FRAMES: u8 = 5;
+const LOAD_GAME_LOADING_FRAGMENT_TOP_SPACER: f32 = 133.0;
+const LOAD_GAME_LOADING_FRAGMENT_WARNING_HEIGHT: f32 = 24.0;
+const LOAD_GAME_LOADING_FRAGMENT_LABEL_GAP: f32 = 10.0;
+const LOAD_GAME_LOADING_FRAGMENT_LABEL_HEIGHT: f32 = 32.0;
+const LOAD_GAME_LOADING_FRAGMENT_STATUS_GAP: f32 = 16.0;
+const LOAD_GAME_LOADING_FRAGMENT_SPINNER_GAP: f32 = 42.0;
 const SAVE_GAME_SAVING_DELAY_FRAMES: u8 = 5;
 const MAP_PLAY_HELP_LABEL_WIDTH: f32 = 400.0;
 const MAP_PLAY_HELP_OK_WIDTH: f32 = 110.0;
@@ -42551,7 +42558,12 @@ impl DesktopLauncher {
         self.push_schematic_modal_dialog(pass, panel);
     }
 
-    fn push_load_game_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+    fn push_load_game_route_page(
+        &self,
+        pass: &mut RenderPass,
+        viewport: RenderViewport,
+        panel: RenderRect,
+    ) {
         let save_mode = self.active_menu_route == Some(DesktopMenuRoute::SaveGame);
         let search = Self::load_game_search_rect_for_panel(panel);
         let list = Self::load_game_list_rect_for_panel(panel);
@@ -42625,7 +42637,7 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.03,
             ));
-            self.push_save_slot_route_modal_dialogs(pass, panel);
+            self.push_save_slot_route_modal_dialogs(pass, viewport, panel);
             return;
         }
 
@@ -42706,7 +42718,7 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.03,
             ));
-            self.push_save_slot_route_modal_dialogs(pass, panel);
+            self.push_save_slot_route_modal_dialogs(pass, viewport, panel);
             return;
         }
 
@@ -42722,7 +42734,7 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.032,
             ));
-            self.push_save_slot_route_modal_dialogs(pass, panel);
+            self.push_save_slot_route_modal_dialogs(pass, viewport, panel);
             return;
         }
 
@@ -42902,10 +42914,15 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.045,
             ));
         }
-        self.push_save_slot_route_modal_dialogs(pass, panel);
+        self.push_save_slot_route_modal_dialogs(pass, viewport, panel);
     }
 
-    fn push_save_slot_route_modal_dialogs(&self, pass: &mut RenderPass, panel: RenderRect) {
+    fn push_save_slot_route_modal_dialogs(
+        &self,
+        pass: &mut RenderPass,
+        viewport: RenderViewport,
+        panel: RenderRect,
+    ) {
         if self.active_menu_route == Some(DesktopMenuRoute::SaveGame) {
             self.push_save_game_new_dialog(pass, panel);
             self.push_save_game_overwrite_dialog(pass, panel);
@@ -42914,43 +42931,46 @@ impl DesktopLauncher {
         } else {
             self.push_load_game_rename_dialog(pass, panel);
             self.push_load_game_delete_dialog(pass, panel);
-            self.push_load_game_loading_overlay(pass, panel);
+            self.push_load_game_loading_overlay(pass, viewport, panel);
         }
     }
 
-    fn push_load_game_loading_overlay(&self, pass: &mut RenderPass, panel: RenderRect) {
+    fn push_load_game_loading_overlay(
+        &self,
+        pass: &mut RenderPass,
+        viewport: RenderViewport,
+        _panel: RenderRect,
+    ) {
         let Some(pending) = self.load_game_pending_load.as_ref() else {
             return;
         };
-        let width = (panel.width - 140.0).clamp(260.0, 380.0);
-        let height = 118.0;
-        let dialog = RenderRect::new(
-            panel.center().x - width * 0.5,
-            panel.center().y - height * 0.5,
-            width,
-            height,
-        );
+        let stage = RenderRect::new(viewport.x, viewport.y, viewport.width, viewport.height);
+        let scale = (viewport.height / 720.0).clamp(0.75, 1.35);
+        let warning_height = (LOAD_GAME_LOADING_FRAGMENT_WARNING_HEIGHT * scale).max(12.0);
+        let top_spacer = LOAD_GAME_LOADING_FRAGMENT_TOP_SPACER * scale;
+        let label_gap = LOAD_GAME_LOADING_FRAGMENT_LABEL_GAP * scale;
+        let label_height = (LOAD_GAME_LOADING_FRAGMENT_LABEL_HEIGHT * scale).max(20.0);
+        let top_warning_y =
+            stage.y + (stage.height - top_spacer - warning_height).max(stage.height * 0.56);
+        let label_y = top_warning_y - label_gap - label_height;
+        let bottom_warning_y = label_y - label_gap - warning_height;
+        let top_warning = RenderRect::new(stage.x, top_warning_y, stage.width, warning_height);
+        let bottom_warning =
+            RenderRect::new(stage.x, bottom_warning_y, stage.width, warning_height);
+        let label_center = RenderPoint::new(stage.center().x, label_y + label_height * 0.5);
         pass.push(RenderCommand::fill_rect(
-            panel,
-            [0.0, 0.0, 0.0, 0.54],
-            Layer::END_PIXELED + 0.090,
+            stage,
+            [0.0, 0.0, 0.0, 0.80],
+            Layer::END_PIXELED + 0.088,
         ));
-        pass.push(RenderCommand::draw_sprite(
-            Self::settings_drawable_symbol("pane"),
-            dialog,
-            [1.0, 1.0, 1.0, 0.98],
-            0.0,
-            Layer::END_PIXELED + 0.091,
-        ));
-        pass.push(RenderCommand::stroke_rect(
-            dialog,
-            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.96],
-            2.0,
-            Layer::END_PIXELED + 0.092,
-        ));
+        Self::push_load_game_loading_warning_bar(pass, top_warning, Layer::END_PIXELED + 0.091);
+        Self::push_load_game_loading_warning_bar(pass, bottom_warning, Layer::END_PIXELED + 0.091);
         pass.push(RenderCommand::draw_text_styled(
             desktop_ui_icon_glyph_or_label("refresh", "refresh"),
-            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 34.0),
+            RenderPoint::new(
+                label_center.x,
+                label_center.y + LOAD_GAME_LOADING_FRAGMENT_SPINNER_GAP * scale,
+            ),
             [0.80, 0.94, 1.0, 1.0],
             20.0,
             self.render_time * 8.0,
@@ -42963,9 +42983,9 @@ impl DesktopLauncher {
         ));
         pass.push(RenderCommand::draw_text_styled(
             "@loading",
-            RenderPoint::new(dialog.center().x, dialog.center().y - 2.0),
+            label_center,
             [0.94, 0.98, 1.0, 1.0],
-            14.0,
+            22.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -42975,15 +42995,68 @@ impl DesktopLauncher {
         ));
         pass.push(RenderCommand::draw_text_styled(
             pending.status_line(),
-            RenderPoint::new(dialog.center().x, dialog.y + 24.0),
+            RenderPoint::new(
+                label_center.x,
+                bottom_warning.y - LOAD_GAME_LOADING_FRAGMENT_STATUS_GAP * scale,
+            ),
             [0.60, 0.72, 0.82, 1.0],
-            9.0,
+            10.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.0945,
         ));
+    }
+
+    fn push_load_game_loading_warning_bar(pass: &mut RenderPass, rect: RenderRect, layer: f32) {
+        let warning = WarningBar::new();
+        let plan = warning.draw_plan(WarningBarLayout::new(
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+        ));
+        for command in plan.commands {
+            match command {
+                WarningBarDrawCommand::Stripe(stripe) => {
+                    let center = RenderPoint::new(
+                        (stripe.quad.x1 + stripe.quad.x3) * 0.5,
+                        (stripe.quad.y1 + stripe.quad.y3) * 0.5,
+                    );
+                    let from = RenderPoint::new(
+                        (stripe.quad.x1 + stripe.quad.x4) * 0.5,
+                        (stripe.quad.y1 + stripe.quad.y4) * 0.5,
+                    );
+                    let to = RenderPoint::new(
+                        (stripe.quad.x2 + stripe.quad.x3) * 0.5,
+                        (stripe.quad.y2 + stripe.quad.y3) * 0.5,
+                    );
+                    let color = rgba8888_to_render_color(stripe.color_rgba, stripe.alpha);
+                    pass.push(RenderCommand::draw_line(
+                        from,
+                        to,
+                        warning.bar_width,
+                        color,
+                        layer,
+                    ));
+                    pass.push(RenderCommand::draw_circle(
+                        center,
+                        (warning.bar_width * 0.18).max(1.0),
+                        color,
+                        true,
+                        layer + 0.01,
+                    ));
+                }
+                WarningBarDrawCommand::Line(line) => pass.push(RenderCommand::draw_line(
+                    RenderPoint::new(line.line.from_x, line.line.from_y),
+                    RenderPoint::new(line.line.to_x, line.line.to_y),
+                    line.line.stroke,
+                    rgba8888_to_render_color(line.color_rgba, line.alpha),
+                    layer + 0.02,
+                )),
+            }
+        }
     }
 
     fn push_save_game_saving_overlay(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -43664,6 +43737,27 @@ impl DesktopLauncher {
 
         let mut close_requested = false;
         for input in input_events {
+            if self.load_game_pending_load.is_some() || self.save_game_pending_save.is_some() {
+                match input {
+                    DesktopInputTickEvent::CursorMoved { x, y } => {
+                        self.last_menu_cursor = Some(RenderPoint::new(*x, *y));
+                        self.last_menu_hovered_button = None;
+                        self.last_settings_hovered_control = None;
+                    }
+                    DesktopInputTickEvent::Key { key_code, pressed }
+                        if *pressed && Self::is_menu_back_key(key_code) =>
+                    {
+                        self.apply_menu_back_key();
+                    }
+                    _ => {}
+                }
+                self.last_menu_action = None;
+                self.last_menu_pressed_button = None;
+                self.last_menu_pressed_chrome_action = None;
+                self.last_settings_pressed_control = None;
+                self.settings_scroll_drag_state = None;
+                continue;
+            }
             match input {
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if Self::is_shift_key_code(key_code) =>
@@ -46215,7 +46309,7 @@ impl DesktopLauncher {
             route,
             DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame
         ) {
-            self.push_load_game_route_page(pass, panel);
+            self.push_load_game_route_page(pass, viewport, panel);
         } else if route == DesktopMenuRoute::Database {
             self.push_database_route_page(pass, panel);
         } else if route == DesktopMenuRoute::TechTree {
@@ -73227,6 +73321,28 @@ version: "2.0.0"
         ));
         assert!(texts.contains(&"@loading"));
         assert!(texts.iter().any(|text| text == &"@loading: @load | slot 2"));
+        let stage_rect = RenderRect::new(viewport.x, viewport.y, viewport.width, viewport.height);
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::FillRect { rect, color, .. }
+                    if *rect == stage_rect && *color == [0.0, 0.0, 0.0, 0.80]
+            )),
+            "Java LoadingFragment uses a full-screen Styles.black8 overlay, not a LoadDialog-local panel overlay"
+        );
+        assert!(
+            commands
+                .iter()
+                .filter(|command| matches!(
+                    command,
+                    RenderCommand::DrawLine { layer, .. }
+                        if *layer >= Layer::END_PIXELED + 0.091
+                            && *layer <= Layer::END_PIXELED + 0.112
+                ))
+                .count()
+                >= 4,
+            "Java LoadingFragment should draw the two full-width WarningBar edge/stripe groups"
+        );
         assert!(texts.contains(&"[accent]New Map"));
         assert!(texts.contains(&"@save.map: New Map"));
         assert!(texts.contains(&"@mode.attack.name / @save.wave: 9"));
@@ -73236,6 +73352,14 @@ version: "2.0.0"
         let route_panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
             viewport,
             super::DesktopMenuRoute::LoadGame,
+        );
+        assert!(
+            !commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::FillRect { rect, color, .. }
+                    if *rect == route_panel && (color[3] - 0.54).abs() < 0.001
+            )),
+            "LoadDialog pending load should no longer render the old route-local 54% black panel overlay"
         );
         let search_rect = DesktopLauncher::load_game_search_rect_for_panel(route_panel);
         for (index, mode) in [
@@ -73360,6 +73484,41 @@ version: "2.0.0"
             )),
             "Java LoadDialog uses Icon.pencil for the rename slot action"
         );
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let settings_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Settings)
+            .expect("menu ui should include SETTINGS")
+            .rect
+            .center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: settings_center.x,
+                    y: settings_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: false,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::LoadGame),
+            "LoadingFragment is a full-screen touchable modal; menu buttons must not receive clicks while a save is loading"
+        );
+        assert!(launcher.load_game_pending_load.is_some());
+        assert_eq!(launcher.last_menu_pressed_button, None);
+        assert_eq!(launcher.last_menu_visual_pressed_button, None);
         for frame_index in 1..=u64::from(super::LOAD_GAME_LOADING_DELAY_FRAMES) {
             launcher.menu_graphics_frame_for_surface(frame_index, viewport);
         }

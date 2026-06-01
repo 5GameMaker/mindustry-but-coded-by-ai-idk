@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **85.7%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **85.8%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：Join 连接中状态栏只认真实 connecting
+## 最新闭环：LoadDialog loading 提升为全屏 LoadingFragment 遮罩
+
+- 当前总体迁移完成度：约 **85.8%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/UI.java`、`core/src/mindustry/ui/fragments/LoadingFragment.java` 与 `core/src/mindustry/ui/dialogs/LoadDialog.java`：
+  - Java `UI.loadAnd(...)` 通过全局 `loadfrag.show(text)` 延迟执行，不是在 LoadDialog 内画局部小面板；
+  - Java `LoadingFragment` 使用 `Styles.black8` 全屏遮罩、上下 `WarningBar`、`@loading` label，并接管输入；
+  - Rust 现在把 LoadGame pending load 视觉提升为 viewport 全屏 80% 黑幕 + WarningBar + `@loading` + refresh spinner + status line；
+  - pending load/save 期间 `apply_menu_input_events(...)` 作为全屏模态层吞掉鼠标/滚轮/文本等输入，back 只消费不关闭 route。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop load_game --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步建议继续前端：
+  1. JoinDialog 连接中/重连中补 Java `loadfrag.show("@connecting")` / `@reconnecting` 同款遮罩与取消按钮；
+  2. 版本不匹配从 status bar/top info 收口成更像 Java `ui.showInfo(...)` 的 modal；
+  3. Controls `Reset All` 继续从固定 footer 语义收口为 ScrollPane 内容末尾行，搜索过滤也要按 Java 仅匹配显示名。
+
+## 上一闭环：Join 连接中状态栏只认真实 connecting
 
 - 当前总体迁移完成度：约 **85.7%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java`：
