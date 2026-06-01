@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 717. CustomRulesDialog 队伍规则子弹窗最小闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **84.8%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - 原版 `CustomRulesDialog` 的 `teams` 分组包含 player team、enemy team 与 base team 折叠规则项；
+  - 这些队伍规则属于自定义规则核心子菜单，不能只停留在 JSON 或隐藏状态。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `OpenTeamRules/CloseTeamRules/SelectDefaultTeam/SelectWaveTeam/ToggleTeamRuleSection/ToggleTeamRule/AdjustTeamRuleNumber`；
+    - `Customize Rules` 右侧增加 `@rules.title.teams` 入口；
+    - 新增队伍规则子弹窗：显示 Player Team、Enemy Team、base teams 列表与选中 team 的规则字段；
+    - 最小可编辑字段覆盖 `Protect Cores / Check Placement / Infinite Resources / RTS AI` 与 `Block Health Multiplier / Unit Damage Multiplier`；
+    - 交互会写回 `Rules.default_team`、`Rules.wave_team` 和 `Rules.teams[team]`，并继续复用上一轮 copy/load JSON 闭环；
+    - 扩展 CustomRules 回归，验证入口命中、team 选择、team rule toggle/number 调整、剪贴板往返恢复。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore -- --nocapture`
+  - `git diff --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - team 子弹窗仍是最小布局，不是 Java 滚动/折叠表格的完整复刻；
+  - `buildAi/buildAiTier/rtsMinSquad/rtsMaxSquad/unitFactoryActivationDelay/extraCoreBuildRadius` 等字段 UI 还需继续补齐；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 716. CustomRulesDialog 队伍规则剪贴板往返
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

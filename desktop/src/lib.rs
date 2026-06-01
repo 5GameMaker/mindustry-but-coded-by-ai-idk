@@ -39,7 +39,8 @@ use mindustry_core::mindustry::entities::{
     WorldLabelComp, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::game::{
-    Gamemode, Rules, Schematic, TeamRule, TechContentRef, TechNode, TechNodeId, TechTree,
+    vanilla_teams, Gamemode, Rules, Schematic, TeamRule, TechContentRef, TechNode, TechNodeId,
+    TechTree,
 };
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
@@ -964,6 +965,87 @@ impl DesktopWeatherNumber {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopTeamRuleToggle {
+    ProtectCores,
+    CheckPlacement,
+    InfiniteResources,
+    RtsAi,
+}
+
+impl DesktopTeamRuleToggle {
+    const ALL: [Self; 4] = [
+        Self::ProtectCores,
+        Self::CheckPlacement,
+        Self::InfiniteResources,
+        Self::RtsAi,
+    ];
+
+    fn label_key(self) -> &'static str {
+        match self {
+            Self::ProtectCores => "@rules.protectcores",
+            Self::CheckPlacement => "@rules.checkplacement",
+            Self::InfiniteResources => "@rules.infiniteresources",
+            Self::RtsAi => "@rules.rtsai",
+        }
+    }
+
+    fn value(self, rule: &TeamRule) -> bool {
+        match self {
+            Self::ProtectCores => rule.protect_cores,
+            Self::CheckPlacement => rule.check_placement,
+            Self::InfiniteResources => rule.infinite_resources,
+            Self::RtsAi => rule.rts_ai,
+        }
+    }
+
+    fn toggle(self, rule: &mut TeamRule) {
+        match self {
+            Self::ProtectCores => rule.protect_cores = !rule.protect_cores,
+            Self::CheckPlacement => rule.check_placement = !rule.check_placement,
+            Self::InfiniteResources => rule.infinite_resources = !rule.infinite_resources,
+            Self::RtsAi => rule.rts_ai = !rule.rts_ai,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopTeamRuleNumber {
+    BlockHealthMultiplier,
+    UnitDamageMultiplier,
+}
+
+impl DesktopTeamRuleNumber {
+    const ALL: [Self; 2] = [Self::BlockHealthMultiplier, Self::UnitDamageMultiplier];
+
+    fn label_key(self) -> &'static str {
+        match self {
+            Self::BlockHealthMultiplier => "@rules.blockhealthmultiplier",
+            Self::UnitDamageMultiplier => "@rules.unitdamagemultiplier",
+        }
+    }
+
+    fn value_text(self, rule: &TeamRule) -> String {
+        let value = match self {
+            Self::BlockHealthMultiplier => rule.block_health_multiplier,
+            Self::UnitDamageMultiplier => rule.unit_damage_multiplier,
+        };
+        format_custom_rules_number(value)
+    }
+
+    fn adjust(self, rule: &mut TeamRule, direction: i32) {
+        let delta = direction.signum() as f32 * 0.1;
+        if delta == 0.0 {
+            return;
+        }
+        let value = match self {
+            Self::BlockHealthMultiplier => &mut rule.block_health_multiplier,
+            Self::UnitDamageMultiplier => &mut rule.unit_damage_multiplier,
+        };
+        *value = (*value + delta).max(0.001);
+    }
+}
+
 fn format_custom_rules_number(value: f32) -> String {
     if (value - value.round()).abs() < 0.01 {
         format!("{}", value.round() as i32)
@@ -1178,6 +1260,13 @@ pub enum DesktopMapCardActionKind {
     RemoveWeather(usize),
     ToggleWeatherAlways(usize),
     AdjustWeatherNumber(usize, DesktopWeatherNumber, i32),
+    OpenTeamRules,
+    CloseTeamRules,
+    SelectDefaultTeam(usize),
+    SelectWaveTeam(usize),
+    ToggleTeamRuleSection(usize),
+    ToggleTeamRule(usize, DesktopTeamRuleToggle),
+    AdjustTeamRuleNumber(usize, DesktopTeamRuleNumber, i32),
     OpenInEditor,
     Delete,
     ViewWorkshop,
@@ -17452,6 +17541,8 @@ pub struct DesktopLauncher {
     pub map_play_banned_content_dialog: Option<DesktopBannedContentKind>,
     pub map_play_weather_dialog_open: bool,
     pub map_play_weather_add_dialog_open: bool,
+    pub map_play_team_rules_dialog_open: bool,
+    pub map_play_team_rules_selected_team: Option<usize>,
     pub map_play_rules: Option<Rules>,
     pub last_map_play_rules_clipboard_text: Option<String>,
     pub map_play_rules_error: Option<String>,
@@ -18612,6 +18703,8 @@ impl DesktopLauncher {
             map_play_banned_content_dialog: None,
             map_play_weather_dialog_open: false,
             map_play_weather_add_dialog_open: false,
+            map_play_team_rules_dialog_open: false,
+            map_play_team_rules_selected_team: None,
             map_play_rules: None,
             last_map_play_rules_clipboard_text: None,
             map_play_rules_error: None,
@@ -30672,6 +30765,72 @@ impl DesktopLauncher {
             .collect()
     }
 
+    fn map_play_team_options() -> Vec<(usize, String, u32)> {
+        vanilla_teams()
+            .base_teams()
+            .iter()
+            .map(|team| (team.id as usize, team.name.clone(), team.color_rgba))
+            .collect()
+    }
+
+    fn map_play_team_rules_dialog_rect(child: RenderRect) -> RenderRect {
+        let width = (child.width - 58.0).clamp(560.0, 700.0);
+        let height = (child.height - 78.0).clamp(360.0, 460.0);
+        RenderRect::new(
+            child.center().x - width * 0.5,
+            child.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn map_play_team_rules_close_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.x + 18.0, dialog.y + 16.0, 112.0, 36.0)
+    }
+
+    fn map_play_team_rules_selector_rect(
+        dialog: RenderRect,
+        row_index: usize,
+        team_index: usize,
+    ) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 150.0 + team_index as f32 * 66.0,
+            dialog.y + dialog.height - 82.0 - row_index as f32 * 42.0,
+            58.0,
+            30.0,
+        )
+    }
+
+    fn map_play_team_rules_section_rect(dialog: RenderRect, team_index: usize) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 22.0,
+            dialog.y + dialog.height - 174.0 - team_index as f32 * 34.0,
+            180.0,
+            28.0,
+        )
+    }
+
+    fn map_play_team_rules_field_rect(dialog: RenderRect, field_index: usize) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 220.0,
+            dialog.y + dialog.height - 174.0 - field_index as f32 * 36.0,
+            dialog.width - 244.0,
+            30.0,
+        )
+    }
+
+    fn map_play_team_rules_field_toggle_rect(row: RenderRect) -> RenderRect {
+        RenderRect::new(row.right() - 76.0, row.y + 3.0, 68.0, 24.0)
+    }
+
+    fn map_play_team_rules_number_button_rect(row: RenderRect, increase: bool) -> RenderRect {
+        if increase {
+            RenderRect::new(row.right() - 28.0, row.y + 3.0, 24.0, 24.0)
+        } else {
+            RenderRect::new(row.right() - 112.0, row.y + 3.0, 24.0, 24.0)
+        }
+    }
+
     fn toggle_map_play_custom_rule(&mut self, index: usize, toggle: DesktopCustomRulesToggle) {
         let Some(map) = self.map_list_cards.get(index) else {
             return;
@@ -30803,6 +30962,54 @@ impl DesktopLauncher {
             self.map_play_rules = Some(rules);
             self.map_play_rules_error = None;
         }
+    }
+
+    fn update_map_play_rules_for_team(&mut self, index: usize, update: impl FnOnce(&mut Rules)) {
+        let Some(map) = self.map_list_cards.get(index) else {
+            return;
+        };
+        let mut rules = self
+            .map_play_rules
+            .clone()
+            .unwrap_or_else(|| Self::map_play_rules_for_mode(map, self.map_play_selected_mode));
+        update(&mut rules);
+        self.map_play_rules = Some(rules);
+        self.map_play_rules_error = None;
+    }
+
+    fn select_map_play_default_team(&mut self, index: usize, team_id: usize) {
+        self.update_map_play_rules_for_team(index, |rules| {
+            rules.default_team = team_id as i32;
+        });
+    }
+
+    fn select_map_play_wave_team(&mut self, index: usize, team_id: usize) {
+        self.update_map_play_rules_for_team(index, |rules| {
+            rules.wave_team = team_id as i32;
+        });
+    }
+
+    fn toggle_map_play_team_rule(
+        &mut self,
+        index: usize,
+        team_id: usize,
+        toggle: DesktopTeamRuleToggle,
+    ) {
+        self.update_map_play_rules_for_team(index, |rules| {
+            toggle.toggle(rules.teams.get_or_insert(team_id));
+        });
+    }
+
+    fn adjust_map_play_team_rule_number(
+        &mut self,
+        index: usize,
+        team_id: usize,
+        number: DesktopTeamRuleNumber,
+        direction: i32,
+    ) {
+        self.update_map_play_rules_for_team(index, |rules| {
+            number.adjust(rules.teams.get_or_insert(team_id), direction);
+        });
     }
 
     fn map_play_rules_clipboard_json(rules: &Rules) -> String {
@@ -32775,6 +32982,122 @@ impl DesktopLauncher {
                             }
                             return None;
                         }
+                        if self.map_play_team_rules_dialog_open {
+                            let team_dialog = Self::map_play_team_rules_dialog_rect(child);
+                            if Self::map_play_team_rules_close_rect(team_dialog)
+                                .contains_point(point)
+                            {
+                                return Some(DesktopMenuRouteShellAction::MapCard(
+                                    DesktopMapCardAction::new(
+                                        index,
+                                        DesktopMapCardActionKind::CloseTeamRules,
+                                    ),
+                                ));
+                            }
+                            let rules = self
+                                .map_play_rules
+                                .clone()
+                                .or_else(|| {
+                                    self.map_list_cards.get(index).map(|map| {
+                                        Self::map_play_rules_for_mode(
+                                            map,
+                                            self.map_play_selected_mode,
+                                        )
+                                    })
+                                })
+                                .unwrap_or_default();
+                            let teams = Self::map_play_team_options();
+                            for (team_index, (team_id, _, _)) in teams.iter().enumerate() {
+                                if Self::map_play_team_rules_selector_rect(
+                                    team_dialog,
+                                    0,
+                                    team_index,
+                                )
+                                .contains_point(point)
+                                {
+                                    return Some(DesktopMenuRouteShellAction::MapCard(
+                                        DesktopMapCardAction::new(
+                                            index,
+                                            DesktopMapCardActionKind::SelectDefaultTeam(*team_id),
+                                        ),
+                                    ));
+                                }
+                                if Self::map_play_team_rules_selector_rect(
+                                    team_dialog,
+                                    1,
+                                    team_index,
+                                )
+                                .contains_point(point)
+                                {
+                                    return Some(DesktopMenuRouteShellAction::MapCard(
+                                        DesktopMapCardAction::new(
+                                            index,
+                                            DesktopMapCardActionKind::SelectWaveTeam(*team_id),
+                                        ),
+                                    ));
+                                }
+                                if Self::map_play_team_rules_section_rect(team_dialog, team_index)
+                                    .contains_point(point)
+                                {
+                                    return Some(DesktopMenuRouteShellAction::MapCard(
+                                        DesktopMapCardAction::new(
+                                            index,
+                                            DesktopMapCardActionKind::ToggleTeamRuleSection(
+                                                *team_id,
+                                            ),
+                                        ),
+                                    ));
+                                }
+                            }
+                            let selected_team = self
+                                .map_play_team_rules_selected_team
+                                .unwrap_or(rules.default_team.max(0) as usize);
+                            for (field_index, toggle) in
+                                DesktopTeamRuleToggle::ALL.into_iter().enumerate()
+                            {
+                                let row =
+                                    Self::map_play_team_rules_field_rect(team_dialog, field_index);
+                                if Self::map_play_team_rules_field_toggle_rect(row)
+                                    .contains_point(point)
+                                {
+                                    return Some(DesktopMenuRouteShellAction::MapCard(
+                                        DesktopMapCardAction::new(
+                                            index,
+                                            DesktopMapCardActionKind::ToggleTeamRule(
+                                                selected_team,
+                                                toggle,
+                                            ),
+                                        ),
+                                    ));
+                                }
+                            }
+                            let offset = DesktopTeamRuleToggle::ALL.len();
+                            for (number_index, number) in
+                                DesktopTeamRuleNumber::ALL.into_iter().enumerate()
+                            {
+                                let row = Self::map_play_team_rules_field_rect(
+                                    team_dialog,
+                                    offset + number_index,
+                                );
+                                for (increase, direction) in [(false, -1), (true, 1)] {
+                                    if Self::map_play_team_rules_number_button_rect(row, increase)
+                                        .contains_point(point)
+                                    {
+                                        return Some(DesktopMenuRouteShellAction::MapCard(
+                                            DesktopMapCardAction::new(
+                                                index,
+                                                DesktopMapCardActionKind::AdjustTeamRuleNumber(
+                                                    selected_team,
+                                                    number,
+                                                    direction,
+                                                ),
+                                            ),
+                                        ));
+                                    }
+                                }
+                            }
+                            return None;
+                        }
                         if self.map_play_rules_edit_dialog_open {
                             let edit = Self::map_play_rules_edit_dialog_rect(child);
                             for (button_index, kind) in [
@@ -32842,6 +33165,15 @@ impl DesktopLauncher {
                                 DesktopMapCardAction::new(
                                     index,
                                     DesktopMapCardActionKind::OpenWeather,
+                                ),
+                            ));
+                        }
+                        if Self::map_play_customize_edit_button_rect(child, 5).contains_point(point)
+                        {
+                            return Some(DesktopMenuRouteShellAction::MapCard(
+                                DesktopMapCardAction::new(
+                                    index,
+                                    DesktopMapCardActionKind::OpenTeamRules,
                                 ),
                             ));
                         }
@@ -34719,6 +35051,68 @@ impl DesktopLauncher {
                             self.map_play_weather_dialog_open = true;
                             self.map_play_weather_add_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::OpenTeamRules => {
+                            self.map_play_team_rules_dialog_open = true;
+                            if self.map_play_team_rules_selected_team.is_none() {
+                                self.map_play_team_rules_selected_team = self
+                                    .map_play_rules
+                                    .as_ref()
+                                    .map(|rules| rules.default_team.max(0) as usize);
+                            }
+                            self.map_play_weather_dialog_open = false;
+                            self.map_play_weather_add_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
+                            self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                            self.map_play_rules_error = None;
+                        }
+                        DesktopMapCardActionKind::CloseTeamRules => {
+                            self.map_play_team_rules_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::SelectDefaultTeam(team_id) => {
+                            self.select_map_play_default_team(action.index, team_id);
+                            self.map_play_team_rules_selected_team = Some(team_id);
+                            self.map_play_team_rules_dialog_open = true;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::SelectWaveTeam(team_id) => {
+                            self.select_map_play_wave_team(action.index, team_id);
+                            self.map_play_team_rules_selected_team = Some(team_id);
+                            self.map_play_team_rules_dialog_open = true;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::ToggleTeamRuleSection(team_id) => {
+                            self.map_play_team_rules_selected_team = Some(team_id);
+                            self.map_play_team_rules_dialog_open = true;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::ToggleTeamRule(team_id, toggle) => {
+                            self.toggle_map_play_team_rule(action.index, team_id, toggle);
+                            self.map_play_team_rules_selected_team = Some(team_id);
+                            self.map_play_team_rules_dialog_open = true;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::AdjustTeamRuleNumber(
+                            team_id,
+                            number,
+                            direction,
+                        ) => {
+                            self.adjust_map_play_team_rule_number(
+                                action.index,
+                                team_id,
+                                number,
+                                direction,
+                            );
+                            self.map_play_team_rules_selected_team = Some(team_id);
+                            self.map_play_team_rules_dialog_open = true;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
@@ -40195,6 +40589,7 @@ impl DesktopLauncher {
             self.localize_bundle_markup_text("@bannedblocks"),
             self.localize_bundle_markup_text("@bannedunits"),
             self.localize_bundle_markup_text("@rules.weather"),
+            self.localize_bundle_markup_text("@rules.title.teams"),
         ]
         .into_iter()
         .enumerate()
@@ -40239,6 +40634,9 @@ impl DesktopLauncher {
         }
         if self.map_play_weather_dialog_open {
             self.push_map_play_weather_dialog(pass, child, &rules);
+        }
+        if self.map_play_team_rules_dialog_open {
+            self.push_map_play_team_rules_dialog(pass, child, &rules);
         }
     }
 
@@ -40593,6 +40991,219 @@ impl DesktopLauncher {
             self.localize_bundle_markup_text("@back"),
             Some("left"),
             layer + 0.050,
+        );
+    }
+
+    fn push_map_play_team_rules_dialog(
+        &self,
+        pass: &mut RenderPass,
+        child: RenderRect,
+        rules: &Rules,
+    ) {
+        let layer = Layer::END_PIXELED + 0.150;
+        let dialog = Self::map_play_team_rules_dialog_rect(child);
+        let teams = Self::map_play_team_options();
+        let selected_team = self
+            .map_play_team_rules_selected_team
+            .unwrap_or(rules.default_team.max(0) as usize);
+        let selected_rule = rules.teams.get_or_default(selected_team);
+        pass.push(RenderCommand::fill_rect(
+            child,
+            [0.0, 0.0, 0.0, 0.52],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.62, 0.82, 1.0, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@rules.title.teams"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 26.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.004,
+        ));
+        for (row_index, (label, active_team)) in [
+            ("@rules.playerteam", rules.default_team),
+            ("@rules.enemyteam", rules.wave_team),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text(label),
+                RenderPoint::new(
+                    dialog.x + 24.0,
+                    dialog.y + dialog.height - 67.0 - row_index as f32 * 42.0,
+                ),
+                [0.88, 0.95, 1.0, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.006 + row_index as f32 * 0.001,
+            ));
+            for (team_index, (team_id, name, color)) in teams.iter().enumerate() {
+                let rect = Self::map_play_team_rules_selector_rect(dialog, row_index, team_index);
+                let mut tint = rgba8888_to_render_color(*color, 1.0);
+                tint[3] = if active_team == *team_id as i32 {
+                    0.98
+                } else {
+                    0.42
+                };
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_drawable_symbol("button"),
+                    rect,
+                    tint,
+                    0.0,
+                    layer + 0.008 + row_index as f32 * 0.001 + team_index as f32 * 0.0001,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    name.clone(),
+                    rect.center(),
+                    [0.96, 0.98, 1.0, 1.0],
+                    8.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    layer + 0.009 + row_index as f32 * 0.001 + team_index as f32 * 0.0001,
+                ));
+            }
+        }
+        for (team_index, (team_id, name, color)) in teams.iter().enumerate() {
+            let rect = Self::map_play_team_rules_section_rect(dialog, team_index);
+            let mut tint = rgba8888_to_render_color(*color, 1.0);
+            tint[3] = if selected_team == *team_id {
+                0.74
+            } else {
+                0.30
+            };
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("button"),
+                rect,
+                tint,
+                0.0,
+                layer + 0.030 + team_index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                name.clone(),
+                RenderPoint::new(rect.x + 10.0, rect.center().y),
+                [0.94, 0.98, 1.0, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.031 + team_index as f32 * 0.001,
+            ));
+        }
+        let selected_name = teams
+            .iter()
+            .find(|(team_id, _, _)| *team_id == selected_team)
+            .map(|(_, name, _)| name.as_str())
+            .unwrap_or("team");
+        pass.push(RenderCommand::draw_text_styled(
+            selected_name.to_string(),
+            RenderPoint::new(dialog.x + 220.0, dialog.y + dialog.height - 146.0),
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.040,
+        ));
+        for (field_index, toggle) in DesktopTeamRuleToggle::ALL.into_iter().enumerate() {
+            let row = Self::map_play_team_rules_field_rect(dialog, field_index);
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text(toggle.label_key()),
+                RenderPoint::new(row.x + 6.0, row.center().y),
+                [0.84, 0.92, 1.0, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.050 + field_index as f32 * 0.001,
+            ));
+            self.push_settings_text_button(
+                pass,
+                Self::map_play_team_rules_field_toggle_rect(row),
+                if toggle.value(&selected_rule) {
+                    "✓"
+                } else {
+                    "□"
+                },
+                None,
+                layer + 0.051 + field_index as f32 * 0.001,
+            );
+        }
+        let offset = DesktopTeamRuleToggle::ALL.len();
+        for (number_index, number) in DesktopTeamRuleNumber::ALL.into_iter().enumerate() {
+            let row = Self::map_play_team_rules_field_rect(dialog, offset + number_index);
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text(number.label_key()),
+                RenderPoint::new(row.x + 6.0, row.center().y),
+                [0.84, 0.92, 1.0, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.070 + number_index as f32 * 0.001,
+            ));
+            self.push_settings_text_button(
+                pass,
+                Self::map_play_team_rules_number_button_rect(row, false),
+                "-",
+                None,
+                layer + 0.071 + number_index as f32 * 0.001,
+            );
+            self.push_settings_text_button(
+                pass,
+                Self::map_play_team_rules_number_button_rect(row, true),
+                "+",
+                None,
+                layer + 0.072 + number_index as f32 * 0.001,
+            );
+            pass.push(RenderCommand::draw_text_styled(
+                number.value_text(&selected_rule),
+                RenderPoint::new(row.right() - 58.0, row.center().y),
+                [0.94, 0.98, 1.0, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.073 + number_index as f32 * 0.001,
+            ));
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_team_rules_close_rect(dialog),
+            self.localize_bundle_markup_text("@back"),
+            Some("left"),
+            layer + 0.090,
         );
     }
 
@@ -66777,6 +67388,181 @@ version: "2.0.0"
             super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::CloseWeather),
         ));
         assert!(!launcher.map_play_weather_dialog_open);
+        let open_team_rules_center =
+            DesktopLauncher::map_play_customize_edit_button_rect(child, 5).center();
+        let open_team_rules = super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenTeamRules),
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                open_team_rules_center.x,
+                open_team_rules_center.y
+            ),
+            Some(open_team_rules)
+        );
+        launcher.dispatch_menu_route_shell_action(open_team_rules);
+        assert!(launcher.map_play_team_rules_dialog_open);
+        let team_frame = launcher.menu_graphics_frame_for_surface(6, render_viewport);
+        let team_texts = team_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("team rules dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(team_texts
+            .iter()
+            .any(|text| text.contains("Teams") || text.contains("rules.title.teams")));
+        assert!(team_texts
+            .iter()
+            .any(|text| text.contains("Player Team") || text.contains("rules.playerteam")));
+        assert!(team_texts
+            .iter()
+            .any(|text| text.contains("Enemy Team") || text.contains("rules.enemyteam")));
+        assert!(team_texts.contains(&"sharded"));
+        let team_dialog = DesktopLauncher::map_play_team_rules_dialog_rect(child);
+        let select_default_malis_center =
+            DesktopLauncher::map_play_team_rules_selector_rect(team_dialog, 0, 3).center();
+        let select_default_malis =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::SelectDefaultTeam(3),
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                select_default_malis_center.x,
+                select_default_malis_center.y
+            ),
+            Some(select_default_malis)
+        );
+        launcher.dispatch_menu_route_shell_action(select_default_malis);
+        let select_wave_green_center =
+            DesktopLauncher::map_play_team_rules_selector_rect(team_dialog, 1, 4).center();
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::SelectWaveTeam(4)),
+        ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                select_wave_green_center.x,
+                select_wave_green_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(
+                    0,
+                    super::DesktopMapCardActionKind::SelectWaveTeam(4)
+                )
+            ))
+        );
+        assert_eq!(
+            launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| (rules.default_team, rules.wave_team)),
+            Some((3, 4))
+        );
+        let sharded_section_center =
+            DesktopLauncher::map_play_team_rules_section_rect(team_dialog, 1).center();
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::ToggleTeamRuleSection(1),
+            ),
+        ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                sharded_section_center.x,
+                sharded_section_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(
+                    0,
+                    super::DesktopMapCardActionKind::ToggleTeamRuleSection(1)
+                )
+            ))
+        );
+        let protect_row = DesktopLauncher::map_play_team_rules_field_rect(team_dialog, 0);
+        let protect_toggle_center =
+            DesktopLauncher::map_play_team_rules_field_toggle_rect(protect_row).center();
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::ToggleTeamRule(
+                    1,
+                    super::DesktopTeamRuleToggle::ProtectCores,
+                ),
+            ),
+        ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                protect_toggle_center.x,
+                protect_toggle_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(
+                    0,
+                    super::DesktopMapCardActionKind::ToggleTeamRule(
+                        1,
+                        super::DesktopTeamRuleToggle::ProtectCores
+                    )
+                )
+            ))
+        );
+        let block_health_row = DesktopLauncher::map_play_team_rules_field_rect(
+            team_dialog,
+            super::DesktopTeamRuleToggle::ALL.len(),
+        );
+        let block_health_plus =
+            DesktopLauncher::map_play_team_rules_number_button_rect(block_health_row, true)
+                .center();
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::AdjustTeamRuleNumber(
+                    1,
+                    super::DesktopTeamRuleNumber::BlockHealthMultiplier,
+                    1,
+                ),
+            ),
+        ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                block_health_plus.x,
+                block_health_plus.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(
+                    0,
+                    super::DesktopMapCardActionKind::AdjustTeamRuleNumber(
+                        1,
+                        super::DesktopTeamRuleNumber::BlockHealthMultiplier,
+                        1
+                    )
+                )
+            ))
+        );
+        assert_eq!(
+            launcher.map_play_rules.as_ref().map(|rules| {
+                let team = rules.teams.get_or_default(1);
+                (team.protect_cores, team.block_health_multiplier)
+            }),
+            Some((false, 1.1))
+        );
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::CloseTeamRules),
+        ));
+        assert!(!launcher.map_play_team_rules_dialog_open);
         let wave_spacing_row = DesktopLauncher::map_play_customize_number_row_rect(content, 1);
         let wave_spacing_plus =
             DesktopLauncher::map_play_customize_number_button_rect(wave_spacing_row, true).center();
@@ -66852,18 +67638,6 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(toggled_texts.contains(&"✓ Attack Mode"));
-        {
-            let rules = launcher
-                .map_play_rules
-                .as_mut()
-                .expect("custom rules edits should keep a mutable rules snapshot");
-            rules.default_team = 3;
-            rules.wave_team = 4;
-            let team = rules.teams.get_or_insert(1);
-            team.protect_cores = false;
-            team.rts_ai = true;
-            team.block_health_multiplier = 1.5;
-        }
 
         let edit_center = DesktopLauncher::map_play_customize_edit_button_rect(child, 0).center();
         let open_edit =
@@ -66929,8 +67703,8 @@ version: "2.0.0"
         assert!(copied_rules.contains("\"waveTeam\":4"));
         assert!(copied_rules.contains("\"teams\":{\"1\":{"));
         assert!(copied_rules.contains("\"protectCores\":false"));
-        assert!(copied_rules.contains("\"rtsAi\":true"));
-        assert!(copied_rules.contains("\"blockHealthMultiplier\":1.5"));
+        assert!(copied_rules.contains("\"rtsAi\":false"));
+        assert!(copied_rules.contains("\"blockHealthMultiplier\":1.1"));
 
         let reset_center =
             DesktopLauncher::map_play_rules_edit_button_rect(edit_dialog, 2).center();
@@ -66997,7 +67771,7 @@ version: "2.0.0"
                     team.block_health_multiplier,
                 )
             }),
-            Some((false, true, 1.5)),
+            Some((false, false, 1.1)),
             "load should restore nested CustomRulesDialog team rule fields from JSON"
         );
         assert_eq!(
