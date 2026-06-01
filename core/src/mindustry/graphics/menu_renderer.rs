@@ -1269,8 +1269,18 @@ impl MenuRenderCommand {
                 let mut commands = Vec::with_capacity(world.tiles.len());
                 for tile in &world.tiles {
                     if tile.wall != MenuBlockKind::Air {
+                        let tile_rect = menu_tile_rect(tile, tile_size);
+                        let shadow_offset = tile_size * 0.24;
                         commands.push(RenderCommand::fill_rect(
-                            menu_transform_rect(menu_tile_rect(tile, tile_size), transform),
+                            menu_transform_rect(
+                                RenderRect::new(
+                                    tile_rect.x - shadow_offset,
+                                    tile_rect.y - shadow_offset,
+                                    tile_rect.width,
+                                    tile_rect.height,
+                                ),
+                                transform,
+                            ),
                             [0.0, 0.0, 0.0, 0.35],
                             0.5,
                         ));
@@ -1309,6 +1319,14 @@ impl MenuRenderCommand {
                         [1.0, 1.0, 1.0, 1.0],
                         0.0,
                         1.5,
+                    ),
+                    RenderCommand::draw_triangle(
+                        center,
+                        body_size * 0.72 * size_scale,
+                        body_size * 0.98 * size_scale,
+                        flyer.rotation,
+                        [0.45, 0.62, 0.72, 0.42],
+                        1.95,
                     ),
                     RenderCommand::draw_sprite(
                         flyer.unit_name,
@@ -2613,6 +2631,87 @@ mod tests {
                     && color == [0.0, 0.0, 0.0, MENU_DARKNESS]
                     && (layer - MENU_DARKNESS_LAYER).abs() < f32::EPSILON
         ));
+    }
+
+    #[test]
+    fn menu_shadow_texture_offsets_wall_tiles_like_java_shadow_buffer() {
+        let world = MenuWorldPlan {
+            width: 2,
+            height: 2,
+            seed: 1,
+            tiles: vec![MenuTile {
+                x: 1,
+                y: 1,
+                floor: MenuBlockKind::Sand,
+                wall: MenuBlockKind::SandWall,
+                ore: MenuBlockKind::Air,
+            }],
+            cache_floor_id: 1,
+            cache_wall_id: 2,
+        };
+        let commands = MenuRenderCommand::DrawShadowTexture {
+            x: 0.0,
+            y: 0.0,
+            width: 16.0,
+            height: -16.0,
+        }
+        .to_render_commands(&world, MENU_TILE_SIZE);
+
+        let expected_offset = MENU_TILE_SIZE * 0.24;
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::FillRect { rect, color, layer }
+                if (rect.x - (MENU_TILE_SIZE - expected_offset)).abs() < f32::EPSILON
+                    && (rect.y - (MENU_TILE_SIZE - expected_offset)).abs() < f32::EPSILON
+                    && (rect.width - MENU_TILE_SIZE).abs() < f32::EPSILON
+                    && (rect.height - MENU_TILE_SIZE).abs() < f32::EPSILON
+                    && *color == [0.0, 0.0, 0.0, 0.35]
+                    && (*layer - 0.5).abs() < f32::EPSILON
+        )));
+    }
+
+    #[test]
+    fn menu_flyer_commands_include_native_silhouette_before_unit_sprite() {
+        let flyer = FlyerPlan {
+            x: 24.0,
+            y: 32.0,
+            rotation: 45.0,
+            unit_name: "mono",
+        };
+        let commands = MenuRenderCommand::DrawFlyer(flyer).to_render_commands(
+            &MenuWorldPlan {
+                width: 1,
+                height: 1,
+                seed: 1,
+                tiles: Vec::new(),
+                cache_floor_id: 1,
+                cache_wall_id: 2,
+            },
+            MENU_TILE_SIZE,
+        );
+        let silhouette_index = commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawTriangle { center, rotation, layer, .. }
+                        if *center == RenderPoint::new(24.0, 32.0)
+                            && (*rotation - 45.0).abs() < f32::EPSILON
+                            && (*layer - 1.95).abs() < f32::EPSILON
+                )
+            })
+            .expect("flyer should include a native triangle silhouette fallback");
+        let sprite_index = commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawSprite { symbol, layer, .. }
+                        if symbol == "mono" && (*layer - 2.0).abs() < f32::EPSILON
+                )
+            })
+            .expect("flyer should still draw the upstream unit sprite");
+        assert!(silhouette_index < sprite_index);
     }
 
     #[test]

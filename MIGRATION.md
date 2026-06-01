@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 655. MenuRenderer 小世界阴影与飞行单位兜底
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **76.7%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是减少主菜单背景“小世界”在贴图/单位资源缺失时退化成扁平色块或空白的风险。
+- Java 对照依据：
+  - `MenuRenderer.cache()` 中 floor/overlay、shadows、wall cache 分层绘制，阴影层是墙体体积感的重要来源；
+  - `MenuRenderer.drawFlyers()` 先画飞行单位阴影，再画单位本体，让菜单背景保留动态生命感。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `DrawShadowTexture` 对 wall tile 的 fallback 阴影从“同格黑色块”改为按 tile size 偏移绘制，避免被 wall fill/sprite 完全覆盖，视觉上更接近 Java 独立 shadow buffer；
+    - `DrawFlyer` 在 `circle-shadow` 与真实 unit sprite 之间新增低透明 triangle silhouette，作为 native 图形兜底，避免 `mono/poly/...` sprite 暂未解析时飞行单位完全不可见；
+    - 新增回归测试覆盖 wall shadow offset 与 flyer silhouette 位于 unit sprite 前。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_ --lib`
+  - `cargo test -p mindustry-desktop menu_frame --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 菜单背景仍未完全复刻 Java `FrameBuffer shadows + CacheBatch` 的真实 GPU/cache 生命周期；
+  - desktop 侧仍有 `menu_background_layer_commands()` 的星球/网格兜底层，后续应继续收敛职责，让真正菜单世界优先来自 `core::graphics::menu_renderer`；
+  - OpenGL 真实 atlas/sprite 解析失败时的可视诊断和截图级对比仍需继续推进；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 654. JoinDialog 多列槽位与 communityservers 开关对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
