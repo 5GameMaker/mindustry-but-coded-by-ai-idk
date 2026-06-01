@@ -28295,6 +28295,11 @@ impl DesktopLauncher {
         )
     }
 
+    fn map_preview_texture_symbol(&self, map: &MapDescriptor) -> String {
+        self.map_play_preview_symbol_if_loaded(map)
+            .unwrap_or_else(|| "error".to_string())
+    }
+
     fn map_list_card_type_label(map: &MapDescriptor) -> String {
         if map.workshop {
             "@workshop".to_string()
@@ -36161,10 +36166,11 @@ impl DesktopLauncher {
                     Layer::END_PIXELED + 0.033 + visible_index as f32 * 0.001,
                 ));
                 let preview = Self::map_list_card_preview_rect(card);
+                let preview_symbol = self.map_preview_texture_symbol(map);
                 pass.push(RenderCommand::draw_sprite(
-                    "whiteui",
+                    &preview_symbol,
                     preview,
-                    [0.10, 0.16, 0.20, 0.96],
+                    [1.0, 1.0, 1.0, 0.98],
                     0.0,
                     Layer::END_PIXELED + 0.034 + visible_index as f32 * 0.001,
                 ));
@@ -36758,10 +36764,11 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.061,
         ));
         let preview = Self::map_editor_preview_rect(dialog, panel);
+        let preview_symbol = self.map_preview_texture_symbol(map);
         pass.push(RenderCommand::draw_sprite(
-            "whiteui",
+            &preview_symbol,
             preview,
-            [0.10, 0.16, 0.20, 0.98],
+            [1.0, 1.0, 1.0, 0.98],
             0.0,
             Layer::END_PIXELED + 0.062,
         ));
@@ -60618,15 +60625,26 @@ version: "2.0.0"
                 }
                 _ => unreachable!(),
             }
-            assert!(commands.iter().any(|command| {
-                matches!(
-                    command,
-                    RenderCommand::DrawSprite { symbol, .. } if symbol == "whiteui"
-                )
-            }));
-
             let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(viewport, route);
             let pane = DesktopLauncher::map_list_pane_rect_for_panel(panel, route);
+            let first_card = DesktopLauncher::map_list_card_rect_for_pane(pane, 0);
+            let first_preview = DesktopLauncher::map_list_card_preview_rect(first_card);
+            assert!(
+                commands.iter().any(|command| matches!(
+                    command,
+                    RenderCommand::DrawSprite { symbol, rect, .. }
+                        if symbol == "error" && *rect == first_preview
+                )),
+                "Map.safeTexture() fallback should render sprites/error.png instead of a plain color block"
+            );
+            assert!(
+                !commands.iter().any(|command| matches!(
+                    command,
+                    RenderCommand::DrawSprite { symbol, rect, .. }
+                        if symbol == "whiteui" && *rect == first_preview
+                )),
+                "missing map previews should not render the old pure whiteui placeholder"
+            );
             for mode in [Gamemode::Survival, Gamemode::Sandbox] {
                 let glyph = DesktopLauncher::map_list_card_mode_badge_text(mode);
                 assert!(
@@ -60725,6 +60743,80 @@ version: "2.0.0"
             assert_eq!(launcher.map_play_dialog_index, None);
             assert_eq!(launcher.editor_map_info_dialog_index, None);
         }
+    }
+
+    #[test]
+    fn desktop_launcher_map_list_cards_render_loaded_preview_textures() {
+        let root = temp_desktop_path("map-list-preview");
+        let preview_dir = root.join("previews");
+        std::fs::create_dir_all(&preview_dir).expect("preview fixture dir should be writable");
+
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), "Battle Island".to_string());
+        let mut map = MapDescriptor::new(
+            "maps/custom/battle-island.msav",
+            180,
+            180,
+            tags,
+            true,
+            1,
+            157,
+        );
+        map.spawns = 1;
+        let preview_path = map.preview_file(preview_dir.to_string_lossy().as_ref());
+        write_test_png(std::path::Path::new(&preview_path));
+        let expected_symbol = DesktopLauncher::map_play_preview_symbol(&map);
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.data_dir = root.display().to_string();
+        launcher.map_list_cards = vec![map.clone()];
+        let cards = launcher.map_list_cards.clone();
+        assert_eq!(
+            launcher.merge_map_preview_textures(&cards),
+            1,
+            "map preview files should be merged into the UI atlas before MapListDialog renders"
+        );
+        launcher.dispatch_menu_action(MenuButtonRole::CustomGame);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::CustomGame,
+        );
+        let pane = DesktopLauncher::map_list_pane_rect_for_panel(
+            panel,
+            super::DesktopMenuRoute::CustomGame,
+        );
+        let first_card = DesktopLauncher::map_list_card_rect_for_pane(pane, 0);
+        let first_preview = DesktopLauncher::map_list_card_preview_rect(first_card);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("map list frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == &expected_symbol && *rect == first_preview
+            )),
+            "MapListDialog cards should render the loaded map.safeTexture() preview"
+        );
+        assert!(
+            !commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == "error" && *rect == first_preview
+            )),
+            "loaded previews should not fall back to sprites/error.png"
+        );
     }
 
     #[test]
@@ -61050,9 +61142,9 @@ version: "2.0.0"
             commands.iter().any(|command| matches!(
                 command,
                 RenderCommand::DrawSprite { symbol, rect, .. }
-                    if symbol == "whiteui" && *rect == preview
+                    if symbol == "error" && *rect == preview
             )),
-            "EditorMapsDialog.showMap should render the Java-like 300f desktop preview"
+            "EditorMapsDialog.showMap should render map.safeTexture(), using sprites/error.png when no preview is loaded"
         );
         let disabled_delete_text = frame
             .bundle

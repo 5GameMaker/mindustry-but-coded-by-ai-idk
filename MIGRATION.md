@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 690. MapListDialog/EditorMapsDialog 地图预览接入 safeTexture 语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **80.4%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是让地图列表卡片和编辑器地图信息页不再画纯色 `whiteui` 占位，而是按 Java `Map.safeTexture()` 语义优先显示真实地图 preview。
+- Java 对照依据：
+  - `MapListDialog.rebuildMaps()` 使用 `new Image(map.safeTexture())` 和 `new BorderImage(map.safeTexture())`；
+  - `EditorMapsDialog.showMap(Map map)` 也使用 `map.safeTexture()`；
+  - `Map.safeTexture()` 在 `texture == null` 时回退 `Core.assets.get("sprites/error.png")`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_preview_texture_symbol(...)`，复用现有 `map_play_preview_symbol_if_loaded(...)` 和 preview atlas；
+    - `push_map_list_route_page(...)` 的地图卡片预览区域改为优先绘制已加载 `map_preview_*` sprite，缺失时绘制 `error`，不再绘制纯 `whiteui` 色块；
+    - `push_editor_map_info_dialog(...)` 的 300f/160f 预览区域同样切到 `map.safeTexture()` 等价符号；
+    - 新增测试覆盖真实 preview 文件合并到 UI atlas 后的地图卡片绘制，并锁定缺失 preview 的 `sprites/error.png` fallback。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop map_list --lib`
+- 仍未完成：
+  - `EditorMapsDialog` 的真实删除确认、打开编辑器和 workshop 平台动作仍需完整迁移；
+  - `MapListDialog` 筛选弹窗的 Java 60f icon toggle/tooltip/右键清空星球过滤等交互仍需继续还原；
+  - 主菜单背景、Scene/Dialog 栈、资源根发现和原生 OpenGL 首帧诊断仍需继续推进，避免 UI 观感不足或黑屏；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 689. EditorMapsDialog 地图信息预览尺寸对齐 Java
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
