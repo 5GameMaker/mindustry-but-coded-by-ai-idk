@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 650. JoinDialog community 视觉结构对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **76.2%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是把 JoinDialog community 区域从调试行推进到更接近 Java `ServerGroup` header + host card 的结构。
+- Java 对照依据：
+  - `JoinDialog.section(...)` 为 global/community 区域绘制标题、分隔线和 show-hidden eye；
+  - `JoinDialog.addHeader(...)` 为 `ServerGroup` 绘制组名、accent/lightGray 分隔线、star favorite、eye hidden；
+  - `JoinDialog.addCommunityHost(...)` 为单个 host 绘制 server card，并提供 add-to-saved 按钮与整卡连接行为。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuRoute::Join` shell 面板从默认小面板扩展为更接近原版 JoinDialog 的大面板；
+    - community group 不再渲染 `community[index] favorite:on hidden:on` 调试行，改为 pane/card、header、group name、server name/version、description、players/map/ping；
+    - group header 操作从 `favorite/hidden/connect` 调整为 `favorite/hidden/save`，整张 community card 点击负责连接，更贴近 Java host card；
+    - 新增 `AddJoinCommunityGroupToSaved` action，将 community host/address 保存进 saved servers 并同步 `servers` settings JSON。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - community 区域仍缺真实远端 fetch/cache、滚动/多列密度、逐 host ping 刷新；
+  - Java `safeConnect(host.address, host.port, host.version)` 版本门禁仍待迁移；
+  - 主菜单背景/星球/云层/网格渲染仍需继续补齐，不能宣告完整可玩。
+
 ## 649. JoinDialog server-disclaimer 读取语义补齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

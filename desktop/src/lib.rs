@@ -171,6 +171,9 @@ const JOIN_SERVER_CARD_HEIGHT: f32 = 132.0;
 const JOIN_SERVER_CARD_GAP: f32 = 10.0;
 const JOIN_SAVED_SERVER_VISIBLE_CARDS: usize = 2;
 const JOIN_LOCAL_HOST_VISIBLE_CARDS: usize = 1;
+const JOIN_COMMUNITY_GROUP_VISIBLE_CARDS: usize = 3;
+const JOIN_COMMUNITY_GROUP_CARD_HEIGHT: f32 = 88.0;
+const JOIN_COMMUNITY_GROUP_CARD_GAP: f32 = 8.0;
 const JOIN_ACTION_BUTTON_WIDTH: f32 = 170.0;
 const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const JOIN_SEARCH_TEXT_MAX_LENGTH: usize = 64;
@@ -2773,6 +2776,7 @@ pub enum DesktopMenuRouteShellAction {
     ConnectJoinServerCard(usize),
     ToggleJoinCommunityFavorite(usize),
     ToggleJoinCommunityHidden(usize),
+    AddJoinCommunityGroupToSaved(usize),
     ConnectJoinCommunityGroup(usize),
     ConfirmJoinServerDisclaimer,
     CancelJoinServerDisclaimer,
@@ -26561,6 +26565,16 @@ impl DesktopLauncher {
                 panel_height,
             );
         }
+        if route == DesktopMenuRoute::Join {
+            let panel_width = (viewport.width * 0.74).clamp(460.0, 860.0);
+            let panel_height = (viewport.height - 110.0).clamp(520.0, 720.0);
+            return RenderRect::new(
+                viewport.x + viewport.width - panel_width - 48.0,
+                viewport.y + (viewport.height - panel_height) * 0.5,
+                panel_width,
+                panel_height,
+            );
+        }
         if matches!(
             route,
             DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame
@@ -27055,11 +27069,12 @@ impl DesktopLauncher {
         visible_index: usize,
     ) -> RenderRect {
         let search = Self::join_route_search_rect_for_panel(panel);
+        let step = JOIN_COMMUNITY_GROUP_CARD_HEIGHT + JOIN_COMMUNITY_GROUP_CARD_GAP;
         RenderRect::new(
             panel.x + 36.0,
-            search.y - 40.0 - visible_index as f32 * 32.0,
+            search.y - 18.0 - JOIN_COMMUNITY_GROUP_CARD_HEIGHT - visible_index as f32 * step,
             panel.width - 72.0,
-            28.0,
+            JOIN_COMMUNITY_GROUP_CARD_HEIGHT,
         )
     }
 
@@ -27067,12 +27082,14 @@ impl DesktopLauncher {
         row: RenderRect,
         button_index: usize,
     ) -> RenderRect {
-        let width = 86.0;
+        let width = 34.0;
+        let gap = 5.0;
+        let header = RenderRect::new(row.x, row.y + row.height - 32.0, row.width, 32.0);
         RenderRect::new(
-            row.right() - width * (3 - button_index.min(2)) as f32,
-            row.y,
-            width - 4.0,
-            row.height,
+            row.right() - 10.0 - (3 - button_index.min(2)) as f32 * (width + gap),
+            header.center().y - width * 0.5,
+            width,
+            width,
         )
     }
 
@@ -29306,7 +29323,7 @@ impl DesktopLauncher {
         for (visible_index, (group_index, _)) in self
             .visible_join_community_groups()
             .into_iter()
-            .take(3)
+            .take(JOIN_COMMUNITY_GROUP_VISIBLE_CARDS)
             .enumerate()
         {
             let row = Self::join_route_community_group_row_rect_for_panel(panel, visible_index);
@@ -29320,10 +29337,13 @@ impl DesktopLauncher {
                     return Some(match button_index {
                         0 => DesktopMenuRouteShellAction::ToggleJoinCommunityFavorite(group_index),
                         1 => DesktopMenuRouteShellAction::ToggleJoinCommunityHidden(group_index),
-                        _ => DesktopMenuRouteShellAction::ConnectJoinCommunityGroup(group_index),
+                        _ => DesktopMenuRouteShellAction::AddJoinCommunityGroupToSaved(group_index),
                     });
                 }
             }
+            return Some(DesktopMenuRouteShellAction::ConnectJoinCommunityGroup(
+                group_index,
+            ));
         }
         for local_index in 0..self.join_route_visible_local_host_count() {
             let rect = Self::join_route_server_card_rect_for_panel(panel, local_index);
@@ -30837,6 +30857,23 @@ impl DesktopLauncher {
                     let _ = self.set_join_community_group_hidden(index, hidden);
                     self.connect_error = None;
                 }
+            }
+            DesktopMenuRouteShellAction::AddJoinCommunityGroupToSaved(index) => {
+                let Some(group) = self.join_community_groups.get(index) else {
+                    self.connect_error = Some("missing community group".into());
+                    return;
+                };
+                let Some(target) = Self::join_community_group_connect_target(group) else {
+                    self.connect_error = Some("missing community host".into());
+                    return;
+                };
+                if !self.join_saved_servers.contains(&target) {
+                    self.join_saved_servers.push(target.clone());
+                    self.persist_join_saved_servers_to_settings();
+                    self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
+                }
+                self.connect_target = Some(target);
+                self.connect_error = None;
             }
             DesktopMenuRouteShellAction::ConnectJoinCommunityGroup(index) => {
                 let Some(group) = self.join_community_groups.get(index) else {
@@ -33339,50 +33376,212 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.037,
             ));
         } else {
-            for (visible_index, (group_index, group)) in
-                visible_community_groups.into_iter().take(3).enumerate()
+            for (visible_index, (group_index, group)) in visible_community_groups
+                .into_iter()
+                .take(JOIN_COMMUNITY_GROUP_VISIBLE_CARDS)
+                .enumerate()
             {
                 let favorite = self.join_community_group_favorite(group);
                 let hidden = self.join_community_group_hidden(group);
-                let row = Self::join_route_community_group_row_rect_for_panel(panel, visible_index);
+                let card =
+                    Self::join_route_community_group_row_rect_for_panel(panel, visible_index);
+                let layer = Layer::END_PIXELED + 0.037 + visible_index as f32 * 0.006;
+                let header = RenderRect::new(card.x, card.y + card.height - 32.0, card.width, 32.0);
+                let group_color = if group.prioritized || favorite {
+                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
+                } else {
+                    [0.78, 0.82, 0.86, 1.0]
+                };
+                let host = group.hosts.first();
+                let target = Self::join_community_group_connect_target(group);
+                let address = host
+                    .map(|host| format!("{}:{}", host.address, host.port))
+                    .or_else(|| target.as_ref().map(desktop_connect_target_display_ip))
+                    .or_else(|| group.addresses.first().cloned())
+                    .unwrap_or_else(|| "@unknown".into());
+
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_drawable_symbol("pane"),
+                    card,
+                    [1.0, 1.0, 1.0, if hidden { 0.62 } else { 0.90 }],
+                    0.0,
+                    layer,
+                ));
+                pass.push(RenderCommand::stroke_rect(
+                    card,
+                    [
+                        group_color[0],
+                        group_color[1],
+                        group_color[2],
+                        if hidden { 0.46 } else { 0.86 },
+                    ],
+                    if favorite { 2.0 } else { 1.0 },
+                    layer + 0.001,
+                ));
+                pass.push(RenderCommand::fill_rect(
+                    header,
+                    [
+                        group_color[0] * 0.34,
+                        group_color[1] * 0.34,
+                        group_color[2] * 0.34,
+                        if hidden { 0.26 } else { 0.42 },
+                    ],
+                    layer + 0.002,
+                ));
                 pass.push(RenderCommand::draw_text_styled(
-                    format!(
-                        "community[{group_index}]: {} hosts:{} favorite:{} hidden:{}",
-                        group.name,
-                        group.hosts.len().max(group.addresses.len()),
-                        if favorite { "on" } else { "off" },
-                        if hidden { "on" } else { "off" }
-                    ),
-                    RenderPoint::new(row.x, row.center().y),
-                    [0.66, 0.78, 0.86, 1.0],
-                    10.0,
+                    if group.name.trim().is_empty() {
+                        format!("community[{group_index}]")
+                    } else {
+                        group.name.clone()
+                    },
+                    RenderPoint::new(header.x + 12.0, header.center().y),
+                    group_color,
+                    12.0,
                     0.0,
                     RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true),
-                    Layer::END_PIXELED + 0.037 + visible_index as f32 * 0.0001,
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    layer + 0.003,
                 ));
-                self.push_settings_text_button(
-                    pass,
-                    Self::join_route_community_group_action_button_rect(row, 0),
-                    if favorite { "★" } else { "☆" },
-                    None,
-                    Layer::END_PIXELED + 0.038 + visible_index as f32 * 0.0001,
-                );
-                self.push_settings_text_button(
-                    pass,
-                    Self::join_route_community_group_action_button_rect(row, 1),
-                    if hidden { "@show" } else { "@hide" },
-                    Some(if hidden { "eyeSmall" } else { "eyeOffSmall" }),
-                    Layer::END_PIXELED + 0.0385 + visible_index as f32 * 0.0001,
-                );
-                self.push_settings_text_button(
-                    pass,
-                    Self::join_route_community_group_action_button_rect(row, 2),
-                    "@connect",
-                    Some("play"),
-                    Layer::END_PIXELED + 0.039 + visible_index as f32 * 0.0001,
-                );
+                for (button_index, (icon, color)) in [
+                    (
+                        "star",
+                        if favorite {
+                            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
+                        } else {
+                            [0.76, 0.80, 0.84, 1.0]
+                        },
+                    ),
+                    (
+                        if hidden { "eyeOffSmall" } else { "eyeSmall" },
+                        [0.78, 0.86, 0.92, 1.0],
+                    ),
+                    ("add", [0.86, 0.94, 1.0, 1.0]),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let button =
+                        Self::join_route_community_group_action_button_rect(card, button_index);
+                    pass.push(RenderCommand::draw_sprite(
+                        Self::settings_image_button_symbol("defaulti", false, false),
+                        button,
+                        [1.0, 1.0, 1.0, if hidden { 0.54 } else { 0.88 }],
+                        0.0,
+                        layer + 0.004 + button_index as f32 * 0.0001,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        desktop_ui_icon_glyph_or_label(icon, icon),
+                        button.center(),
+                        color,
+                        14.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_font(RenderFontId::Icon)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true)
+                            .with_outline(true),
+                        layer + 0.005 + button_index as f32 * 0.0001,
+                    ));
+                }
+
+                if let Some(host) = host {
+                    let version = if host.version_type.is_empty() {
+                        host.version.to_string()
+                    } else {
+                        format!("{} {}", host.version, host.version_type)
+                    };
+                    pass.push(RenderCommand::draw_text_styled(
+                        format!("{}   @server.version: {}", host.name, version),
+                        RenderPoint::new(card.x + 12.0, header.y - 14.0),
+                        [0.92, 0.98, 1.0, if hidden { 0.68 } else { 1.0 }],
+                        11.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true)
+                            .with_outline(true),
+                        layer + 0.003,
+                    ));
+                    let description = host
+                        .description
+                        .lines()
+                        .take(2)
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if !description.trim().is_empty() {
+                        pass.push(RenderCommand::draw_text_styled(
+                            description,
+                            RenderPoint::new(card.x + 12.0, header.y - 32.0),
+                            [0.62, 0.72, 0.80, if hidden { 0.58 } else { 1.0 }],
+                            9.5,
+                            0.0,
+                            RenderTextStyle::new(RenderTextAlign::Start)
+                                .with_vertical_align(RenderTextVerticalAlign::Center)
+                                .with_integer_position(true),
+                            layer + 0.003,
+                        ));
+                    }
+                    for (index, line) in [
+                        format!(
+                            "{}  players: {}/{}",
+                            address, host.players, host.player_limit
+                        ),
+                        format!(
+                            "save.map: {} / {}",
+                            host.mapname,
+                            host.mode_name.as_deref().unwrap_or("@unknown")
+                        ),
+                        format!(
+                            "{} {}ms",
+                            desktop_ui_icon_glyph_or_label("chartBar", "ping"),
+                            host.ping
+                        ),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        pass.push(RenderCommand::draw_text_styled(
+                            line,
+                            RenderPoint::new(
+                                card.x + 12.0,
+                                card.y + 14.0 + (2 - index) as f32 * 14.0,
+                            ),
+                            [0.72, 0.82, 0.88, if hidden { 0.58 } else { 1.0 }],
+                            9.0,
+                            0.0,
+                            RenderTextStyle::new(RenderTextAlign::Start)
+                                .with_vertical_align(RenderTextVerticalAlign::Center)
+                                .with_integer_position(true),
+                            layer + 0.003 + index as f32 * 0.0001,
+                        ));
+                    }
+                } else {
+                    pass.push(RenderCommand::draw_text_styled(
+                        address,
+                        RenderPoint::new(card.x + 12.0, card.center().y - 8.0),
+                        [0.78, 0.88, 0.94, if hidden { 0.62 } else { 1.0 }],
+                        11.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true)
+                            .with_outline(true),
+                        layer + 0.003,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        "@server.waiting",
+                        RenderPoint::new(card.x + 12.0, card.center().y - 30.0),
+                        [0.58, 0.68, 0.76, if hidden { 0.54 } else { 1.0 }],
+                        9.5,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        layer + 0.003,
+                    ));
+                }
             }
         }
         self.push_join_add_server_dialog(pass, panel);
@@ -38140,7 +38339,7 @@ impl DesktopLauncher {
                             group.hosts.len()
                         ),
                         format!("community[{index}] key: {}", group.key()),
-                        format!("community[{index}] actions: favorite hidden connect"),
+                        format!("community[{index}] actions: favorite hidden save connect"),
                     ]);
                 }
                 if self.join_info_dialog_open {
@@ -68377,7 +68576,7 @@ version: "2.0.0"
                 .to_string()
         ));
         assert!(lines.contains(&"community[0] key: server-Official".to_string()));
-        assert!(lines.contains(&"community[0] actions: favorite hidden connect".to_string()));
+        assert!(lines.contains(&"community[0] actions: favorite hidden save connect".to_string()));
 
         assert!(launcher.set_join_community_group_favorite(0, true));
         assert!(launcher.set_join_community_group_hidden(0, true));
@@ -68407,14 +68606,17 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts
-            .iter()
-            .any(|text| text.contains("community[0]: Official")
-                && text.contains("favorite:on")
-                && text.contains("hidden:on")));
-        assert!(texts.contains(&"★"));
-        assert!(texts.contains(&"@show"));
-        assert!(texts.contains(&"@connect"));
+        assert!(texts.contains(&"Official"));
+        assert!(texts.iter().any(|text| text.contains("Community Host")
+            && text.contains("@server.version: 158 official")));
+        assert!(texts.contains(&"public survival server"));
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("community.example:6567")
+                    && text.contains("players: 12/24"))
+        );
+        assert!(texts.contains(&"save.map: sector map / @mode.survival.name"));
 
         let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
             viewport,
@@ -68425,8 +68627,9 @@ version: "2.0.0"
             DesktopLauncher::join_route_community_group_action_button_rect(row, 0).center();
         let hidden_button =
             DesktopLauncher::join_route_community_group_action_button_rect(row, 1).center();
-        let connect_button =
+        let add_button =
             DesktopLauncher::join_route_community_group_action_button_rect(row, 2).center();
+        let connect_button = row.center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
@@ -68442,6 +68645,14 @@ version: "2.0.0"
                 hidden_button.y
             ),
             Some(super::DesktopMenuRouteShellAction::ToggleJoinCommunityHidden(0))
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                add_button.x,
+                add_button.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::AddJoinCommunityGroupToSaved(0))
         );
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
@@ -68465,6 +68676,20 @@ version: "2.0.0"
             launcher.settings_overrides.get("server-Official-hidden"),
             Some(&"false".to_string())
         );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::AddJoinCommunityGroupToSaved(0),
+        );
+        assert!(launcher
+            .join_saved_servers
+            .contains(&super::DesktopConnectTarget {
+                host: "community.example".into(),
+                port: 6567,
+            }));
+        assert!(launcher
+            .settings_overrides
+            .get(super::JOIN_SERVERS_SETTINGS_KEY)
+            .is_some_and(|servers| servers.contains("community.example")));
+        launcher.connect_target = None;
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::ConnectJoinCommunityGroup(0),
         );
