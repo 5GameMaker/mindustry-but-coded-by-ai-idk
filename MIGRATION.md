@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 651. 主菜单背景层兜底补齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **76.3%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是降低主菜单黑屏/只剩壳的观感风险。
+- Java 对照依据：
+  - `MenuFragment` 通过 `renderer.render()` 先绘制整页菜单背景，再叠加 Scene2D 菜单树；
+  - 原版背景链路还涉及 `Renderer.drawBackground()`、`LoadRenderer.draw()` 的星球/网格/渐变/动画视觉。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `menu_background_layer_commands()`，为菜单 pass 生成渐变、星点、类星球圆层、网格线和云层 polygon 的低成本背景命令；
+    - 新增 `insert_menu_background_layers()`，将背景命令插入到 `Clear` 后、菜单 UI/route shell 前，避免 plan 为空或 fast path 时只剩黑底；
+    - `fast_menu_render_pass_from_plan()` 移除纯色全屏覆盖，避免挡住新背景；
+    - 回归测试断言 menu pass 包含 `menu-background-approximation` marker，且位于 clear 与菜单按钮之间，并包含 circle/polygon/line 背景图元。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop menu_frame --lib`
+- 仍未完成：
+  - 这仍是 2D fallback/近似层，不是完整 Java `PlanetShader/CloudShader/PlanetGridShader`；
+  - OpenGL 真实 shader/mesh 星球、云层、网格背景仍待继续迁移；
+  - 黑屏根因若来自窗口/驱动/资源上传路径，还需继续接 runtime 诊断和真实图形 backend。
+
 ## 650. JoinDialog community 视觉结构对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

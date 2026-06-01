@@ -21105,11 +21105,6 @@ impl DesktopLauncher {
             ],
         ));
         pass.push(RenderCommand::clear([0.018, 0.024, 0.036, 1.0]));
-        pass.push(RenderCommand::fill_rect(
-            RenderRect::new(0.0, 0.0, width, height),
-            [0.025, 0.035, 0.055, 1.0],
-            0.0,
-        ));
         pass.extend(plan.ui.to_render_commands());
         pass
     }
@@ -40078,6 +40073,159 @@ impl DesktopLauncher {
         }
     }
 
+    fn menu_background_layer_commands(&self, viewport: RenderViewport) -> Vec<RenderCommand> {
+        let width = viewport.width.max(1.0);
+        let height = viewport.height.max(1.0);
+        let rect = viewport.as_rect();
+        let time = self.menu_renderer_state.time;
+        let mut commands = Vec::with_capacity(80);
+        commands.push(RenderCommand::custom(
+            "menu-background-approximation",
+            vec![
+                RenderProperty::new("java", "Renderer.drawBackground/LoadRenderer.draw"),
+                RenderProperty::new("width", width.to_string()),
+                RenderProperty::new("height", height.to_string()),
+                RenderProperty::new("time", format!("{time:.3}")),
+            ],
+        ));
+        commands.push(RenderCommand::fill_rect(
+            rect,
+            [0.010, 0.015, 0.030, 1.0],
+            -120.0,
+        ));
+
+        let bands = 10usize;
+        for band in 0..bands {
+            let t0 = band as f32 / bands as f32;
+            let band_height = (height / bands as f32).ceil() + 1.0;
+            let y = viewport.y + t0 * height;
+            commands.push(RenderCommand::fill_rect(
+                RenderRect::new(viewport.x, y, width, band_height),
+                [
+                    0.015 + 0.018 * t0,
+                    0.022 + 0.030 * t0,
+                    0.045 + 0.075 * t0,
+                    1.0,
+                ],
+                -119.0 + band as f32 * 0.0001,
+            ));
+        }
+
+        for index in 0..42usize {
+            let seed = index as u32;
+            let x_hash = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            let y_hash = seed.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
+            let x = viewport.x + (x_hash % 10_000) as f32 / 10_000.0 * width;
+            let y = viewport.y + (y_hash % 10_000) as f32 / 10_000.0 * height;
+            let twinkle = ((time * (0.7 + index as f32 * 0.013)) + index as f32).sin() * 0.5 + 0.5;
+            let radius = 0.7 + (index % 3) as f32 * 0.35;
+            commands.push(RenderCommand::draw_circle(
+                RenderPoint::new(x, y),
+                radius,
+                [0.62, 0.78, 0.92, 0.28 + twinkle * 0.34],
+                true,
+                -117.0 + index as f32 * 0.0001,
+            ));
+        }
+
+        let planet_radius = width.min(height) * 0.29;
+        let planet_center = RenderPoint::new(
+            viewport.x + width * 0.70 + (time * 0.11).sin() * planet_radius * 0.06,
+            viewport.y + height * 0.44 + (time * 0.07).cos() * planet_radius * 0.04,
+        );
+        commands.push(RenderCommand::draw_circle(
+            planet_center,
+            planet_radius * 1.18,
+            [0.05, 0.22, 0.32, 0.20],
+            true,
+            -112.0,
+        ));
+        commands.push(RenderCommand::draw_circle(
+            planet_center,
+            planet_radius,
+            [0.035, 0.105, 0.125, 0.78],
+            true,
+            -111.0,
+        ));
+        commands.push(RenderCommand::draw_circle(
+            RenderPoint::new(
+                planet_center.x - planet_radius * 0.18,
+                planet_center.y + planet_radius * 0.16,
+            ),
+            planet_radius * 0.72,
+            [0.10, 0.30, 0.24, 0.34],
+            true,
+            -110.0,
+        ));
+        commands.push(RenderCommand::draw_polygon(
+            planet_center,
+            planet_radius * 1.01,
+            48,
+            time * 0.025,
+            [0.34, 0.66, 0.72, 0.22],
+            false,
+            -109.0,
+        ));
+
+        for index in 0..9usize {
+            let offset = (index as f32 - 4.0) * planet_radius * 0.18;
+            let half = (planet_radius.powi(2) - offset.powi(2)).max(0.0).sqrt();
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(planet_center.x - half, planet_center.y + offset),
+                RenderPoint::new(planet_center.x + half, planet_center.y + offset),
+                1.0,
+                [0.36, 0.74, 0.78, 0.10],
+                -108.0 + index as f32 * 0.0001,
+            ));
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(planet_center.x + offset, planet_center.y - half),
+                RenderPoint::new(planet_center.x + offset, planet_center.y + half),
+                1.0,
+                [0.36, 0.74, 0.78, 0.07],
+                -107.0 + index as f32 * 0.0001,
+            ));
+        }
+
+        for index in 0..5usize {
+            let drift = time * (0.018 + index as f32 * 0.003);
+            let radius = planet_radius * (0.62 + index as f32 * 0.08);
+            commands.push(RenderCommand::draw_polygon(
+                RenderPoint::new(
+                    planet_center.x + (drift + index as f32).sin() * planet_radius * 0.06,
+                    planet_center.y + (drift + index as f32).cos() * planet_radius * 0.04,
+                ),
+                radius,
+                7 + index,
+                drift,
+                [0.78, 0.88, 0.92, 0.035 + index as f32 * 0.008],
+                false,
+                -106.0 + index as f32 * 0.0001,
+            ));
+        }
+
+        commands.push(RenderCommand::fill_rect(rect, [0.0, 0.0, 0.0, 0.22], -90.0));
+        commands
+    }
+
+    fn insert_menu_background_layers(&self, pass: &mut RenderPass, viewport: RenderViewport) {
+        if pass.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::Custom { name, .. } if name == "menu-background-approximation"
+            )
+        }) {
+            return;
+        }
+        let commands = self.menu_background_layer_commands(viewport);
+        let insert_at = pass
+            .commands
+            .iter()
+            .position(|command| matches!(command, RenderCommand::Clear { .. }))
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        pass.commands.splice(insert_at..insert_at, commands);
+    }
+
     fn push_menu_empty_plan_fallback(&self, pass: &mut RenderPass, viewport: RenderViewport) {
         pass.push(RenderCommand::fill_rect(
             viewport.as_rect(),
@@ -40453,6 +40601,7 @@ impl DesktopLauncher {
         };
 
         let frame_viewport = menu_pass.viewport.unwrap_or(viewport);
+        self.insert_menu_background_layers(&mut menu_pass, frame_viewport);
         self.push_active_menu_route_shell(&mut menu_pass, frame_viewport);
         self.push_menu_info_message(&mut menu_pass, frame_viewport);
         self.push_menu_guard_message(&mut menu_pass, frame_viewport);
@@ -57840,6 +57989,58 @@ version: "2.0.0"
                     if symbol == "flat-down-base.9" && *rect == settings_rect
             )
         }));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_frame_inserts_planet_like_background_layers() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+
+        let clear_index = commands
+            .iter()
+            .position(|command| matches!(command, RenderCommand::Clear { .. }))
+            .expect("menu pass should clear before drawing");
+        let background_index = commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::Custom { name, .. } if name == "menu-background-approximation"
+                )
+            })
+            .expect("menu pass should include a Java-like background marker");
+        let first_button_index = commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawText { text, .. } if text.eq_ignore_ascii_case("play")
+                )
+            })
+            .expect("menu pass should still render menu buttons");
+
+        assert!(clear_index < background_index);
+        assert!(background_index < first_button_index);
+        assert!(commands
+            .iter()
+            .any(|command| { matches!(command, RenderCommand::DrawCircle { filled: true, .. }) }));
+        assert!(commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::DrawPolygon { .. })));
+        assert!(commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::DrawLine { .. })));
     }
 
     #[test]
