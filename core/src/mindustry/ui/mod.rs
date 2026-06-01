@@ -843,6 +843,14 @@ mod tests {
             ("about.button", "About"),
             ("maps", "Maps"),
             ("server.add", "Add Server"),
+            (
+                "server.kicked.clientOutdated",
+                "Outdated client! Update your game!",
+            ),
+            (
+                "server.kicked.serverOutdated",
+                "Outdated server! Ask the host to update!",
+            ),
             ("ok", "OK"),
             ("back", "Back"),
             ("settings", "Settings"),
@@ -906,6 +914,15 @@ mod tests {
             )
             .as_deref(),
             Some("Are you sure you want to clear Erekir's research?")
+        );
+        assert_eq!(
+            upstream_menu_bundle_format_for_locale("en", "server.versions", &["158", "157"])
+                .as_deref(),
+            Some("Your version:[accent] 158[]\\nServer version:[accent] 157[]")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "server.kicked.serverOutdated"),
+            Some("服务器版本过旧！请让房主更新！")
         );
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "schematic.import"),
