@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 711. EditorMapsDialog Open In Editor 真实 beginEditMap 状态闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **84.2%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版，而不是只做主菜单或孤立模块。
+- Java 对照依据：
+  - 原版 `EditorMapsDialog` 的 `@editor.openin` 会调用 `Vars.ui.editor.beginEditMap(map.file)`；
+  - `MapEditorDialog.beginEditMap(Fi)` 会把地图交给编辑器，而不是只切到 Editor 路由或保留地图信息对话框。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `begin_edit_map_from_index(...)` helper，从当前地图列表取出选中 `MapDescriptor`，应用 `Gamemode::Editor` 规则并同步写入 `game_state` 与 `runtime.state`；
+    - `DesktopMapCardActionKind::OpenInEditor` 现在调用该 helper，清理地图信息/CustomGame 子弹层状态，并记录 `beginEditMap: <map>`；
+    - `editor_maps_route_lines()` 增加可观测 `event: beginEditMap current=<map>` 行，便于测试和后续压缩上下文审计；
+    - 扩展 editor map 测试，验证点击 `Open In Editor` 后进入 Editor 路由、地图实际进入 `game_state/runtime.state`，`rules.editor` 与 `mode_name=editor` 生效，且后续仍能重新打开地图信息继续 delete/workshop 流。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore -- --nocapture`
+  - `git diff --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 该闭环目前仍使用 `MapDescriptor` 元数据进入编辑状态，后续需要继续接真实 `MapIO.createMap(file, true)` / tile/world payload 读取；
+  - Editor 画布、工具栏、地图保存与过滤器 UI 还需要继续按原版补齐；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 710. BannedContentDialog blocks/units 双栏最小闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

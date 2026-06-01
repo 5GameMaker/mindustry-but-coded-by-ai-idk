@@ -30729,6 +30729,33 @@ impl DesktopLauncher {
         true
     }
 
+    fn begin_edit_map_from_index(&mut self, index: usize) -> bool {
+        let Some(map) = self.map_list_cards.get(index).cloned() else {
+            return false;
+        };
+        let mut rules = map.apply_rules(Gamemode::Editor);
+        rules.mode_name = Some(Gamemode::Editor.wire_name().to_string());
+        rules.editor = true;
+        self.game_state.map = map.clone();
+        self.game_state.rules = rules.clone();
+        self.runtime.state.map = map.clone();
+        self.runtime.state.rules = rules;
+        self.active_menu_route = Some(DesktopMenuRoute::Editor);
+        self.editor_map_info_dialog_index = None;
+        self.map_play_dialog_index = None;
+        self.map_play_mode_help_dialog_open = false;
+        self.map_play_customize_dialog_open = false;
+        self.map_play_rules_edit_dialog_open = false;
+        self.map_play_banned_content_dialog = None;
+        self.map_play_rules = None;
+        self.map_play_rules_error = None;
+        self.map_play_playtesting = false;
+        self.clear_editor_new_map_dialog();
+        self.clear_editor_import_map_dialog();
+        self.last_menu_info_message = Some(format!("beginEditMap: {}", map.plain_name()));
+        true
+    }
+
     fn dispatch_editor_import_map_with_platform<P: Platform>(
         &mut self,
         platform: &mut P,
@@ -34113,16 +34140,7 @@ impl DesktopLauncher {
                             self.map_play_mode_help_dialog_open = false;
                         }
                         DesktopMapCardActionKind::OpenInEditor => {
-                            self.active_menu_route = Some(DesktopMenuRoute::Editor);
-                            self.editor_map_info_dialog_index = Some(action.index);
-                            self.map_play_dialog_index = None;
-                            self.map_play_mode_help_dialog_open = false;
-                            self.map_play_customize_dialog_open = false;
-                            self.map_play_rules_edit_dialog_open = false;
-                            self.map_play_banned_content_dialog = None;
-                            self.map_play_rules = None;
-                            self.map_play_rules_error = None;
-                            self.map_play_playtesting = false;
+                            let _ = self.begin_edit_map_from_index(action.index);
                         }
                         DesktopMapCardActionKind::Delete => {
                             let deleted_file = self
@@ -42979,6 +42997,12 @@ impl DesktopLauncher {
             lines.push(format!(
                 "event: maps.importMap {} -> {}",
                 result.map_name, result.destination
+            ));
+        }
+        if self.game_state.rules.editor {
+            lines.push(format!(
+                "event: beginEditMap current={}",
+                self.game_state.map.plain_name()
             ));
         }
         lines
@@ -65038,15 +65062,46 @@ version: "2.0.0"
         );
         let dialog = DesktopLauncher::map_card_dialog_rect_for_panel(panel);
         let open_in_center = DesktopLauncher::map_editor_action_button_rect(dialog, 0).center();
+        let open_in = super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenInEditor),
+        );
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 viewport,
                 open_in_center.x,
                 open_in_center.y
             ),
-            Some(super::DesktopMenuRouteShellAction::MapCard(
-                super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenInEditor)
-            ))
+            Some(open_in)
+        );
+        launcher.dispatch_menu_route_shell_action(open_in);
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Editor)
+        );
+        assert_eq!(launcher.editor_map_info_dialog_index, None);
+        assert_eq!(launcher.game_state.map.plain_name(), "Delete Me");
+        assert_eq!(launcher.runtime.state.map.plain_name(), "Delete Me");
+        assert!(launcher.game_state.rules.editor);
+        assert!(launcher.runtime.state.rules.editor);
+        assert_eq!(
+            launcher.game_state.rules.mode_name.as_deref(),
+            Some(Gamemode::Editor.wire_name())
+        );
+        assert_eq!(
+            launcher.last_menu_info_message.as_deref(),
+            Some("beginEditMap: Delete Me")
+        );
+        assert!(launcher
+            .editor_maps_route_lines()
+            .iter()
+            .any(|line| line.contains("event: beginEditMap current=Delete Me")));
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenEditorInfo),
+        ));
+        assert_eq!(
+            launcher.editor_map_info_dialog_index,
+            Some(0),
+            "reopening map info after beginEditMap should keep map list actions usable"
         );
 
         let delete_center = DesktopLauncher::map_editor_action_button_rect(dialog, 1).center();
