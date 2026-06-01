@@ -34556,7 +34556,7 @@ impl DesktopLauncher {
         ));
         pass.push(RenderCommand::draw_text_styled(
             if self.schematic_label_add_text.is_empty() {
-                "@schematic.addtag".to_string()
+                self.localize_bundle_markup_text("@schematic.addtag")
             } else {
                 self.schematic_label_add_text.clone()
             },
@@ -34576,14 +34576,14 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::schematic_label_add_button_rect(dialog),
-            "@schematic.texttag",
+            self.localize_bundle_markup_text("@schematic.texttag"),
             Some("add"),
             Layer::END_PIXELED + layer_offset + 0.002,
         );
         self.push_settings_text_button(
             pass,
             Self::schematic_label_add_icon_button_rect(dialog),
-            "@schematic.icontag",
+            self.localize_bundle_markup_text("@schematic.icontag"),
             Some("add"),
             Layer::END_PIXELED + layer_offset + 0.003,
         );
@@ -34686,7 +34686,11 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.072,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            format!("[schematic] {}", entry.name),
+            format!(
+                "{}: {}",
+                self.localize_bundle_markup_text("@schematics"),
+                entry.name
+            ),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
             [0.94, 0.98, 1.0, 1.0],
             15.0,
@@ -34697,11 +34701,11 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.076,
         ));
+        let info_width = entry.width.to_string();
+        let info_height = entry.height.to_string();
+        let info_blocks = entry.tile_count.to_string();
         pass.push(RenderCommand::draw_text_styled(
-            format!(
-                "schematic.info: {}x{} | {} blocks",
-                entry.width, entry.height, entry.tile_count
-            ),
+            self.format_bundle_text("schematic.info", &[&info_width, &info_height, &info_blocks]),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 54.0),
             [0.72, 0.80, 0.86, 1.0],
             12.0,
@@ -34712,7 +34716,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.076,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@schematic.tags",
+            self.localize_bundle_markup_text("@schematic.tags"),
             RenderPoint::new(dialog.x + 42.0, dialog.y + dialog.height - 92.0),
             [0.72, 0.82, 0.9, 1.0],
             11.0,
@@ -34859,7 +34863,11 @@ impl DesktopLauncher {
         }
         if !entry.description.is_empty() {
             pass.push(RenderCommand::draw_text_styled(
-                format!("description: {}", entry.description),
+                format!(
+                    "{} {}",
+                    self.localize_bundle_markup_text("@editor.description"),
+                    entry.description
+                ),
                 RenderPoint::new(dialog.center().x, dialog.y + 82.0),
                 [0.70, 0.76, 0.82, 1.0],
                 11.0,
@@ -34883,7 +34891,7 @@ impl DesktopLauncher {
             self.push_settings_text_button(
                 pass,
                 Self::schematic_info_button_rect(dialog, button_index),
-                label,
+                self.localize_bundle_markup_text(label),
                 Some(icon),
                 Layer::END_PIXELED + 0.078 + button_index as f32 * 0.001,
             );
@@ -34924,7 +34932,7 @@ impl DesktopLauncher {
                 self.push_settings_text_button(
                     pass,
                     Self::schematic_info_button_rect(dialog, 0),
-                    "@back",
+                    self.localize_bundle_markup_text("@back"),
                     Some("left"),
                     Layer::END_PIXELED + 0.083,
                 );
@@ -35027,7 +35035,7 @@ impl DesktopLauncher {
                 ));
                 pass.push(RenderCommand::draw_text_styled(
                     if self.schematic_tag_editor_text.is_empty() {
-                        "@schematic.addtag".to_string()
+                        self.localize_bundle_markup_text("@schematic.addtag")
                     } else {
                         self.schematic_tag_editor_text.clone()
                     },
@@ -35047,21 +35055,21 @@ impl DesktopLauncher {
                 self.push_settings_text_button(
                     pass,
                     Self::schematic_tag_editor_new_text_rect(dialog),
-                    "@schematic.texttag",
+                    self.localize_bundle_markup_text("@schematic.texttag"),
                     Some("add"),
                     Layer::END_PIXELED + 0.085,
                 );
                 self.push_settings_text_button(
                     pass,
                     Self::schematic_tag_editor_new_icon_rect(dialog),
-                    "@schematic.icontag",
+                    self.localize_bundle_markup_text("@schematic.icontag"),
                     Some("add"),
                     Layer::END_PIXELED + 0.086,
                 );
                 self.push_settings_text_button(
                     pass,
                     Self::schematic_info_button_rect(dialog, 0),
-                    "@back",
+                    self.localize_bundle_markup_text("@back"),
                     Some("left"),
                     Layer::END_PIXELED + 0.083,
                 );
@@ -35106,7 +35114,7 @@ impl DesktopLauncher {
                 self.push_settings_text_button(
                     pass,
                     Self::schematic_info_button_rect(dialog, 0),
-                    "@back",
+                    self.localize_bundle_markup_text("@back"),
                     Some("left"),
                     Layer::END_PIXELED + 0.083,
                 );
@@ -35119,7 +35127,7 @@ impl DesktopLauncher {
                     .unwrap_or_else(|| "@schematic.edit".to_string());
                 let dialog = self.push_schematic_modal_base(pass, panel, title);
                 pass.push(RenderCommand::draw_text_styled(
-                    "@schematic.tags",
+                    self.localize_bundle_markup_text("@schematic.tags"),
                     RenderPoint::new(dialog.x + 42.0, dialog.y + dialog.height - 92.0),
                     [0.72, 0.82, 0.9, 1.0],
                     11.0,
@@ -35205,7 +35213,7 @@ impl DesktopLauncher {
                 {
                     let y = dialog.y + dialog.height - 234.0 - row as f32 * 92.0;
                     pass.push(RenderCommand::draw_text_styled(
-                        label,
+                        self.localize_bundle_markup_text(label),
                         RenderPoint::new(dialog.x + 42.0, y + height * 0.5),
                         [0.72, 0.82, 0.9, 1.0],
                         11.0,
@@ -35239,14 +35247,14 @@ impl DesktopLauncher {
                 self.push_settings_text_button(
                     pass,
                     Self::schematic_info_button_rect(dialog, 1),
-                    "@ok",
+                    self.localize_bundle_markup_text("@ok"),
                     Some("ok"),
                     Layer::END_PIXELED + 0.083,
                 );
                 self.push_settings_text_button(
                     pass,
                     Self::schematic_info_button_rect(dialog, 2),
-                    "@cancel",
+                    self.localize_bundle_markup_text("@cancel"),
                     Some("cancel"),
                     Layer::END_PIXELED + 0.084,
                 );
@@ -35284,7 +35292,7 @@ impl DesktopLauncher {
                 self.push_settings_text_button(
                     pass,
                     Self::schematic_info_button_rect(dialog, 0),
-                    "@back",
+                    self.localize_bundle_markup_text("@back"),
                     Some("left"),
                     Layer::END_PIXELED + 0.083,
                 );
@@ -61987,15 +61995,15 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"[schematic] Core Starter"));
-        assert!(texts.contains(&"schematic.info: 12x8 | 42 blocks"));
-        assert!(texts.contains(&"@schematic.tags"));
+        assert!(texts.contains(&"Schematics: Core Starter"));
+        assert!(texts.contains(&"12x8, 42 blocks"));
+        assert!(texts.contains(&"Tags:"));
         assert!(texts.contains(&"preview: 12x8 | 42 blocks"));
         assert!(texts.contains(&"source: local"));
         assert!(texts.contains(&"core"));
         assert!(texts.contains(&"power"));
         assert!(texts.contains(&"+logic"));
-        assert!(texts.contains(&"description: basic launch schematic"));
+        assert!(texts.contains(&"Description: basic launch schematic"));
         assert!(texts.contains(&"requirements:"));
         assert!(texts.contains(&"7"));
         assert!(!texts.contains(&"requirements: @none"));
@@ -62006,12 +62014,12 @@ version: "2.0.0"
             command,
             RenderCommand::DrawSprite { symbol, .. } if symbol.contains("copper")
         )));
-        assert!(texts.contains(&"@schematic.addtag"));
-        assert!(texts.contains(&"@schematic.texttag"));
-        assert!(texts.contains(&"@schematic.icontag"));
-        assert!(texts.contains(&"@back"));
-        assert!(texts.contains(&"@editor.export"));
-        assert!(texts.contains(&"@edit"));
+        assert!(texts.contains(&"Add Tag"));
+        assert!(texts.contains(&"Text Tag"));
+        assert!(texts.contains(&"Icon Tag"));
+        assert!(texts.contains(&"Back"));
+        assert!(texts.contains(&"Export..."));
+        assert!(texts.contains(&"Edit"));
 
         let dialog = DesktopLauncher::schematic_info_dialog_rect_for_panel(panel);
         let remove_core = DesktopLauncher::schematic_edit_tag_remove_rect(
@@ -62461,8 +62469,8 @@ version: "2.0.0"
         ));
         assert!(texts.contains(&"core | 1"));
         assert!(texts.contains(&"power | 1"));
-        assert!(texts.contains(&"@schematic.texttag"));
-        assert!(texts.contains(&"@schematic.icontag"));
+        assert!(texts.contains(&"Text Tag"));
+        assert!(texts.contains(&"Icon Tag"));
         assert!(!texts.contains(&"tag editor pending showAllTags/buildTags/showNewTag"));
 
         launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("logic".into())]);
@@ -62643,8 +62651,8 @@ version: "2.0.0"
         assert!(texts.contains(&"power"));
         assert!(texts.contains(&"+core"));
         assert!(texts.contains(&"+logic"));
-        assert!(texts.contains(&"@schematic.addtag"));
-        assert!(texts.contains(&"@schematic.texttag"));
+        assert!(texts.contains(&"Add Tag"));
+        assert!(texts.contains(&"Text Tag"));
 
         let dialog = DesktopLauncher::schematic_info_dialog_rect_for_panel(panel);
         let chip = DesktopLauncher::schematic_edit_owned_tag_chip_rect(dialog, 0);

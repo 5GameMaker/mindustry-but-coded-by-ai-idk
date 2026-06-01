@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 685. Schematics 信息/标签/编辑弹窗文案接入 bundle locale
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **79.8%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是减少 Schematics 信息弹窗、标签编辑弹窗和编辑弹窗中的 raw `@schematic.*` / 英文调试壳。
+- Java 对照依据：
+  - `SchematicsDialog` / bundle 使用 `schematic.info`、`schematic.addtag`、`schematic.texttag`、`schematic.icontag`、`schematic.renametag`、`schematic.tagged`、`schematic.tagdelconfirm`、`schematic.tagexists`；
+  - 编辑/信息字段使用 `name`、`editor.description`、`editor.export`、`edit`、`ok`、`cancel`、`back`。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 补 Schematics tag/info 相关 key 与 `edit` 的 EN/简中/繁中 fallback；
+  - `desktop/src/lib.rs`
+    - `push_schematic_label_add_controls(...)` 的 add/text/icon tag 控件按 locale 输出；
+    - `push_schematic_info_dialog(...)` 标题、`schematic.info`、tags、description、back/export/edit 按 locale 输出；
+    - Tags/Edit/IconTag 模态的 placeholder、按钮与字段标签按 locale 输出；
+    - 同步更新 schematics 回归测试，不再锁定 raw key。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle --lib`
+  - `cargo test -p mindustry-desktop schematics --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - Schematics tag 删除仍未完全复刻 Java 的确认弹窗；
+  - info/preview/source/requirements 仍有部分布局和摘要逻辑未完全 Scene2D 化；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 684. 加载页背景网格从 custom 标记落到真实绘制
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
