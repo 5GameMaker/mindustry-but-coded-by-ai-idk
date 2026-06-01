@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 681. AboutDialog 链接与贡献者文案接入 bundle locale
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **79.4%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是降低 About 页面中英文硬编码和调试式 `credits.text:` / `contributors:` 文案。
+- Java 对照依据：
+  - `AboutDialog` 使用 `credits.text`、`credits`、`contributors`；
+  - `links` 列表的描述来自 `link.discord.description`、`link.github.description`、`link.wiki.description` 等 bundle key；
+  - 简中/繁中 bundle 提供对应 About 与 link 描述文案。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 补 About/links 相关 key 的 EN/简中/繁中 fallback；
+  - `desktop/src/lib.rs`
+    - About 链接页顶部 credits、链接卡描述、credits 页标题与 contributors 计数按 `settings_locale` 解析；
+    - About route 行文本不再输出 `credits.text:` / `contributors:` 这类调试前缀；
+    - 同步更新 About route 与 link card 回归测试，避免测试继续锁定英文硬编码。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle --lib`
+  - `cargo test -p mindustry-desktop about --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - About 页面布局仍是 Rust route shell 专用实现，还没有完全复刻 Java `AboutDialog` 的 Scene2D 表格/链接按钮样式；
+  - `Core.bundle` 仍是增量 fallback，并非完整资源文件加载；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 680. Database ContentInfoDialog 详情文案接入 bundle locale
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

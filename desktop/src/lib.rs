@@ -898,8 +898,6 @@ impl DesktopMenuRoute {
     }
 }
 
-const ABOUT_CREDITS_TEXT: &str = "Created by [royal]Anuken[] - [sky]anukendev@gmail.com[]";
-const ABOUT_CREDITS_LINE: &str = "credits: Created by Anuken - anukendev@gmail.com";
 pub const ABOUT_DISCORD_LINE: &str = "discord: The official Mindustry Discord chatroom";
 pub const ABOUT_GITHUB_LINE: &str = "github: Game source code";
 const DISCORD_URL: &str = "https://discord.gg/mindustry";
@@ -37979,14 +37977,22 @@ impl DesktopLauncher {
         format!("links: {names}")
     }
 
+    fn about_link_description(&self, link: &AboutLinkEntry) -> String {
+        self.localize_bundle_markup_text(format!("@link.{}.description", link.name))
+    }
+
     fn about_route_link_lines(&self) -> Vec<String> {
         let mut lines = vec![
-            ABOUT_CREDITS_LINE.into(),
+            self.localize_bundle_markup_text("@credits.text"),
             self.about_links_line(),
-            "button: credits".into(),
+            format!("button: {}", self.localize_bundle_markup_text("@credits")),
         ];
         for link in self.visible_about_links() {
-            lines.push(format!("{}: {}", link.name, link.description));
+            lines.push(format!(
+                "{}: {}",
+                link.name,
+                self.about_link_description(link)
+            ));
             lines.push(format!("url: {}", link.url));
         }
         lines
@@ -37994,8 +38000,12 @@ impl DesktopLauncher {
 
     fn about_route_credit_lines(&self) -> Vec<String> {
         let mut lines = vec![
-            format!("credits.text: {ABOUT_CREDITS_TEXT}"),
-            format!("contributors: {} entries", ABOUT_CONTRIBUTORS.len()),
+            self.localize_bundle_markup_text("@credits.text"),
+            format!(
+                "{} ({})",
+                self.localize_bundle_markup_text("@contributors"),
+                ABOUT_CONTRIBUTORS.len()
+            ),
         ];
         for chunk in ABOUT_CONTRIBUTORS.chunks(3) {
             lines.push(chunk.join(" | "));
@@ -38013,7 +38023,7 @@ impl DesktopLauncher {
     fn push_about_links_page(&self, pass: &mut RenderPass, panel: RenderRect) {
         let layer = Layer::END_PIXELED + 0.025;
         pass.push(RenderCommand::draw_text_styled(
-            ABOUT_CREDITS_LINE,
+            self.localize_bundle_markup_text("@credits.text"),
             RenderPoint::new(panel.x + 22.0, panel.y + panel.height - 112.0),
             [0.82, 0.90, 0.96, 1.0],
             12.0,
@@ -38137,7 +38147,7 @@ impl DesktopLauncher {
             base_layer + 0.008,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            format!("{}: {}", link.name, link.description),
+            self.about_link_description(link),
             RenderPoint::new(text_x, rect.y + rect.height - 29.0),
             [0.74, 0.78, 0.82, 1.0],
             if text_width < 120.0 { 8.0 } else { 9.0 },
@@ -38162,7 +38172,7 @@ impl DesktopLauncher {
 
     fn push_about_credits_page(&self, pass: &mut RenderPass, panel: RenderRect) {
         pass.push(RenderCommand::draw_text_styled(
-            format!("credits.text: {ABOUT_CREDITS_TEXT}"),
+            self.localize_bundle_markup_text("@credits.text"),
             RenderPoint::new(panel.x + panel.width * 0.5, panel.y + panel.height - 112.0),
             [0.92, 0.96, 1.0, 1.0],
             13.0,
@@ -38184,7 +38194,11 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.031,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            format!("contributors: {} entries", ABOUT_CONTRIBUTORS.len()),
+            format!(
+                "{} ({})",
+                self.localize_bundle_markup_text("@contributors"),
+                ABOUT_CONTRIBUTORS.len()
+            ),
             RenderPoint::new(panel.x + panel.width * 0.5, panel.y + panel.height - 154.0),
             [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
             12.0,
@@ -64691,12 +64705,28 @@ version: "2.0.0"
             .collect::<Vec<_>>();
 
         assert!(texts.contains(&"upstream: AboutDialog"));
-        assert!(texts.contains(&super::ABOUT_CREDITS_LINE));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@credits.text")
+                .as_str()
+        ));
         let links_line = launcher.about_links_line();
         assert!(texts.contains(&links_line.as_str()));
-        assert!(texts.contains(&super::ABOUT_DISCORD_LINE));
-        assert!(texts.contains(&super::ABOUT_GITHUB_LINE));
-        assert!(texts.contains(&"wiki: Official Mindustry wiki"));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@link.discord.description")
+                .as_str()
+        ));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@link.github.description")
+                .as_str()
+        ));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@link.wiki.description")
+                .as_str()
+        ));
         assert!(texts.contains(&"url: https://github.com/Anuken/Mindustry/"));
         assert!(!texts
             .iter()
@@ -64723,9 +64753,17 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(credit_texts
-            .contains(&"credits.text: Created by [royal]Anuken[] - [sky]anukendev@gmail.com[]"));
-        assert!(credit_texts.contains(&"contributors: 197 entries"));
+        assert!(credit_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@credits.text")
+                .as_str()
+        ));
+        let contributors_line = format!(
+            "{} ({})",
+            launcher.localize_bundle_markup_text("@contributors"),
+            super::ABOUT_CONTRIBUTORS.len()
+        );
+        assert!(credit_texts.contains(&contributors_line.as_str()));
         assert!(credit_texts
             .iter()
             .any(|text| text.contains("redloong9527 | Prosta4okua | Felix Corvus")));
@@ -64800,7 +64838,7 @@ version: "2.0.0"
             matches!(
                 command,
                 RenderCommand::DrawText { text, .. }
-                    if text == super::ABOUT_DISCORD_LINE
+                    if text == &launcher.localize_bundle_markup_text("@link.discord.description")
             )
         }));
     }

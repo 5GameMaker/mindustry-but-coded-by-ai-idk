@@ -67,6 +67,36 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("info.title", "Info"),
     ("category.purpose", "Purpose"),
     ("category.general", "General"),
+    (
+        "credits.text",
+        "Created by [royal]Anuken[] - [sky]anukendev@gmail.com[]",
+    ),
+    ("credits", "Credits"),
+    ("contributors", "Translators and Contributors"),
+    (
+        "link.discord.description",
+        "The official Mindustry Discord chatroom",
+    ),
+    ("link.reddit.description", "The Mindustry subreddit"),
+    ("link.github.description", "Game source code"),
+    ("link.changelog.description", "List of update changes"),
+    (
+        "link.dev-builds.description",
+        "Unstable development builds",
+    ),
+    (
+        "link.trello.description",
+        "Official Trello board for planned features",
+    ),
+    (
+        "link.itch.io.description",
+        "itch.io page with PC downloads",
+    ),
+    ("link.google-play.description", "Google Play store listing"),
+    ("link.f-droid.description", "F-Droid listing"),
+    ("link.wiki.description", "Official Mindustry wiki"),
+    ("link.suggestions.description", "Suggest new features"),
+    ("link.bug.description", "Found one? Report it here"),
     ("host.invalid", "[scarlet]Can't connect to host."),
     ("server.waiting", "Waiting for server"),
     ("warning", "Warning!"),
@@ -180,6 +210,24 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES: &[(&str, &str)] = &[
     ("info.title", "详情"),
     ("category.purpose", "用途"),
     ("category.general", "基础"),
+    ("credits.text", "作者 [royal]Anuken[] - [sky]anukendev@gmail.com[]"),
+    ("credits", "致谢"),
+    ("contributors", "翻译者和贡献者"),
+    (
+        "link.discord.description",
+        "Mindustry 官方的 Discord 聊天室",
+    ),
+    ("link.reddit.description", "Mindustry 的 Reddit 板块"),
+    ("link.github.description", "游戏源代码"),
+    ("link.changelog.description", "更新日志"),
+    ("link.dev-builds.description", "不稳定的开发版本"),
+    ("link.trello.description", "Trello 上的规划表"),
+    ("link.itch.io.description", "itch.io 电脑版下载页面"),
+    ("link.google-play.description", "Google Play 页面"),
+    ("link.f-droid.description", "F-Droid 页面"),
+    ("link.wiki.description", "Mindustry 官方 Wiki"),
+    ("link.suggestions.description", "提出新功能"),
+    ("link.bug.description", "发现了错误？在这里报告"),
     ("host.invalid", "[scarlet]无法连接到服务器。"),
     ("server.waiting", "等待服务器"),
     ("warning", "警告！"),
@@ -281,6 +329,27 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
     ("info.title", "資訊"),
     ("category.purpose", "用途"),
     ("category.general", "一般"),
+    (
+        "credits.text",
+        "由[royal]Anuken[]製作 - [sky]anukendev@gmail.com[]",
+    ),
+    ("credits", "感謝名單"),
+    ("contributors", "翻譯員和貢獻者"),
+    (
+        "link.discord.description",
+        "官方 Mindustry Discord 聊天室",
+    ),
+    ("link.reddit.description", "Mindustry Reddit論壇"),
+    ("link.github.description", "遊戲原始碼"),
+    ("link.changelog.description", "遊戲更新日誌"),
+    ("link.dev-builds.description", "開發中版本"),
+    ("link.trello.description", "官方 Trello 功能規劃看板"),
+    ("link.itch.io.description", "itch.io 電腦版下載網頁"),
+    ("link.google-play.description", "Google Play 商店頁面"),
+    ("link.f-droid.description", "F-Droid 目錄頁面"),
+    ("link.wiki.description", "官方 Mindustry 維基"),
+    ("link.suggestions.description", "建議新功能"),
+    ("link.bug.description", "發現錯誤？在這裡回報"),
     ("host.invalid", "[scarlet]無法連線至伺服器。"),
     ("server.waiting", "等待伺服器"),
     ("warning", "警告。"),
@@ -512,6 +581,14 @@ mod tests {
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "info.title"),
             Some("详情")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "credits"),
+            Some("致谢")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "link.github.description"),
+            Some("游戏源代码")
         );
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh-TW", "joingame"),
