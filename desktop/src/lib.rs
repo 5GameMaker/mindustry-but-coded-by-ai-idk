@@ -23595,7 +23595,7 @@ impl DesktopLauncher {
         enabled: bool,
         style_name: &'static str,
     ) {
-        let label = self.localize_bundle_markup_text(label.into());
+        let label = label.into();
         let hovered = enabled
             && self
                 .last_menu_cursor
@@ -33058,14 +33058,14 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::join_add_dialog_button_rect(dialog, 0),
-            "@cancel",
+            self.localize_bundle_markup_text("@cancel"),
             Some("left"),
             Layer::END_PIXELED + 0.086,
         );
         self.push_settings_text_button_enabled(
             pass,
             Self::join_add_dialog_button_rect(dialog, 1),
-            "@ok",
+            self.localize_bundle_markup_text("@ok"),
             Some("ok"),
             Layer::END_PIXELED + 0.087,
             self.join_add_server_confirm_enabled(),
@@ -33126,14 +33126,14 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::join_add_dialog_button_rect(dialog, 0),
-            "@cancel",
+            self.localize_bundle_markup_text("@cancel"),
             None,
             Layer::END_PIXELED + 0.094,
         );
         self.push_settings_text_button(
             pass,
             Self::join_add_dialog_button_rect(dialog, 1),
-            "@ok",
+            self.localize_bundle_markup_text("@ok"),
             None,
             Layer::END_PIXELED + 0.094,
         );
@@ -33192,14 +33192,14 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::join_add_dialog_button_rect(dialog, 0),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             Layer::END_PIXELED + 0.100,
         );
         self.push_settings_text_button(
             pass,
             Self::join_add_dialog_button_rect(dialog, 1),
-            "@ok",
+            self.localize_bundle_markup_text("@ok"),
             Some("ok"),
             Layer::END_PIXELED + 0.100,
         );
@@ -33255,7 +33255,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::join_add_dialog_button_rect(dialog, 1),
-            "@ok",
+            self.localize_bundle_markup_text("@ok"),
             Some("ok"),
             Layer::END_PIXELED + 0.105,
         );
@@ -33571,7 +33571,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             add,
-            "@server.add",
+            self.localize_bundle_markup_text("@server.add"),
             Some("add"),
             Layer::END_PIXELED + 0.03,
         );
@@ -33581,7 +33581,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             refresh,
-            "@refresh",
+            self.localize_bundle_markup_text("@refresh"),
             Some("refresh"),
             Layer::END_PIXELED + 0.034,
         );
@@ -69611,27 +69611,27 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@server.add"));
-        assert!(texts.contains(&"@refresh"));
-        assert!(texts.contains(&"@name"));
+        assert!(texts.contains(&"Add Server"));
+        assert!(texts.contains(&"Refresh"));
+        assert!(texts.contains(&"Name:"));
         assert!(texts.contains(&"frog"));
-        assert!(texts.contains(&"@servers.local"));
-        assert!(texts.contains(&"@servers.remote"));
-        assert!(texts.contains(&"@servers.global"));
+        assert!(texts.contains(&"Local Servers"));
+        assert!(texts.contains(&"Remote Servers"));
+        assert!(texts.contains(&"Community Servers"));
         assert!(texts
             .iter()
-            .any(|text| text.contains("example.org") && text.contains("@server.version")));
+            .any(|text| text.contains("example.org") && text.contains("v")));
         assert!(texts.contains(&"@server.refreshing"));
         assert!(texts.contains(&"players: 0"));
-        assert!(texts.contains(&"save.map: @unknown / @mode.survival.name"));
+        assert!(texts.contains(&"save.map: Unknown / @mode.survival.name"));
         assert!(texts.contains(&"ping: --ms"));
-        assert!(texts.contains(&"@search"));
+        assert!(texts.contains(&"Search:"));
         assert!(texts.contains(&"@servers.showhidden"));
-        assert!(texts.contains(&"@hosts.none"));
+        assert!(texts.contains(&"[lightgray]No local games found!"));
         assert!(!texts.contains(&"@joingame.title"));
-        assert!(texts.contains(&"@joingame.ip"));
-        assert!(texts.contains(&"@cancel"));
-        assert!(texts.contains(&"@ok"));
+        assert!(texts.contains(&"Address:"));
+        assert!(texts.contains(&"Cancel"));
+        assert!(texts.contains(&"OK"));
 
         let dialog = DesktopLauncher::join_add_dialog_rect_for_panel(panel);
         let cancel = DesktopLauncher::join_add_dialog_button_rect(dialog, 0).center();
@@ -69662,7 +69662,7 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(edit_texts.contains(&"@server.edit"));
+        assert!(edit_texts.contains(&"Edit Server"));
         assert!(!edit_texts.contains(&"@joingame.title"));
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::CloseJoinAddServer,
@@ -69687,10 +69687,12 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(delete_texts.contains(&"@confirm"));
-        assert!(delete_texts.contains(&"@server.delete | example.org"));
-        assert!(delete_texts.contains(&"@cancel"));
-        assert!(delete_texts.contains(&"@ok"));
+        assert!(delete_texts.contains(&"Confirm"));
+        assert!(
+            delete_texts.contains(&"Are you sure you want to delete this server? | example.org")
+        );
+        assert!(delete_texts.contains(&"Cancel"));
+        assert!(delete_texts.contains(&"OK"));
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::CancelDeleteJoinServerCard,
         );
