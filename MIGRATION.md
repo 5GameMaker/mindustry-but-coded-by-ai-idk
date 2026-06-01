@@ -17,6 +17,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 732. 菜单 frame-loop 输入坐标翻转回归收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **86.8%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - Java Scene2D 输入由 stage 统一处理坐标，按钮、chrome、dialog/route shell 都不应出现额外上下翻转；
+  - Rust 桌面端从 winit window-space 进入自有 surface-space hit-test 时必须只翻转一次。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `menu_input_event_from_window_space(...)` 补充注释，明确唯一 window-space → surface-space 转换入口；
+    - 新增 frame-loop 端到端回归，分别覆盖 Join route shell、主菜单 Settings 按钮、桌面 chrome becheck 按钮，避免点击上下反转或未来重复翻转；
+    - 菜单首帧渲染测试允许中文菜单标签按预渲染 sprite 输出，避免把 `menu-label-zh-play` 误判为缺少主菜单按钮。
+  - `README.md`
+    - 路径统一写入 `D:/MDT/...`，迁移进度百分比同步到 `86.8%`。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_frame_loop --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - AboutDialog、Settings、Mods、LoadGame、JoinDialog 等子菜单仍需继续向 Java Scene2D 对话框层级/滚动/按钮皮肤靠拢；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 731. JoinDialog 即时连接失败改为错误 modal
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

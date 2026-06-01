@@ -22829,6 +22829,10 @@ impl DesktopLauncher {
         surface_size: DesktopSurfaceSize,
         input: &DesktopInputTickEvent,
     ) -> DesktopInputTickEvent {
+        // Winit cursor events are window-space (origin at top-left); all menu and route-shell hit
+        // tests below this point use Mindustry/Scene2D-style surface-space (origin at bottom-left).
+        // MouseButton carries no position, so only CursorMoved is flipped here; never flip again in
+        // `apply_menu_input_events` or route-specific `*_at_surface_point` helpers.
         match input {
             DesktopInputTickEvent::CursorMoved { x, y } => DesktopInputTickEvent::CursorMoved {
                 x: *x,
@@ -81083,6 +81087,133 @@ version: "2.0.0"
     }
 
     #[test]
+    fn desktop_frame_loop_join_route_shell_uses_single_window_to_surface_flip() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
+        let mut frame_loop =
+            DesktopFrameLoopState::new(Default::default(), DesktopFramePacing::uncapped());
+        let mut graphics_renderer = HeadlessDesktopGraphicsRenderer::default();
+        let mut effect_renderer = HeadlessDesktopEffectRenderer::default();
+        let viewport = launcher.default_render_viewport_for_surface(frame_loop.surface.size);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Join,
+        );
+        let add_center = DesktopLauncher::join_route_add_button_rect_for_panel(panel).center();
+        let window_space_add_y = frame_loop.surface.size.height as f32 - add_center.y;
+
+        let result = launcher.step_desktop_frame_loop(
+            &mut frame_loop,
+            &[
+                DesktopFrameLoopEvent::Input(DesktopInputTickEvent::CursorMoved {
+                    x: add_center.x,
+                    y: window_space_add_y,
+                }),
+                DesktopFrameLoopEvent::Input(DesktopInputTickEvent::MouseButton {
+                    button: "MouseLeft".into(),
+                    pressed: true,
+                }),
+            ],
+            &mut graphics_renderer,
+            &mut effect_renderer,
+        );
+
+        assert!(!result.close_requested);
+        assert_eq!(
+            launcher.last_menu_route_shell_action,
+            Some(super::DesktopMenuRouteShellAction::OpenJoinAddServer)
+        );
+        assert!(launcher.join_add_dialog_open);
+    }
+
+    #[test]
+    fn desktop_frame_loop_main_menu_uses_single_window_to_surface_flip() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut frame_loop =
+            DesktopFrameLoopState::new(Default::default(), DesktopFramePacing::uncapped());
+        let mut graphics_renderer = HeadlessDesktopGraphicsRenderer::default();
+        let mut effect_renderer = HeadlessDesktopEffectRenderer::default();
+        let viewport = launcher.default_render_viewport_for_surface(frame_loop.surface.size);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let settings_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Settings)
+            .expect("menu ui should include SETTINGS")
+            .rect
+            .center();
+        let window_space_settings_y = frame_loop.surface.size.height as f32 - settings_center.y;
+
+        let result = launcher.step_desktop_frame_loop(
+            &mut frame_loop,
+            &[
+                DesktopFrameLoopEvent::Input(DesktopInputTickEvent::CursorMoved {
+                    x: settings_center.x,
+                    y: window_space_settings_y,
+                }),
+                DesktopFrameLoopEvent::Input(DesktopInputTickEvent::MouseButton {
+                    button: "MouseLeft".into(),
+                    pressed: true,
+                }),
+            ],
+            &mut graphics_renderer,
+            &mut effect_renderer,
+        );
+
+        assert!(!result.close_requested);
+        assert_eq!(launcher.last_menu_action, Some(MenuButtonRole::Settings));
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Settings)
+        );
+    }
+
+    #[test]
+    fn desktop_frame_loop_menu_chrome_uses_single_window_to_surface_flip() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_becheck_active = true;
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let mut surface_config = DesktopSurfaceConfig::default();
+        surface_config.size = surface;
+        let mut frame_loop =
+            DesktopFrameLoopState::new(surface_config, DesktopFramePacing::uncapped());
+        let mut graphics_renderer = HeadlessDesktopGraphicsRenderer::default();
+        let mut effect_renderer = HeadlessDesktopEffectRenderer::default();
+        let viewport = launcher.default_render_viewport_for_surface(frame_loop.surface.size);
+        let chrome = DesktopLauncher::menu_chrome_layout_for_viewport(viewport);
+        let becheck_rect = chrome
+            .becheck_rect
+            .expect("desktop chrome layout should include becheck");
+        let becheck_point = RenderPoint::new(becheck_rect.x + 20.0, becheck_rect.center().y);
+        let window_space_becheck_y = frame_loop.surface.size.height as f32 - becheck_point.y;
+
+        let result = launcher.step_desktop_frame_loop(
+            &mut frame_loop,
+            &[
+                DesktopFrameLoopEvent::Input(DesktopInputTickEvent::CursorMoved {
+                    x: becheck_point.x,
+                    y: window_space_becheck_y,
+                }),
+                DesktopFrameLoopEvent::Input(DesktopInputTickEvent::MouseButton {
+                    button: "MouseLeft".into(),
+                    pressed: true,
+                }),
+            ],
+            &mut graphics_renderer,
+            &mut effect_renderer,
+        );
+
+        assert!(!result.close_requested);
+        assert_eq!(
+            launcher.last_menu_chrome_action,
+            Some(super::DesktopMenuChromeAction::Becheck)
+        );
+        assert_eq!(launcher.last_menu_action, None);
+    }
+
+    #[test]
     fn desktop_frame_loop_presents_menu_graphics_frame_when_world_is_absent() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let mut frame_loop =
@@ -81119,12 +81250,18 @@ version: "2.0.0"
             .commands
             .iter()
             .any(|command| matches!(command, RenderCommand::FillRect { .. })));
+        let localized_play_text = launcher.localize_bundle_markup_text("@play");
         assert!(graphics_renderer.last_trace.render_passes[0]
             .commands
             .iter()
-            .any(
-                |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "Play")
-            ));
+            .any(|command| match command {
+                RenderCommand::DrawText { text, .. } => {
+                    text.as_str() == localized_play_text.as_str()
+                        || text.as_str() == MenuButtonRole::Play.label()
+                }
+                RenderCommand::DrawSprite { symbol, .. } => symbol == "menu-label-zh-play",
+                _ => false,
+            }));
         assert!(
             graphics_renderer
                 .last_opengl_backend_executor_state
