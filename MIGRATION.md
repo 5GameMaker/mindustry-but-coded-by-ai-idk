@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 672. 菜单 logo 使用 atlas region 与 scale
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **78.4%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是让首屏 logo 尺寸来源对齐 Java `MenuFragment` 的 atlas region/scale，而不是永久依赖固定常量。
+- Java 对照依据：
+  - `MenuFragment.build(...)` 中 `TextureRegion logo = Core.atlas.find("logo")`；
+  - `logoscl = Scl.scl(1) * logo.scale`；
+  - `logow = Math.min(logo.width * logoscl, Core.graphics.getWidth() - Scl.scl(20))`；
+  - `logoh = logow * logo.height / logo.width`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `menu_logo_region_dimensions(...)`，优先读取 `self.texture_atlas.lookup("logo")` 的 `width/height/scale`；
+    - 虚拟 atlas 无真实尺寸时仍 fallback 到上游 logo 常量，保证当前默认首屏不回退为 1px logo；
+    - `push_menu_logo_and_version_chrome(...)` 改为按 atlas region 与 `menu_ui_scale` 计算 `logo_width/logo_height`；
+    - 新增 `desktop_launcher_menu_logo_uses_atlas_region_scale_like_java`，锁定 Java `logo.scale` 路径。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop logo --lib`
+- 仍未完成：
+  - 需要继续接入真实 asset atlas 加载后的像素级 smoke；
+  - locale-aware 文案、route/dialog 细节、主菜单背景与完整前端仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 671. 菜单 chrome 底部锚定与首帧可见性回归
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

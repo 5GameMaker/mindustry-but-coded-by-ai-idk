@@ -20936,10 +20936,11 @@ impl DesktopLauncher {
         }
 
         let ui_scale = options.ui_scale.max(0.01);
-        let logo_width =
-            (MENU_LOGO_UPSTREAM_WIDTH * ui_scale).min((width - 20.0 * ui_scale).max(1.0));
-        let logo_height =
-            (logo_width * MENU_LOGO_UPSTREAM_HEIGHT / MENU_LOGO_UPSTREAM_WIDTH).max(1.0);
+        let (logo_region_width, logo_region_height, logo_region_scale) =
+            self.menu_logo_region_dimensions();
+        let logo_scale = ui_scale * logo_region_scale.max(0.01);
+        let logo_width = (logo_region_width * logo_scale).min((width - 20.0 * ui_scale).max(1.0));
+        let logo_height = (logo_width * logo_region_height / logo_region_width).max(1.0);
         let logo_x = viewport.x + ((width.floor() * 0.5) - logo_width * 0.5).floor();
         let portrait_logo_offset = if height > width { 30.0 * ui_scale } else { 0.0 };
         let macnotch_offset = if options.macnotch_enabled {
@@ -20976,6 +20977,22 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.09,
         ));
+    }
+
+    fn menu_logo_region_dimensions(&self) -> (f32, f32, f32) {
+        self.texture_atlas
+            .lookup("logo")
+            .ok()
+            .map(|lookup| lookup.region)
+            .filter(|region| region.width > 1 && region.height > 1)
+            .map(|region| {
+                (
+                    region.width as f32,
+                    region.height as f32,
+                    region.scale.max(0.01),
+                )
+            })
+            .unwrap_or((MENU_LOGO_UPSTREAM_WIDTH, MENU_LOGO_UPSTREAM_HEIGHT, 1.0))
     }
 
     fn push_menu_chrome_icon_button(
@@ -43582,8 +43599,8 @@ mod tests {
         RenderTarget, RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign,
         RenderTextureSampleFlip, RenderTextureSamplePlan, RenderUvRect, RenderViewport,
         ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan, ShaderCatalog,
-        ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TextureBinding, TileCoord, UniformBinding,
-        UniformValue,
+        ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TextureAtlasRegion, TextureBinding,
+        TileCoord, UniformBinding, UniformValue,
     };
     use mindustry_core::mindustry::io::{
         write_deflated_save_meta_prefix, ContentHeaderEntry, ContentHeaderSnapshot,
@@ -63329,6 +63346,50 @@ version: "2.0.0"
             logo_rect,
             RenderRect::new(256.0, 555.0, 768.0, 107.0),
             "Java MenuFragment subtracts Core.scene.marginTop and macNotchHeight before placing logo"
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_menu_logo_uses_atlas_region_scale_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut atlas = TextureAtlasPlan::new();
+        let _ = atlas.insert_or_replace_region(
+            PageType::Main,
+            TextureAtlasRegion::new(
+                PageType::Main,
+                "logo",
+                "sprites/logo.png",
+                0,
+                0,
+                512,
+                128,
+                true,
+            )
+            .with_scale(0.5),
+        );
+        launcher.texture_atlas = atlas;
+        launcher.menu_ui_scale = 1.0;
+
+        let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let logo_rect = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .find_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, rect, .. } if symbol == "logo" => Some(*rect),
+                _ => None,
+            })
+            .expect("menu chrome should draw the logo sprite");
+
+        assert_eq!(
+            logo_rect,
+            RenderRect::new(512.0, 650.0, 256.0, 64.0),
+            "Java MenuFragment uses Core.atlas.find(\"logo\") width/height and logo.scale instead of a hard-coded logo size"
         );
     }
 
