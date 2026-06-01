@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 691. MapListDialog 筛选弹窗按钮尺寸与图标化对齐 Java
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **80.5%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是把 `MapListDialog.showMapFilters()` 从紧凑文本按钮推进到 Java 的 60f 图标按钮与 150f 文本按钮布局。
+- Java 对照依据：
+  - `MapListDialog.showMapFilters()` 中 mode / priorities / planet 使用 `size(60f)` 图标按钮；
+  - type / search 使用 `size(150f, 60f)` 文本按钮；
+  - planet 按钮桌面右键清空当前可用星球过滤，移动端长按同义。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `map_list_filter_dialog_rect_for_panel(...)` 放宽并加高弹窗，给 Java 风格按钮网格留出空间；
+    - mode / priorities / planet rect 改为 `60x60`，type / search rect 改为 `150x60`；
+    - 新增 `push_map_list_filter_icon_toggle(...)`，mode、priority、planet 改用 icon glyph 视觉，不再显示扁平长文本按钮；
+    - 新增 `DesktopMapListFilterAction::ClearPlanets`，在筛选弹窗内对 planet 按钮执行 secondary click 时清空星球过滤；
+    - 测试锁定 Java 尺寸、icon font 渲染、右键清空星球过滤行为。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop map_list --lib`
+- 仍未完成：
+  - mode/priorities/planet 当前使用 icon font glyph，后续还要继续查 atlas symbol，尽量替换为 Java `Vars.ui.getIcon(...)` 的真实 atlas image；
+  - tooltip hover 行为尚未完全迁移；
+  - planet 二级弹窗候选行仍是文本 toggle，尚未完全复刻 Java 图标 + 文本行；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 690. MapListDialog/EditorMapsDialog 地图预览接入 safeTexture 语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

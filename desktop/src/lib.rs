@@ -762,6 +762,7 @@ pub enum DesktopMapListFilterAction {
     ToggleShowBuiltin,
     ToggleShowModded,
     TogglePlanet(usize),
+    ClearPlanets,
     ToggleSearchAuthor,
     ToggleSearchDescription,
     ToggleSearchModName,
@@ -28184,8 +28185,8 @@ impl DesktopLauncher {
     }
 
     fn map_list_filter_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
-        let width = (panel.width * 0.62).clamp(300.0, 430.0);
-        let height = 420.0;
+        let width = (panel.width * 0.72).clamp(500.0, 560.0);
+        let height = 500.0;
         RenderRect::new(
             panel.center().x - width * 0.5,
             panel.center().y - height * 0.5,
@@ -28196,42 +28197,49 @@ impl DesktopLauncher {
 
     fn map_list_filter_mode_rect(dialog: RenderRect, index: usize) -> RenderRect {
         RenderRect::new(
-            dialog.x + 34.0 + index as f32 * 84.0,
-            dialog.y + dialog.height - 116.0,
-            76.0,
-            38.0,
+            dialog.x + 34.0 + index as f32 * 66.0,
+            dialog.y + dialog.height - 146.0,
+            60.0,
+            60.0,
         )
     }
 
     fn map_list_filter_priority_rect(dialog: RenderRect, index: usize) -> RenderRect {
         RenderRect::new(
-            dialog.x + 34.0 + index as f32 * 152.0,
-            dialog.y + dialog.height - 182.0,
-            144.0,
-            38.0,
+            dialog.x + 306.0 + index as f32 * 66.0,
+            dialog.y + dialog.height - 146.0,
+            60.0,
+            60.0,
         )
     }
 
     fn map_list_filter_type_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let start_x = dialog.center().x - 225.0;
         RenderRect::new(
-            dialog.x + 34.0 + index as f32 * 122.0,
-            dialog.y + dialog.height - 256.0,
-            114.0,
-            42.0,
+            start_x + index as f32 * 150.0,
+            dialog.y + dialog.height - 286.0,
+            150.0,
+            60.0,
         )
     }
 
     fn map_list_filter_search_scope_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let start_x = dialog.center().x - 225.0;
         RenderRect::new(
-            dialog.x + 34.0 + index as f32 * 122.0,
-            dialog.y + dialog.height - 330.0,
-            114.0,
-            42.0,
+            start_x + index as f32 * 150.0,
+            dialog.y + dialog.height - 376.0,
+            150.0,
+            60.0,
         )
     }
 
     fn map_list_filter_planet_button_rect(dialog: RenderRect) -> RenderRect {
-        RenderRect::new(dialog.x + 34.0, dialog.y + 72.0, dialog.width - 68.0, 38.0)
+        RenderRect::new(
+            dialog.right() - 94.0,
+            dialog.y + dialog.height - 146.0,
+            60.0,
+            60.0,
+        )
     }
 
     fn map_list_planet_filter_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
@@ -28735,6 +28743,9 @@ impl DesktopLauncher {
                         self.map_list_filter_planets.push(planet.clone());
                     }
                 }
+            }
+            DesktopMapListFilterAction::ClearPlanets => {
+                self.map_list_filter_planets.clear();
             }
             DesktopMapListFilterAction::ToggleSearchAuthor => {
                 self.map_list_filter_search_author = !self.map_list_filter_search_author;
@@ -36900,6 +36911,47 @@ impl DesktopLauncher {
         ));
     }
 
+    fn push_map_list_filter_icon_toggle(
+        &self,
+        pass: &mut RenderPass,
+        rect: RenderRect,
+        icon: impl Into<String>,
+        checked: bool,
+        enabled: bool,
+        layer: f32,
+    ) {
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("flatTogglet", false, checked && enabled),
+            rect,
+            if !enabled {
+                [0.28, 0.32, 0.36, 0.54]
+            } else if checked {
+                [0.78, 0.92, 1.0, 0.96]
+            } else {
+                [0.56, 0.64, 0.72, 0.78]
+            },
+            0.0,
+            layer,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            icon.into(),
+            rect.center(),
+            if enabled {
+                [0.92, 0.97, 1.0, 1.0]
+            } else {
+                [0.46, 0.52, 0.58, 0.88]
+            },
+            20.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(enabled),
+            layer + 0.0001,
+        ));
+    }
+
     fn push_map_list_filter_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
         if !self.map_list_filter_dialog_open {
             return;
@@ -36935,42 +36987,53 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.073,
         ));
+        let mode_group = RenderRect::new(
+            dialog.x + 28.0,
+            dialog.y + dialog.height - 154.0,
+            268.0,
+            76.0,
+        );
+        let priority_group = RenderRect::new(
+            dialog.x + 300.0,
+            dialog.y + dialog.height - 154.0,
+            136.0,
+            76.0,
+        );
+        let planet_group = RenderRect::new(
+            dialog.right() - 100.0,
+            dialog.y + dialog.height - 154.0,
+            72.0,
+            76.0,
+        );
+        let type_group = RenderRect::new(
+            dialog.center().x - 229.0,
+            dialog.y + dialog.height - 294.0,
+            458.0,
+            76.0,
+        );
+        let search_group = RenderRect::new(
+            dialog.center().x - 229.0,
+            dialog.y + dialog.height - 384.0,
+            458.0,
+            76.0,
+        );
         let group_specs = [
             (
                 self.localize_bundle_markup_text("@editor.filters.mode"),
-                RenderRect::new(
-                    dialog.x + 24.0,
-                    dialog.y + dialog.height - 126.0,
-                    dialog.width - 48.0,
-                    54.0,
-                ),
+                mode_group,
             ),
             (
                 self.localize_bundle_markup_text("@editor.filters.priorities"),
-                RenderRect::new(
-                    dialog.x + 24.0,
-                    dialog.y + dialog.height - 192.0,
-                    dialog.width - 48.0,
-                    54.0,
-                ),
+                priority_group,
             ),
+            ("".to_string(), planet_group),
             (
                 self.localize_bundle_markup_text("@editor.filters.type"),
-                RenderRect::new(
-                    dialog.x + 24.0,
-                    dialog.y + dialog.height - 266.0,
-                    dialog.width - 48.0,
-                    58.0,
-                ),
+                type_group,
             ),
             (
                 self.localize_bundle_markup_text("@editor.filters.search"),
-                RenderRect::new(
-                    dialog.x + 24.0,
-                    dialog.y + dialog.height - 340.0,
-                    dialog.width - 48.0,
-                    58.0,
-                ),
+                search_group,
             ),
         ];
         for (index, (label, group)) in group_specs.into_iter().enumerate() {
@@ -36981,41 +37044,43 @@ impl DesktopLauncher {
                 0.0,
                 Layer::END_PIXELED + 0.074 + index as f32 * 0.001,
             ));
-            pass.push(RenderCommand::draw_text_styled(
-                label,
-                RenderPoint::new(group.x + 10.0, group.y + group.height + 12.0),
-                [0.78, 0.88, 0.96, 1.0],
-                10.5,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Start)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true)
-                    .with_outline(true),
-                Layer::END_PIXELED + 0.078 + index as f32 * 0.001,
-            ));
+            if !label.is_empty() {
+                pass.push(RenderCommand::draw_text_styled(
+                    label,
+                    RenderPoint::new(group.x + 10.0, group.y + group.height + 12.0),
+                    [0.78, 0.88, 0.96, 1.0],
+                    10.5,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.078 + index as f32 * 0.001,
+                ));
+            }
         }
         for (index, mode) in Gamemode::ALL
             .into_iter()
             .filter(|mode| !mode.hidden())
             .enumerate()
         {
-            self.push_map_list_filter_toggle(
+            self.push_map_list_filter_icon_toggle(
                 pass,
                 Self::map_list_filter_mode_rect(dialog, index),
-                self.localize_bundle_markup_text(format!("@mode.{}.name", mode.wire_name())),
+                Self::map_list_card_mode_badge_text(mode),
                 self.map_list_filter_modes.contains(&mode),
                 true,
                 Layer::END_PIXELED + 0.082 + index as f32 * 0.001,
             );
         }
-        for (index, (label, checked, enabled)) in [
+        for (index, (icon, checked, enabled)) in [
             (
-                self.localize_bundle_markup_text("@editor.filters.prioritizecustom"),
+                desktop_ui_icon_glyph_or_label("players", "players"),
                 self.map_list_filter_show_custom && self.map_list_filter_prioritize_custom,
                 self.map_list_filter_show_custom,
             ),
             (
-                self.localize_bundle_markup_text("@editor.filters.prioritizemod"),
+                desktop_ui_icon_glyph_or_label("hammer", "hammer"),
                 self.map_list_filter_show_modded && self.map_list_filter_prioritize_modded,
                 self.map_list_filter_show_modded,
             ),
@@ -37023,10 +37088,10 @@ impl DesktopLauncher {
         .into_iter()
         .enumerate()
         {
-            self.push_map_list_filter_toggle(
+            self.push_map_list_filter_icon_toggle(
                 pass,
                 Self::map_list_filter_priority_rect(dialog, index),
-                label,
+                icon,
                 checked,
                 enabled,
                 Layer::END_PIXELED + 0.088 + index as f32 * 0.001,
@@ -37089,14 +37154,28 @@ impl DesktopLauncher {
         } else {
             self.map_list_filter_planets.join(", ")
         };
-        let planet_label = self.localize_bundle_markup_text("@editor.filters.planetselect");
-        self.push_settings_text_button(
+        self.push_map_list_filter_icon_toggle(
             pass,
             Self::map_list_filter_planet_button_rect(dialog),
-            format!("{planet_label}: {planet_summary}"),
-            Some("planet"),
+            desktop_ui_icon_glyph_or_label("planet", "planet"),
+            !self.map_list_filter_planets.is_empty(),
+            true,
             Layer::END_PIXELED + 0.100,
         );
+        pass.push(RenderCommand::draw_text_styled(
+            schematic_text_snippet(&planet_summary, 14),
+            RenderPoint::new(
+                Self::map_list_filter_planet_button_rect(dialog).center().x,
+                Self::map_list_filter_planet_button_rect(dialog).y - 12.0,
+            ),
+            [0.62, 0.72, 0.80, 1.0],
+            8.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.101,
+        ));
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
@@ -38852,6 +38931,22 @@ impl DesktopLauncher {
                             let viewport = self.default_render_viewport_for_surface(surface_size);
                             let panel =
                                 Self::active_menu_route_shell_panel_for_route(viewport, route);
+                            if self.map_list_filter_dialog_open
+                                && !self.map_list_planet_filter_dialog_open
+                            {
+                                let dialog = Self::map_list_filter_dialog_rect_for_panel(panel);
+                                if Self::map_list_filter_planet_button_rect(dialog)
+                                    .contains_point(cursor)
+                                {
+                                    self.dispatch_menu_route_shell_action(
+                                        DesktopMenuRouteShellAction::MapListFilter(
+                                            DesktopMapListFilterAction::ClearPlanets,
+                                        ),
+                                    );
+                                    self.last_menu_action = None;
+                                    continue;
+                                }
+                            }
                             if Self::map_list_search_rect_for_panel(panel, route)
                                 .contains_point(cursor)
                             {
@@ -61551,7 +61646,7 @@ version: "2.0.0"
         );
         assert!(custom.map_list_filter_dialog_open);
         let filter_frame = custom.menu_graphics_frame_for_surface(0, viewport);
-        let filter_texts = filter_frame
+        let filter_commands = filter_frame
             .bundle
             .render_frame
             .as_ref()
@@ -61559,6 +61654,9 @@ version: "2.0.0"
             .passes
             .iter()
             .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let filter_texts = filter_commands
+            .iter()
             .filter_map(|command| match command {
                 RenderCommand::DrawText { text, .. } => Some(text.as_str()),
                 _ => None,
@@ -61566,11 +61664,7 @@ version: "2.0.0"
             .collect::<Vec<_>>();
         assert!(filter_texts.contains(&"Filter Maps"));
         assert!(filter_texts.contains(&"Gamemodes:"));
-        assert!(filter_texts.contains(&"Survival"));
-        assert!(filter_texts.contains(&"Attack"));
         assert!(filter_texts.contains(&"Priorities:"));
-        assert!(filter_texts.contains(&"Custom Priority"));
-        assert!(filter_texts.contains(&"Mod Priority"));
         assert!(filter_texts.contains(&"Map Type:"));
         assert!(filter_texts.contains(&"Custom"));
         assert!(filter_texts.contains(&"Built-In"));
@@ -61579,7 +61673,7 @@ version: "2.0.0"
         assert!(filter_texts.contains(&"Author"));
         assert!(filter_texts.contains(&"Description"));
         assert!(filter_texts.contains(&"Mod Name"));
-        assert!(filter_texts.contains(&"Planet Selection: <Any>"));
+        assert!(filter_texts.contains(&"<Any>"));
         assert!(!filter_texts.iter().any(|text| text.starts_with('@')));
 
         let back = DesktopLauncher::route_back_button_rect_for_panel(custom_panel).center();
@@ -61589,6 +61683,54 @@ version: "2.0.0"
             "open map filter dialog should block route back clicks behind it"
         );
         let dialog = DesktopLauncher::map_list_filter_dialog_rect_for_panel(custom_panel);
+        assert_eq!(
+            (
+                DesktopLauncher::map_list_filter_mode_rect(dialog, 0).width,
+                DesktopLauncher::map_list_filter_mode_rect(dialog, 0).height
+            ),
+            (60.0, 60.0),
+            "Java MapListDialog mode filters use 60f icon buttons"
+        );
+        assert_eq!(
+            (
+                DesktopLauncher::map_list_filter_priority_rect(dialog, 0).width,
+                DesktopLauncher::map_list_filter_priority_rect(dialog, 0).height
+            ),
+            (60.0, 60.0),
+            "Java MapListDialog priority filters use 60f icon buttons"
+        );
+        assert_eq!(
+            (
+                DesktopLauncher::map_list_filter_type_rect(dialog, 0).width,
+                DesktopLauncher::map_list_filter_type_rect(dialog, 0).height
+            ),
+            (150.0, 60.0),
+            "Java MapListDialog type filters use 150f x 60f buttons"
+        );
+        assert_eq!(
+            (
+                DesktopLauncher::map_list_filter_search_scope_rect(dialog, 0).width,
+                DesktopLauncher::map_list_filter_search_scope_rect(dialog, 0).height
+            ),
+            (150.0, 60.0),
+            "Java MapListDialog search filters use 150f x 60f buttons"
+        );
+        for glyph in [
+            DesktopLauncher::map_list_card_mode_badge_text(Gamemode::Survival),
+            DesktopLauncher::map_list_card_mode_badge_text(Gamemode::Attack),
+            super::desktop_ui_icon_glyph_or_label("players", "players"),
+            super::desktop_ui_icon_glyph_or_label("hammer", "hammer"),
+            super::desktop_ui_icon_glyph_or_label("planet", "planet"),
+        ] {
+            assert!(
+                filter_commands.iter().any(|command| matches!(
+                    command,
+                    RenderCommand::DrawText { text, style, .. }
+                        if text == &glyph && style.font == RenderFontId::Icon
+                )),
+                "MapListDialog filter icon buttons should render Java-like icon glyph {glyph}"
+            );
+        }
         let close_filter = DesktopLauncher::schematic_info_button_rect(dialog, 0).center();
         assert_eq!(
             custom.active_menu_route_shell_action_at_surface_point(
@@ -61859,6 +62001,28 @@ version: "2.0.0"
         launcher.dispatch_menu_route_shell_action(action.unwrap());
         assert!(!launcher.map_list_planet_filter_dialog_open);
         assert!(launcher.map_list_filter_dialog_open);
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: planet_button.x,
+                    y: planet_button.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "secondary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert!(
+            launcher.map_list_filter_planets.is_empty(),
+            "Java MapListDialog planet filter button clears selected planets on desktop right-click"
+        );
+        assert_eq!(
+            visible_names(&launcher),
+            vec!["Erekir Arena".to_string(), "Serpulo Arena".to_string()]
+        );
     }
 
     #[test]
