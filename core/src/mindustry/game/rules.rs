@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::mindustry::{game::SpawnGroup, r#type::Sector};
+use crate::mindustry::{
+    game::SpawnGroup,
+    r#type::{Sector, WeatherEntry},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rules {
@@ -76,6 +79,7 @@ pub struct Rules {
     pub unit_whitelist: bool,
     pub banned_blocks: BTreeSet<String>,
     pub banned_units: BTreeSet<String>,
+    pub weather: Vec<WeatherEntry>,
     pub revealed_blocks: BTreeSet<String>,
     pub researched: BTreeSet<String>,
     pub objective_flags: BTreeSet<String>,
@@ -244,6 +248,7 @@ struct RulesJsonPatch {
     unit_whitelist: Option<bool>,
     banned_blocks: Option<BTreeSet<String>>,
     banned_units: Option<BTreeSet<String>>,
+    weather: Option<Vec<WeatherEntry>>,
     core_capture: Option<bool>,
     wave_spacing: Option<f32>,
     initial_wave_spacing: Option<f32>,
@@ -300,6 +305,9 @@ impl RulesJsonPatch {
         }
         if let Some(value) = self.banned_units {
             rules.banned_units = value;
+        }
+        if let Some(value) = self.weather {
+            rules.weather = value;
         }
         if let Some(value) = self.core_capture {
             rules.core_capture = value;
@@ -379,6 +387,7 @@ impl<'a> RulesJsonParser<'a> {
                 "unitWhitelist" => patch.unit_whitelist = self.parse_optional_bool()?,
                 "bannedBlocks" => patch.banned_blocks = self.parse_optional_string_set()?,
                 "bannedUnits" => patch.banned_units = self.parse_optional_string_set()?,
+                "weather" => patch.weather = self.parse_optional_weather_entries()?,
                 "coreCapture" => patch.core_capture = self.parse_optional_bool()?,
                 "waveSpacing" => patch.wave_spacing = self.parse_optional_f32()?,
                 "initialWaveSpacing" => patch.initial_wave_spacing = self.parse_optional_f32()?,
@@ -540,6 +549,114 @@ impl<'a> RulesJsonParser<'a> {
                 Some(']') => return Ok(Some(values)),
                 Some(ch) => return Err(format!("expected ',' or ']', found '{ch}'")),
                 None => return Err("unterminated json string array".into()),
+            }
+        }
+    }
+
+    fn parse_optional_weather_entries(&mut self) -> Result<Option<Vec<WeatherEntry>>, String> {
+        self.skip_ws();
+        if self.peek() != Some('[') {
+            self.skip_value()?;
+            return Ok(None);
+        }
+        self.expect('[')?;
+        self.skip_ws();
+        let mut entries = Vec::new();
+        if self.peek() == Some(']') {
+            self.index += 1;
+            return Ok(Some(entries));
+        }
+        loop {
+            self.skip_ws();
+            match self.peek() {
+                Some('{') => {
+                    if let Some(entry) = self.parse_weather_entry_object()? {
+                        entries.push(entry);
+                    }
+                }
+                _ => {
+                    self.skip_value()?;
+                }
+            }
+            self.skip_ws();
+            match self.next() {
+                Some(',') => continue,
+                Some(']') => return Ok(Some(entries)),
+                Some(ch) => return Err(format!("expected ',' or ']', found '{ch}'")),
+                None => return Err("unterminated weather json array".into()),
+            }
+        }
+    }
+
+    fn parse_weather_entry_object(&mut self) -> Result<Option<WeatherEntry>, String> {
+        self.expect('{')?;
+        self.skip_ws();
+        let mut entry = WeatherEntry::default();
+        let mut saw_field = false;
+        if self.peek() == Some('}') {
+            self.index += 1;
+            return Ok(None);
+        }
+        loop {
+            let key = self.parse_string()?;
+            self.expect(':')?;
+            match key.as_str() {
+                "weather" => {
+                    if let Some(value) = self.parse_optional_string_value()? {
+                        entry.weather = value;
+                        saw_field = true;
+                    }
+                }
+                "minFrequency" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        entry.min_frequency = value;
+                        saw_field = true;
+                    }
+                }
+                "maxFrequency" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        entry.max_frequency = value;
+                        saw_field = true;
+                    }
+                }
+                "minDuration" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        entry.min_duration = value;
+                        saw_field = true;
+                    }
+                }
+                "maxDuration" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        entry.max_duration = value;
+                        saw_field = true;
+                    }
+                }
+                "cooldown" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        entry.cooldown = value;
+                        saw_field = true;
+                    }
+                }
+                "intensity" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        entry.intensity = value;
+                        saw_field = true;
+                    }
+                }
+                "always" => {
+                    if let Some(value) = self.parse_optional_bool()? {
+                        entry.always = value;
+                        saw_field = true;
+                    }
+                }
+                _ => self.skip_value()?,
+            }
+            self.skip_ws();
+            match self.next() {
+                Some(',') => continue,
+                Some('}') => return Ok(saw_field.then_some(entry)),
+                Some(ch) => return Err(format!("expected ',' or '}}', found '{ch}'")),
+                None => return Err("unterminated weather json object".into()),
             }
         }
     }
@@ -831,6 +948,7 @@ impl Default for Rules {
             unit_whitelist: false,
             banned_blocks: BTreeSet::new(),
             banned_units: BTreeSet::new(),
+            weather: Vec::new(),
             revealed_blocks: BTreeSet::new(),
             researched: BTreeSet::new(),
             objective_flags: BTreeSet::new(),
@@ -1061,6 +1179,7 @@ mod tests {
         assert!(!rules.unit_whitelist);
         assert!(rules.banned_blocks.is_empty());
         assert!(rules.banned_units.is_empty());
+        assert!(rules.weather.is_empty());
         assert!(rules.revealed_blocks.is_empty());
         assert!(rules.researched.is_empty());
         assert!(rules.objective_flags.is_empty());
@@ -1121,6 +1240,16 @@ mod tests {
                     "unitWhitelist": true,
                     "bannedBlocks": ["router", "duo"],
                     "bannedUnits": ["dagger"],
+                    "weather": [{
+                        "weather": "rain",
+                        "minFrequency": 10.0,
+                        "maxFrequency": 20.0,
+                        "minDuration": 30.0,
+                        "maxDuration": 40.0,
+                        "cooldown": 5.0,
+                        "intensity": 0.75,
+                        "always": true
+                    }],
                     "coreCapture": true,
                     "waveSpacing": 7200.5,
                     "initialWaveSpacing": 600.25,
@@ -1151,6 +1280,15 @@ mod tests {
         assert!(rules.banned_blocks.contains("router"));
         assert!(rules.banned_blocks.contains("duo"));
         assert!(rules.banned_units.contains("dagger"));
+        assert_eq!(rules.weather.len(), 1);
+        assert_eq!(rules.weather[0].weather, "rain");
+        assert_eq!(rules.weather[0].min_frequency, 10.0);
+        assert_eq!(rules.weather[0].max_frequency, 20.0);
+        assert_eq!(rules.weather[0].min_duration, 30.0);
+        assert_eq!(rules.weather[0].max_duration, 40.0);
+        assert_eq!(rules.weather[0].cooldown, 5.0);
+        assert_eq!(rules.weather[0].intensity, 0.75);
+        assert!(rules.weather[0].always);
         assert!(rules.core_capture);
         assert_eq!(rules.wave_spacing, 7200.5);
         assert_eq!(rules.initial_wave_spacing, 600.25);

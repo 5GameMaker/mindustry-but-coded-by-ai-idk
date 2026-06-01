@@ -17,6 +17,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 712. CustomRulesDialog 天气规则编辑入口最小闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **84.3%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版，而不是只做主菜单或孤立模块。
+- Java 对照依据：
+  - 原版 `CustomRulesDialog` 在规则列表中通过 `@rules.weather` 打开 `weatherDialog()`；
+  - `weatherDialog()` 展示 `Rules.weather` 中的 `WeatherEntry`，支持删除条目、编辑 duration/frequency、切换 `always`，并通过 `@add` 子弹窗从 `ContentType.weather` 添加非 hidden 天气。
+- 本轮主改动：
+  - `core/src/mindustry/game/rules.rs`
+    - `Rules` 新增 `weather: Vec<WeatherEntry>` 并保持默认空列表；
+    - `Rules::apply_json_str` 支持 `weather` 数组，解析 `weather/minFrequency/maxFrequency/minDuration/maxDuration/cooldown/intensity/always`；
+    - 扩展规则 JSON 回归，确保剪贴板载入时能恢复天气条目。
+  - `desktop/src/lib.rs`
+    - `MapPlayDialog -> @customize` 右侧增加 `@rules.weather` 入口；
+    - 新增 `map_play_weather_dialog_open` 状态与 `OpenWeather/CloseWeather/AddWeather/RemoveWeather/ToggleWeatherAlways` 动作；
+    - 天气子弹层会列出当前天气条目、展示 duration/frequency 摘要、支持 `always` 切换与删除，并列出非 hidden 天气候选供添加；
+    - copy/load JSON 现在包含 `weather`，避免自定义规则通过剪贴板往返时丢失天气配置。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core rules_apply_json_str_updates_supported_top_level_fields -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore -- --nocapture`
+  - `git diff --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 目前天气弹窗仍是最小闭环，duration/frequency 还只是摘要展示，尚未做到 Java 文本框逐项编辑；
+  - `@add` 仍是同层候选按钮，尚未还原 Java 独立 add 子弹窗与双列布局；
+  - CustomRulesDialog 的 team rules、环境细项和更多子菜单仍需继续补齐；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 711. EditorMapsDialog Open In Editor 真实 beginEditMap 状态闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
