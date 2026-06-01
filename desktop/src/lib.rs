@@ -903,6 +903,53 @@ fn format_custom_rules_number(value: f32) -> String {
     }
 }
 
+fn json_string_array_from_set(values: &BTreeSet<String>) -> String {
+    let items = values
+        .iter()
+        .map(|value| format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")))
+        .collect::<Vec<_>>();
+    format!("[{}]", items.join(","))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopBannedContentKind {
+    Blocks,
+    Units,
+}
+
+impl DesktopBannedContentKind {
+    fn selected_label_key(self) -> &'static str {
+        match self {
+            Self::Blocks => "@bannedblocks",
+            Self::Units => "@bannedunits",
+        }
+    }
+
+    fn deselected_label_key(self) -> &'static str {
+        match self {
+            Self::Blocks => "@unbannedblocks",
+            Self::Units => "@unbannedunits",
+        }
+    }
+
+    fn contains(self, rules: &Rules, name: &str) -> bool {
+        match self {
+            Self::Blocks => rules.banned_blocks.contains(name),
+            Self::Units => rules.banned_units.contains(name),
+        }
+    }
+
+    fn toggle(self, rules: &mut Rules, name: &str) {
+        let set = match self {
+            Self::Blocks => &mut rules.banned_blocks,
+            Self::Units => &mut rules.banned_units,
+        };
+        if !set.remove(name) {
+            set.insert(name.to_string());
+        }
+    }
+}
+
 const MAP_PLAY_CUSTOM_RULE_WAVE_TOGGLES: &[DesktopCustomRulesToggle] = &[
     DesktopCustomRulesToggle::Waves,
     DesktopCustomRulesToggle::WaveSending,
@@ -946,6 +993,9 @@ pub enum DesktopMapCardActionKind {
     CopyCustomRules,
     LoadCustomRules,
     ResetCustomRules,
+    OpenBannedContent(DesktopBannedContentKind),
+    CloseBannedContent,
+    ToggleBannedContent(DesktopBannedContentKind, usize),
     OpenInEditor,
     Delete,
     ViewWorkshop,
@@ -17217,6 +17267,7 @@ pub struct DesktopLauncher {
     pub map_play_mode_help_dialog_open: bool,
     pub map_play_customize_dialog_open: bool,
     pub map_play_rules_edit_dialog_open: bool,
+    pub map_play_banned_content_dialog: Option<DesktopBannedContentKind>,
     pub map_play_rules: Option<Rules>,
     pub last_map_play_rules_clipboard_text: Option<String>,
     pub map_play_rules_error: Option<String>,
@@ -18374,6 +18425,7 @@ impl DesktopLauncher {
             map_play_mode_help_dialog_open: false,
             map_play_customize_dialog_open: false,
             map_play_rules_edit_dialog_open: false,
+            map_play_banned_content_dialog: None,
             map_play_rules: None,
             last_map_play_rules_clipboard_text: None,
             map_play_rules_error: None,
@@ -30190,10 +30242,12 @@ impl DesktopLauncher {
     }
 
     fn map_play_customize_content_rect(child: RenderRect) -> RenderRect {
+        let x = child.x + 28.0;
+        let button_rail_x = Self::map_play_customize_edit_button_rect(child, 0).x;
         RenderRect::new(
-            child.x + 28.0,
+            x,
             child.y + 62.0,
-            child.width - 56.0,
+            (button_rail_x - x - 12.0).max(260.0),
             child.height - 156.0,
         )
     }
@@ -30285,6 +30339,66 @@ impl DesktopLauncher {
         )
     }
 
+    fn map_play_banned_content_dialog_rect(child: RenderRect) -> RenderRect {
+        let width = (child.width - 64.0).clamp(520.0, 700.0);
+        let height = (child.height - 86.0).clamp(300.0, 420.0);
+        RenderRect::new(
+            child.center().x - width * 0.5,
+            child.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn map_play_banned_content_close_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.center().x - 70.0, dialog.y + 18.0, 140.0, 38.0)
+    }
+
+    fn map_play_banned_content_item_rect(
+        dialog: RenderRect,
+        selected_side: bool,
+        row_index: usize,
+    ) -> RenderRect {
+        let column_width = (dialog.width - 56.0) * 0.5;
+        let x = if selected_side {
+            dialog.x + 20.0
+        } else {
+            dialog.x + 36.0 + column_width
+        };
+        RenderRect::new(
+            x,
+            dialog.y + dialog.height - 94.0 - row_index as f32 * 30.0,
+            column_width,
+            24.0,
+        )
+    }
+
+    fn map_play_banned_content_candidate_names(
+        &self,
+        kind: DesktopBannedContentKind,
+    ) -> Vec<String> {
+        match kind {
+            DesktopBannedContentKind::Blocks => self
+                .content_loader
+                .blocks()
+                .filter(|block| {
+                    let base = block.base();
+                    base.name != "air" && base.build_visibility.statically_visible()
+                })
+                .map(|block| block.base().name.clone())
+                .take(10)
+                .collect(),
+            DesktopBannedContentKind::Units => self
+                .content_loader
+                .units()
+                .iter()
+                .filter(|unit| !unit.is_hidden())
+                .map(|unit| unit.name().to_string())
+                .take(10)
+                .collect(),
+        }
+    }
+
     fn toggle_map_play_custom_rule(&mut self, index: usize, toggle: DesktopCustomRulesToggle) {
         let Some(map) = self.map_list_cards.get(index) else {
             return;
@@ -30319,6 +30433,31 @@ impl DesktopLauncher {
         }
     }
 
+    fn toggle_map_play_banned_content(
+        &mut self,
+        index: usize,
+        kind: DesktopBannedContentKind,
+        candidate_index: usize,
+    ) {
+        let Some(map) = self.map_list_cards.get(index) else {
+            return;
+        };
+        let Some(name) = self
+            .map_play_banned_content_candidate_names(kind)
+            .get(candidate_index)
+            .cloned()
+        else {
+            return;
+        };
+        let mut rules = self
+            .map_play_rules
+            .clone()
+            .unwrap_or_else(|| Self::map_play_rules_for_mode(map, self.map_play_selected_mode));
+        kind.toggle(&mut rules, &name);
+        self.map_play_rules = Some(rules);
+        self.map_play_rules_error = None;
+    }
+
     fn map_play_rules_clipboard_json(rules: &Rules) -> String {
         let mode_name = rules.mode_name.as_deref().unwrap_or("custom");
         format!(
@@ -30333,6 +30472,8 @@ impl DesktopLauncher {
                 "\"hideBannedBlocks\":{},",
                 "\"blockWhitelist\":{},",
                 "\"unitWhitelist\":{},",
+                "\"bannedBlocks\":{},",
+                "\"bannedUnits\":{},",
                 "\"attackMode\":{},",
                 "\"pvp\":{},",
                 "\"coreCapture\":{},",
@@ -30351,6 +30492,8 @@ impl DesktopLauncher {
             rules.hide_banned_blocks,
             rules.block_whitelist,
             rules.unit_whitelist,
+            json_string_array_from_set(&rules.banned_blocks),
+            json_string_array_from_set(&rules.banned_units),
             rules.attack_mode,
             rules.pvp,
             rules.core_capture,
@@ -32049,6 +32192,64 @@ impl DesktopLauncher {
                 let child = Self::map_play_child_dialog_rect(dialog);
                 if self.map_play_customize_dialog_open {
                     if let Some(index) = self.map_play_dialog_index {
+                        if let Some(kind) = self.map_play_banned_content_dialog {
+                            let banned_dialog = Self::map_play_banned_content_dialog_rect(child);
+                            if Self::map_play_banned_content_close_rect(banned_dialog)
+                                .contains_point(point)
+                            {
+                                return Some(DesktopMenuRouteShellAction::MapCard(
+                                    DesktopMapCardAction::new(
+                                        index,
+                                        DesktopMapCardActionKind::CloseBannedContent,
+                                    ),
+                                ));
+                            }
+                            let rules = self
+                                .map_play_rules
+                                .clone()
+                                .or_else(|| {
+                                    self.map_list_cards.get(index).map(|map| {
+                                        Self::map_play_rules_for_mode(
+                                            map,
+                                            self.map_play_selected_mode,
+                                        )
+                                    })
+                                })
+                                .unwrap_or_default();
+                            let candidates = self.map_play_banned_content_candidate_names(kind);
+                            let mut selected_row = 0usize;
+                            let mut deselected_row = 0usize;
+                            for (candidate_index, name) in candidates.iter().enumerate() {
+                                let selected = kind.contains(&rules, name);
+                                let row_index = if selected {
+                                    let row = selected_row;
+                                    selected_row += 1;
+                                    row
+                                } else {
+                                    let row = deselected_row;
+                                    deselected_row += 1;
+                                    row
+                                };
+                                if Self::map_play_banned_content_item_rect(
+                                    banned_dialog,
+                                    selected,
+                                    row_index,
+                                )
+                                .contains_point(point)
+                                {
+                                    return Some(DesktopMenuRouteShellAction::MapCard(
+                                        DesktopMapCardAction::new(
+                                            index,
+                                            DesktopMapCardActionKind::ToggleBannedContent(
+                                                kind,
+                                                candidate_index,
+                                            ),
+                                        ),
+                                    ));
+                                }
+                            }
+                            return None;
+                        }
                         if self.map_play_rules_edit_dialog_open {
                             let edit = Self::map_play_rules_edit_dialog_rect(child);
                             for (button_index, kind) in [
@@ -32069,6 +32270,46 @@ impl DesktopLauncher {
                                 }
                             }
                             return None;
+                        }
+                        if Self::map_play_customize_edit_button_rect(child, 0).contains_point(point)
+                        {
+                            return Some(DesktopMenuRouteShellAction::MapCard(
+                                DesktopMapCardAction::new(
+                                    index,
+                                    DesktopMapCardActionKind::OpenCustomRulesEdit,
+                                ),
+                            ));
+                        }
+                        if Self::map_play_customize_edit_button_rect(child, 1).contains_point(point)
+                        {
+                            return Some(DesktopMenuRouteShellAction::MapCard(
+                                DesktopMapCardAction::new(
+                                    index,
+                                    DesktopMapCardActionKind::ResetCustomRules,
+                                ),
+                            ));
+                        }
+                        if Self::map_play_customize_edit_button_rect(child, 2).contains_point(point)
+                        {
+                            return Some(DesktopMenuRouteShellAction::MapCard(
+                                DesktopMapCardAction::new(
+                                    index,
+                                    DesktopMapCardActionKind::OpenBannedContent(
+                                        DesktopBannedContentKind::Blocks,
+                                    ),
+                                ),
+                            ));
+                        }
+                        if Self::map_play_customize_edit_button_rect(child, 3).contains_point(point)
+                        {
+                            return Some(DesktopMenuRouteShellAction::MapCard(
+                                DesktopMapCardAction::new(
+                                    index,
+                                    DesktopMapCardActionKind::OpenBannedContent(
+                                        DesktopBannedContentKind::Units,
+                                    ),
+                                ),
+                            ));
                         }
                         let content = Self::map_play_customize_content_rect(child);
                         let rules = self
@@ -32135,24 +32376,6 @@ impl DesktopLauncher {
                                     ),
                                 ));
                             }
-                        }
-                        if Self::map_play_customize_edit_button_rect(child, 0).contains_point(point)
-                        {
-                            return Some(DesktopMenuRouteShellAction::MapCard(
-                                DesktopMapCardAction::new(
-                                    index,
-                                    DesktopMapCardActionKind::OpenCustomRulesEdit,
-                                ),
-                            ));
-                        }
-                        if Self::map_play_customize_edit_button_rect(child, 1).contains_point(point)
-                        {
-                            return Some(DesktopMenuRouteShellAction::MapCard(
-                                DesktopMapCardAction::new(
-                                    index,
-                                    DesktopMapCardActionKind::ResetCustomRules,
-                                ),
-                            ));
                         }
                     }
                 }
@@ -33748,6 +33971,7 @@ impl DesktopLauncher {
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_customize_dialog_open = false;
                             self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
                             self.map_play_rules_error = None;
                         }
                         DesktopMapCardActionKind::OpenEditorInfo => {
@@ -33756,6 +33980,7 @@ impl DesktopLauncher {
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_customize_dialog_open = false;
                             self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
                             self.map_play_rules = None;
                             self.map_play_rules_error = None;
                             self.map_play_playtesting = false;
@@ -33800,6 +34025,7 @@ impl DesktopLauncher {
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_customize_dialog_open = false;
                             self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
                             self.map_play_rules = None;
                             self.map_play_rules_error = None;
                             self.map_play_playtesting = false;
@@ -33808,17 +34034,20 @@ impl DesktopLauncher {
                         DesktopMapCardActionKind::Customize => {
                             self.map_play_customize_dialog_open = true;
                             self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
                             self.map_play_mode_help_dialog_open = false;
                         }
                         DesktopMapCardActionKind::ShowModeHelp => {
                             self.map_play_mode_help_dialog_open = true;
                             self.map_play_customize_dialog_open = false;
                             self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
                         }
                         DesktopMapCardActionKind::ToggleCustomRule(toggle) => {
                             self.toggle_map_play_custom_rule(action.index, toggle);
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
                         }
                         DesktopMapCardActionKind::AdjustCustomRuleNumber(number, direction) => {
                             self.adjust_map_play_custom_rule_number(
@@ -33829,9 +34058,11 @@ impl DesktopLauncher {
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
                         }
                         DesktopMapCardActionKind::OpenCustomRulesEdit => {
                             self.map_play_rules_edit_dialog_open = true;
+                            self.map_play_banned_content_dialog = None;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_rules_error = None;
@@ -33861,6 +34092,26 @@ impl DesktopLauncher {
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
+                        DesktopMapCardActionKind::OpenBannedContent(kind) => {
+                            self.map_play_banned_content_dialog = Some(kind);
+                            self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                            self.map_play_rules_error = None;
+                        }
+                        DesktopMapCardActionKind::CloseBannedContent => {
+                            self.map_play_banned_content_dialog = None;
+                        }
+                        DesktopMapCardActionKind::ToggleBannedContent(kind, candidate_index) => {
+                            self.toggle_map_play_banned_content(
+                                action.index,
+                                kind,
+                                candidate_index,
+                            );
+                            self.map_play_banned_content_dialog = Some(kind);
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                        }
                         DesktopMapCardActionKind::OpenInEditor => {
                             self.active_menu_route = Some(DesktopMenuRoute::Editor);
                             self.editor_map_info_dialog_index = Some(action.index);
@@ -33868,6 +34119,7 @@ impl DesktopLauncher {
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_customize_dialog_open = false;
                             self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
                             self.map_play_rules = None;
                             self.map_play_rules_error = None;
                             self.map_play_playtesting = false;
@@ -33896,6 +34148,7 @@ impl DesktopLauncher {
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_customize_dialog_open = false;
                             self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
                             self.map_play_rules = None;
                             self.map_play_rules_error = None;
                             self.map_play_playtesting = false;
@@ -33917,6 +34170,7 @@ impl DesktopLauncher {
                 self.map_play_mode_help_dialog_open = false;
                 self.map_play_customize_dialog_open = false;
                 self.map_play_rules_edit_dialog_open = false;
+                self.map_play_banned_content_dialog = None;
                 self.map_play_rules = None;
                 self.map_play_rules_error = None;
                 self.map_play_playtesting = false;
@@ -33927,6 +34181,7 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::CloseMapPlayCustomize => {
                 self.map_play_customize_dialog_open = false;
                 self.map_play_rules_edit_dialog_open = false;
+                self.map_play_banned_content_dialog = None;
                 self.map_play_rules_error = None;
             }
             DesktopMenuRouteShellAction::NewEditorMap => {
@@ -39333,6 +39588,8 @@ impl DesktopLauncher {
         for (index, line) in [
             self.localize_bundle_markup_text("@edit"),
             self.localize_bundle_markup_text("@settings.reset"),
+            self.localize_bundle_markup_text("@bannedblocks"),
+            self.localize_bundle_markup_text("@bannedunits"),
         ]
         .into_iter()
         .enumerate()
@@ -39372,6 +39629,142 @@ impl DesktopLauncher {
         if self.map_play_rules_edit_dialog_open {
             self.push_map_play_rules_edit_dialog(pass, child, &rules);
         }
+        if let Some(kind) = self.map_play_banned_content_dialog {
+            self.push_map_play_banned_content_dialog(pass, child, kind, &rules);
+        }
+    }
+
+    fn push_map_play_banned_content_dialog(
+        &self,
+        pass: &mut RenderPass,
+        child: RenderRect,
+        kind: DesktopBannedContentKind,
+        rules: &Rules,
+    ) {
+        let layer = Layer::END_PIXELED + 0.145;
+        let dialog = Self::map_play_banned_content_dialog_rect(child);
+        let candidates = self.map_play_banned_content_candidate_names(kind);
+        pass.push(RenderCommand::fill_rect(
+            child,
+            [0.0, 0.0, 0.0, 0.52],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.62, 0.82, 1.0, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text(kind.selected_label_key()),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 26.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.004,
+        ));
+        for (selected_side, label, color) in [
+            (true, kind.selected_label_key(), [0.95, 0.44, 0.42, 1.0]),
+            (
+                false,
+                kind.deselected_label_key(),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+            ),
+        ] {
+            let column = Self::map_play_banned_content_item_rect(dialog, selected_side, 0);
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text(label),
+                RenderPoint::new(column.center().x, dialog.y + dialog.height - 58.0),
+                color,
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.006,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                RenderRect::new(column.x, dialog.y + dialog.height - 70.0, column.width, 1.0),
+                color,
+                1.0,
+                layer + 0.007,
+            ));
+        }
+
+        let mut selected_row = 0usize;
+        let mut deselected_row = 0usize;
+        for (candidate_index, name) in candidates.iter().enumerate() {
+            let selected = kind.contains(rules, name);
+            let row_index = if selected {
+                let row = selected_row;
+                selected_row += 1;
+                row
+            } else {
+                let row = deselected_row;
+                deselected_row += 1;
+                row
+            };
+            if row_index >= 7 {
+                continue;
+            }
+            let row = Self::map_play_banned_content_item_rect(dialog, selected, row_index);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("button"),
+                row,
+                if selected {
+                    [1.0, 0.78, 0.78, 0.34]
+                } else {
+                    [1.0, 1.0, 1.0, 0.24]
+                },
+                0.0,
+                layer + 0.010 + candidate_index as f32 * 0.0005,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                name.clone(),
+                RenderPoint::new(row.x + 8.0, row.center().y),
+                [0.88, 0.95, 1.0, 1.0],
+                9.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_wrap_width((row.width - 16.0).max(80.0))
+                    .with_integer_position(true),
+                layer + 0.011 + candidate_index as f32 * 0.0005,
+            ));
+        }
+        if selected_row == 0 {
+            let row = Self::map_play_banned_content_item_rect(dialog, true, 0);
+            pass.push(RenderCommand::draw_text_styled(
+                "@empty",
+                row.center(),
+                [0.62, 0.70, 0.76, 0.80],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.030,
+            ));
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_banned_content_close_rect(dialog),
+            self.localize_bundle_markup_text("@back"),
+            Some("left"),
+            layer + 0.050,
+        );
     }
 
     fn push_map_play_rules_edit_dialog(
@@ -65158,6 +65551,8 @@ version: "2.0.0"
         assert!(customize_texts.contains(&"□ Hide Banned Blocks"));
         assert!(customize_texts.contains(&"□ Banned Blocks As Whitelist"));
         assert!(customize_texts.contains(&"□ Banned Units As Whitelist"));
+        assert!(customize_texts.contains(&"Banned Blocks"));
+        assert!(customize_texts.contains(&"Banned Units"));
 
         let child = DesktopLauncher::map_play_child_dialog_rect(dialog);
         let content = DesktopLauncher::map_play_customize_content_rect(child);
@@ -65187,6 +65582,163 @@ version: "2.0.0"
                 .unwrap_or(false),
             "CustomRulesDialog hide banned blocks row should update Rules.hideBannedBlocks"
         );
+        let open_banned_blocks_center =
+            DesktopLauncher::map_play_customize_edit_button_rect(child, 2).center();
+        let open_banned_blocks =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::OpenBannedContent(
+                    super::DesktopBannedContentKind::Blocks,
+                ),
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                open_banned_blocks_center.x,
+                open_banned_blocks_center.y
+            ),
+            Some(open_banned_blocks)
+        );
+        launcher.dispatch_menu_route_shell_action(open_banned_blocks);
+        let banned_candidate = launcher
+            .map_play_banned_content_candidate_names(super::DesktopBannedContentKind::Blocks)
+            .first()
+            .cloned()
+            .expect("vanilla block list should provide a BannedContentDialog candidate");
+        let banned_frame = launcher.menu_graphics_frame_for_surface(3, render_viewport);
+        let banned_texts = banned_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("banned content dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(banned_texts.contains(&"Banned Blocks"));
+        assert!(banned_texts.contains(&"Unbanned Blocks"));
+        assert!(banned_texts.contains(&banned_candidate.as_str()));
+        let banned_dialog = DesktopLauncher::map_play_banned_content_dialog_rect(child);
+        let first_unbanned =
+            DesktopLauncher::map_play_banned_content_item_rect(banned_dialog, false, 0).center();
+        let toggle_first_block =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::ToggleBannedContent(
+                    super::DesktopBannedContentKind::Blocks,
+                    0,
+                ),
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                first_unbanned.x,
+                first_unbanned.y
+            ),
+            Some(toggle_first_block)
+        );
+        launcher.dispatch_menu_route_shell_action(toggle_first_block);
+        assert!(
+            launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| rules.banned_blocks.contains(&banned_candidate))
+                .unwrap_or(false),
+            "BannedContentDialog unbanned-side click should add the block to Rules.bannedBlocks"
+        );
+        let close_banned =
+            DesktopLauncher::map_play_banned_content_close_rect(banned_dialog).center();
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::CloseBannedContent,
+            ),
+        ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                close_banned.x,
+                close_banned.y
+            ),
+            None
+        );
+        let open_banned_units_center =
+            DesktopLauncher::map_play_customize_edit_button_rect(child, 3).center();
+        let open_banned_units =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::OpenBannedContent(
+                    super::DesktopBannedContentKind::Units,
+                ),
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                open_banned_units_center.x,
+                open_banned_units_center.y
+            ),
+            Some(open_banned_units)
+        );
+        launcher.dispatch_menu_route_shell_action(open_banned_units);
+        let banned_unit_candidate = launcher
+            .map_play_banned_content_candidate_names(super::DesktopBannedContentKind::Units)
+            .first()
+            .cloned()
+            .expect("vanilla unit list should provide a BannedContentDialog candidate");
+        let banned_units_frame = launcher.menu_graphics_frame_for_surface(4, render_viewport);
+        let banned_units_texts = banned_units_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("banned units dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(banned_units_texts.contains(&"Banned Units"));
+        assert!(banned_units_texts.contains(&"Unbanned Units"));
+        assert!(banned_units_texts.contains(&banned_unit_candidate.as_str()));
+        let first_unbanned_unit =
+            DesktopLauncher::map_play_banned_content_item_rect(banned_dialog, false, 0).center();
+        let toggle_first_unit =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::ToggleBannedContent(
+                    super::DesktopBannedContentKind::Units,
+                    0,
+                ),
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                first_unbanned_unit.x,
+                first_unbanned_unit.y
+            ),
+            Some(toggle_first_unit)
+        );
+        launcher.dispatch_menu_route_shell_action(toggle_first_unit);
+        assert!(
+            launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| rules.banned_units.contains(&banned_unit_candidate))
+                .unwrap_or(false),
+            "BannedContentDialog unbanned-side click should add the unit to Rules.bannedUnits"
+        );
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::CloseBannedContent,
+            ),
+        ));
         let wave_spacing_row = DesktopLauncher::map_play_customize_number_row_rect(content, 1);
         let wave_spacing_plus =
             DesktopLauncher::map_play_customize_number_button_rect(wave_spacing_row, true).center();

@@ -10,12 +10,38 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前短期优先级：原版 UI 还原优先，资源直接复用上游，黑/白屏修复优先；资源层优先复用 `D:/MDT/mindustry-upstream-v157.4` 里可直接沿用的原项目资源（如 assets、布局、文案、图标、字体），避免重复造轮子。
+- 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；资源层优先复用 `D:/MDT/mindustry-upstream-v157.4` 里可直接沿用的原项目资源（如 assets、布局、文案、图标、字体），避免重复造轮子。
 - 当前 fast synthetic background 只是过渡方案，最终必须接入 cached/batched 的原版 `MenuRenderer`。
 
 本文档用于约束后续 AI/开发者持续迁移，目标是防止漏迁移、跑偏目录、把工程做成孤立模块，或忘记最终要交付的是可整合、可联机、可游玩的 Rust 版 Mindustry/MDT。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 710. BannedContentDialog blocks/units 双栏最小闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **84.1%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版，而不是只做主菜单或孤立模块。
+- Java 对照依据：
+  - `CustomRulesDialog` 的 `@bannedblocks` / `@bannedunits` 会打开 `BannedContentDialog.show(...)`；
+  - 原版 `BannedContentDialog` 用已禁用/未禁用双栏展示内容，点击条目会在 `Rules.bannedBlocks` / `Rules.bannedUnits` 集合中移动。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopBannedContentKind` 与 `map_play_banned_content_dialog` 状态；
+    - `MapPlayDialog -> @customize` 右侧增加 `Banned Blocks` / `Banned Units` 入口，点击后打开双栏 banned content 子弹层；
+    - 子弹层按 blocks/units 分别展示 banned/unbanned 两栏，点击未禁用条目会写入 `Rules.banned_blocks` / `Rules.banned_units`，点击已禁用条目会移除；
+    - 调整 custom rules 内容区域，避免右侧按钮栏与数值/开关行命中区重叠，修复按钮点击串到规则开关的问题；
+    - 扩展现有 custom rules 测试，覆盖 blocks 与 units 两条 ban/unban 写回链路。
+  - `core/src/mindustry/game/rules.rs`
+    - `Rules::apply_json_str` 支持 `bannedBlocks` / `bannedUnits` 数组；
+    - copy/load JSON 现在包含 banned blocks/units 集合，避免通过剪贴板往返时丢失禁用列表。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore -- --nocapture`
+  - `cargo test -p mindustry-core rules_apply_json_str_updates_supported_top_level_fields -- --nocapture`
+- 仍未完成：
+  - `BannedContentDialog` 仍需继续补搜索框、block 分类过滤、add all/remove all、滚动列表与图标化内容按钮；
+  - `hide_banned_blocks` 仍需继续接到真实 block visibility/build menu 过滤链路；
+  - `CustomRulesDialog` 天气编辑、队伍规则、完整数值文本输入与 `Open In Editor` 真实 `beginEditMap` 仍未完成。
 
 ## 709. CustomRulesDialog banned policy 开关最小前端闭环
 

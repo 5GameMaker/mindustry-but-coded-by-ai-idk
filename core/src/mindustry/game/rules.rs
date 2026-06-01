@@ -242,6 +242,8 @@ struct RulesJsonPatch {
     hide_banned_blocks: Option<bool>,
     block_whitelist: Option<bool>,
     unit_whitelist: Option<bool>,
+    banned_blocks: Option<BTreeSet<String>>,
+    banned_units: Option<BTreeSet<String>>,
     core_capture: Option<bool>,
     wave_spacing: Option<f32>,
     initial_wave_spacing: Option<f32>,
@@ -292,6 +294,12 @@ impl RulesJsonPatch {
         }
         if let Some(value) = self.unit_whitelist {
             rules.unit_whitelist = value;
+        }
+        if let Some(value) = self.banned_blocks {
+            rules.banned_blocks = value;
+        }
+        if let Some(value) = self.banned_units {
+            rules.banned_units = value;
         }
         if let Some(value) = self.core_capture {
             rules.core_capture = value;
@@ -369,6 +377,8 @@ impl<'a> RulesJsonParser<'a> {
                 "hideBannedBlocks" => patch.hide_banned_blocks = self.parse_optional_bool()?,
                 "blockWhitelist" => patch.block_whitelist = self.parse_optional_bool()?,
                 "unitWhitelist" => patch.unit_whitelist = self.parse_optional_bool()?,
+                "bannedBlocks" => patch.banned_blocks = self.parse_optional_string_set()?,
+                "bannedUnits" => patch.banned_units = self.parse_optional_string_set()?,
                 "coreCapture" => patch.core_capture = self.parse_optional_bool()?,
                 "waveSpacing" => patch.wave_spacing = self.parse_optional_f32()?,
                 "initialWaveSpacing" => patch.initial_wave_spacing = self.parse_optional_f32()?,
@@ -497,6 +507,39 @@ impl<'a> RulesJsonParser<'a> {
             _ => {
                 self.skip_value()?;
                 Ok(None)
+            }
+        }
+    }
+
+    fn parse_optional_string_set(&mut self) -> Result<Option<BTreeSet<String>>, String> {
+        self.skip_ws();
+        if self.peek() != Some('[') {
+            self.skip_value()?;
+            return Ok(None);
+        }
+        self.expect('[')?;
+        self.skip_ws();
+        let mut values = BTreeSet::new();
+        if self.peek() == Some(']') {
+            self.index += 1;
+            return Ok(Some(values));
+        }
+        loop {
+            self.skip_ws();
+            match self.peek() {
+                Some('"') => {
+                    values.insert(self.parse_string()?);
+                }
+                _ => {
+                    self.skip_value()?;
+                }
+            }
+            self.skip_ws();
+            match self.next() {
+                Some(',') => continue,
+                Some(']') => return Ok(Some(values)),
+                Some(ch) => return Err(format!("expected ',' or ']', found '{ch}'")),
+                None => return Err("unterminated json string array".into()),
             }
         }
     }
@@ -1076,6 +1119,8 @@ mod tests {
                     "hideBannedBlocks": true,
                     "blockWhitelist": true,
                     "unitWhitelist": true,
+                    "bannedBlocks": ["router", "duo"],
+                    "bannedUnits": ["dagger"],
                     "coreCapture": true,
                     "waveSpacing": 7200.5,
                     "initialWaveSpacing": 600.25,
@@ -1103,6 +1148,9 @@ mod tests {
         assert!(rules.hide_banned_blocks);
         assert!(rules.block_whitelist);
         assert!(rules.unit_whitelist);
+        assert!(rules.banned_blocks.contains("router"));
+        assert!(rules.banned_blocks.contains("duo"));
+        assert!(rules.banned_units.contains("dagger"));
         assert!(rules.core_capture);
         assert_eq!(rules.wave_spacing, 7200.5);
         assert_eq!(rules.initial_wave_spacing, 600.25);
