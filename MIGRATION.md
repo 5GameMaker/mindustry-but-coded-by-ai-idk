@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 752. MapPlayDialog 子弹窗返回栈对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **88.6%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `MapPlayDialog` 的 help/customize/rules/weather/team rules 等界面以 `BaseDialog` 子弹窗方式逐层关闭；
+  - Rust 此前 `apply_menu_back_key()` 在 `CustomGame | Editor` route 中容易把 map card 或 route 过早关闭，导致返回层级不像原版。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_play_back_key_action()`，在 active route 为 `CustomGame | Editor` 且 `map_play_dialog_index` 存在时，按 help → custom rules edit → banned content → weather add → weather → team rules → customize root 的顺序逐层关闭；
+    - `apply_menu_back_key()` 在关闭 map card/route 前先分发 MapPlay 子弹窗关闭动作；
+    - `CloseMapPlayCustomize` 额外清理 weather add、team rules 和 selected team 状态，避免隐藏子弹窗状态泄漏；
+    - 新增 `desktop_launcher_map_play_back_key_closes_nested_child_dialogs_like_java_stack`，锁定 Java 风格返回栈行为。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_back_key_closes_nested_child_dialogs_like_java_stack --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop map_play --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop map_list --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop editor --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - MapPlay help/customize/rules 的具体视觉布局仍需继续按 Java 对齐；
+  - CustomRules 的字段分组、默认值展示、天气/队伍规则细节仍需继续接入真实 runtime 与原版 UI 层级。
+
 ## 751. EditorMapsDialog 地图信息返回层级对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -23142,6 +23142,10 @@ impl DesktopLauncher {
                 Some(DesktopMenuRouteShellAction::CancelEditorImportOverwrite);
             return true;
         }
+        if let Some(action) = self.map_play_back_key_action() {
+            self.dispatch_menu_route_shell_action(action);
+            return true;
+        }
         if matches!(
             self.active_menu_route,
             Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
@@ -23202,6 +23206,38 @@ impl DesktopLauncher {
             return true;
         }
         false
+    }
+
+    fn map_play_back_key_action(&self) -> Option<DesktopMenuRouteShellAction> {
+        if !matches!(
+            self.active_menu_route,
+            Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
+        ) {
+            return None;
+        }
+        let index = self.map_play_dialog_index?;
+        if self.map_play_mode_help_dialog_open {
+            return Some(DesktopMenuRouteShellAction::CloseMapPlayHelp);
+        }
+        if !self.map_play_customize_dialog_open {
+            return None;
+        }
+        let kind = if self.map_play_rules_edit_dialog_open {
+            DesktopMapCardActionKind::CloseCustomRulesEdit
+        } else if self.map_play_banned_content_dialog.is_some() {
+            DesktopMapCardActionKind::CloseBannedContent
+        } else if self.map_play_weather_add_dialog_open {
+            DesktopMapCardActionKind::CloseWeatherAdd
+        } else if self.map_play_weather_dialog_open {
+            DesktopMapCardActionKind::CloseWeather
+        } else if self.map_play_team_rules_dialog_open {
+            DesktopMapCardActionKind::CloseTeamRules
+        } else {
+            return Some(DesktopMenuRouteShellAction::CloseMapPlayCustomize);
+        };
+        Some(DesktopMenuRouteShellAction::MapCard(
+            DesktopMapCardAction::new(index, kind),
+        ))
     }
 
     fn dispatch_menu_action(&mut self, role: MenuButtonRole) -> DesktopMenuActionDispatch {
@@ -36885,6 +36921,9 @@ impl DesktopLauncher {
                 self.map_play_rules_edit_dialog_open = false;
                 self.map_play_banned_content_dialog = None;
                 self.map_play_weather_dialog_open = false;
+                self.map_play_weather_add_dialog_open = false;
+                self.map_play_team_rules_dialog_open = false;
+                self.map_play_team_rules_selected_team = None;
                 self.map_play_rules_error = None;
             }
             DesktopMenuRouteShellAction::NewEditorMap => {
@@ -71249,6 +71288,93 @@ repo: "Beta/Override"
         );
         launcher.dispatch_menu_route_shell_action(close_edit);
         assert!(!launcher.map_play_rules_edit_dialog_open);
+    }
+
+    #[test]
+    fn desktop_launcher_map_play_back_key_closes_nested_child_dialogs_like_java_stack() {
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), "Back Stack Arena".to_string());
+        let mut map = MapDescriptor::new(
+            "maps/default/back-stack-arena.msav",
+            180,
+            180,
+            tags,
+            false,
+            1,
+            158,
+        );
+        map.spawns = 1;
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.map_list_cards = vec![map];
+        launcher.dispatch_menu_action(MenuButtonRole::CustomGame);
+        let map_card_action = |kind| {
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(0, kind))
+        };
+        launcher.dispatch_menu_route_shell_action(map_card_action(
+            super::DesktopMapCardActionKind::OpenPlay,
+        ));
+        assert_eq!(launcher.map_play_dialog_index, Some(0));
+
+        launcher.dispatch_menu_route_shell_action(map_card_action(
+            super::DesktopMapCardActionKind::ShowModeHelp,
+        ));
+        assert!(launcher.map_play_mode_help_dialog_open);
+        assert!(launcher.apply_menu_back_key());
+        assert!(!launcher.map_play_mode_help_dialog_open);
+        assert_eq!(
+            launcher.map_play_dialog_index,
+            Some(0),
+            "Java MapPlayDialog back closes mode help without closing the map card"
+        );
+
+        launcher.dispatch_menu_route_shell_action(map_card_action(
+            super::DesktopMapCardActionKind::Customize,
+        ));
+        assert!(launcher.map_play_customize_dialog_open);
+        launcher.dispatch_menu_route_shell_action(map_card_action(
+            super::DesktopMapCardActionKind::OpenCustomRulesEdit,
+        ));
+        assert!(launcher.map_play_rules_edit_dialog_open);
+        assert!(launcher.apply_menu_back_key());
+        assert!(!launcher.map_play_rules_edit_dialog_open);
+        assert!(launcher.map_play_customize_dialog_open);
+
+        launcher.dispatch_menu_route_shell_action(map_card_action(
+            super::DesktopMapCardActionKind::OpenWeather,
+        ));
+        launcher.dispatch_menu_route_shell_action(map_card_action(
+            super::DesktopMapCardActionKind::OpenWeatherAdd,
+        ));
+        assert!(launcher.map_play_weather_dialog_open);
+        assert!(launcher.map_play_weather_add_dialog_open);
+        assert!(launcher.apply_menu_back_key());
+        assert!(!launcher.map_play_weather_add_dialog_open);
+        assert!(launcher.map_play_weather_dialog_open);
+        assert!(launcher.map_play_customize_dialog_open);
+        assert!(launcher.apply_menu_back_key());
+        assert!(!launcher.map_play_weather_dialog_open);
+        assert!(launcher.map_play_customize_dialog_open);
+
+        launcher.dispatch_menu_route_shell_action(map_card_action(
+            super::DesktopMapCardActionKind::OpenTeamRules,
+        ));
+        assert!(launcher.map_play_team_rules_dialog_open);
+        assert!(launcher.apply_menu_back_key());
+        assert!(!launcher.map_play_team_rules_dialog_open);
+        assert!(launcher.map_play_customize_dialog_open);
+
+        assert!(launcher.apply_menu_back_key());
+        assert!(!launcher.map_play_customize_dialog_open);
+        assert_eq!(launcher.map_play_dialog_index, Some(0));
+        assert!(launcher.apply_menu_back_key());
+        assert_eq!(launcher.map_play_dialog_index, None);
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::CustomGame)
+        );
+        assert!(launcher.apply_menu_back_key());
+        assert_eq!(launcher.active_menu_route, None);
     }
 
     #[test]
