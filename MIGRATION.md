@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 780. CustomRulesDialog Weather 自适应双列卡片布局
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **91.4%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `CustomRulesDialog.weatherDialog()` 的 weather entry 使用 `pane` 内的卡片式布局，并按屏宽计算列数；
+  - Rust 此前虽已取消 4 条截断，但仍是单列固定 48px 行，超过几条后视觉密度和原版差异较大。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Weather dialog 宽度改为更充分利用 MapPlay child 的可用空间；
+    - 新增 Weather entry 列数、列间距、行间距、卡片高度 helper；
+    - `map_play_weather_entry_rect()` 改为 1/2 列自适应网格；
+    - Weather 卡片从旧的单行 48px 改为 72px：标题/Always/Remove 在上层，duration/frequency 数值按钮在下层；
+    - 回归测试锁定 1280x720 下第 0/1 条同一行双列，第 2 条换行，第 5 条仍可渲染和命中。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_weather_dialog_renders_and_hits_all_entries_like_java_rebuild --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Weather 主列表仍需继续接 ScrollPane/scroll offset/clip，才能完整覆盖大量条目；
+  - Weather 卡片内部还可继续向 Java 的 duration/frequency 文案行和 text field 形态靠拢；
+  - 完整客户端可玩性和联机 smoke test 仍未达成。
+
 ## 779. CustomRulesDialog Weather 条目与 Always 文案对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

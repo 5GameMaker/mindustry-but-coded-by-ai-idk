@@ -32641,7 +32641,7 @@ impl DesktopLauncher {
     }
 
     fn map_play_weather_dialog_rect(child: RenderRect) -> RenderRect {
-        let width = (child.width - 72.0).clamp(480.0, 660.0);
+        let width = (child.width - 36.0).clamp(480.0, 660.0);
         let height = (child.height - 96.0).clamp(300.0, 420.0);
         RenderRect::new(
             child.center().x - width * 0.5,
@@ -32655,25 +32655,67 @@ impl DesktopLauncher {
         RenderRect::new(dialog.x + 18.0, dialog.y + 16.0, 112.0, 36.0)
     }
 
+    fn map_play_weather_entry_columns(dialog: RenderRect) -> usize {
+        if dialog.width >= 560.0 {
+            2
+        } else {
+            1
+        }
+    }
+
+    fn map_play_weather_entry_column_gap() -> f32 {
+        8.0
+    }
+
+    fn map_play_weather_entry_row_gap() -> f32 {
+        10.0
+    }
+
+    fn map_play_weather_entry_height() -> f32 {
+        72.0
+    }
+
     fn map_play_weather_entry_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let columns = Self::map_play_weather_entry_columns(dialog);
+        let column = index % columns;
+        let row = index / columns;
+        let column_gap = Self::map_play_weather_entry_column_gap();
+        let entry_width =
+            (dialog.width - 44.0 - column_gap * columns.saturating_sub(1) as f32) / columns as f32;
+        let entry_height = Self::map_play_weather_entry_height();
         RenderRect::new(
-            dialog.x + 22.0,
-            dialog.y + dialog.height - 78.0 - index as f32 * 58.0,
-            dialog.width - 44.0,
-            48.0,
+            dialog.x + 22.0 + column as f32 * (entry_width + column_gap),
+            dialog.y + dialog.height
+                - 92.0
+                - row as f32 * (entry_height + Self::map_play_weather_entry_row_gap()),
+            entry_width,
+            entry_height,
         )
     }
 
     fn map_play_weather_entry_remove_rect(row: RenderRect) -> RenderRect {
-        RenderRect::new(row.right() - 34.0, row.y + 8.0, 26.0, 26.0)
+        RenderRect::new(row.right() - 34.0, row.y + row.height - 34.0, 26.0, 26.0)
     }
 
     fn map_play_weather_entry_always_rect(row: RenderRect) -> RenderRect {
-        RenderRect::new(row.right() - 126.0, row.y + 8.0, 84.0, 26.0)
+        let width = if row.width < 420.0 { 86.0 } else { 96.0 };
+        RenderRect::new(
+            row.right() - 34.0 - 8.0 - width,
+            row.y + row.height - 34.0,
+            width,
+            26.0,
+        )
     }
 
     fn map_play_weather_entry_number_rect(row: RenderRect, index: usize) -> RenderRect {
-        RenderRect::new(row.x + 10.0 + index as f32 * 76.0, row.y + 6.0, 70.0, 20.0)
+        let gap = 6.0;
+        let width = ((row.width - 20.0 - 3.0 * gap) / 4.0).clamp(46.0, 70.0);
+        RenderRect::new(
+            row.x + 10.0 + index as f32 * (width + gap),
+            row.y + 8.0,
+            width,
+            22.0,
+        )
     }
 
     fn map_play_weather_entry_number_button_rect(field: RenderRect, increase: bool) -> RenderRect {
@@ -73292,6 +73334,19 @@ repo: "Beta/Override"
         let dialog = DesktopLauncher::map_card_dialog_rect_for_panel(panel);
         let child = DesktopLauncher::map_play_child_dialog_rect(dialog);
         let weather_dialog = DesktopLauncher::map_play_weather_dialog_rect(child);
+        let first_entry_row = DesktopLauncher::map_play_weather_entry_rect(weather_dialog, 0);
+        let second_entry_row = DesktopLauncher::map_play_weather_entry_rect(weather_dialog, 1);
+        let third_entry_row = DesktopLauncher::map_play_weather_entry_rect(weather_dialog, 2);
+        assert!(
+            second_entry_row.x > first_entry_row.x,
+            "Java CustomRulesDialog uses more than one weather column when the screen is wide enough"
+        );
+        assert!((second_entry_row.y - first_entry_row.y).abs() < 0.01);
+        assert!(
+            third_entry_row.y < first_entry_row.y,
+            "weather entry layout should wrap to the next row after filling the adaptive columns"
+        );
+        assert!(first_entry_row.height > 48.0);
         let weather_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
         let weather_texts = weather_frame
             .bundle
