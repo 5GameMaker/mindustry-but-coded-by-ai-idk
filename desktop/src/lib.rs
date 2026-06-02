@@ -29130,11 +29130,14 @@ impl DesktopLauncher {
         source: impl AsRef<Path>,
     ) -> Result<DesktopLoadGameImportResult, String> {
         let source = source.as_ref();
-        let bytes = std::fs::read(source).map_err(|error| {
-            format!("failed to read imported save {}: {error}", source.display())
+        let source_display = source.display().to_string();
+        let bytes = std::fs::read(source).map_err(|_| {
+            let message = self.format_bundle_text("save.import.fail", &[source_display.as_str()]);
+            self.load_game_error = Some(message.clone());
+            message
         })?;
-        let meta = read_deflated_save_meta(bytes.as_slice()).map_err(|error| {
-            let message = format!("@save.import.invalid: {error}");
+        let meta = read_deflated_save_meta(bytes.as_slice()).map_err(|_error| {
+            let message = "@save.import.invalid".to_string();
             self.load_game_error = Some(message.clone());
             message
         })?;
@@ -29144,16 +29147,20 @@ impl DesktopLauncher {
         }
         let destination = self.next_load_game_slot_file();
         if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| {
-                format!("failed to create save dir {}: {error}", parent.display())
+            let parent_display = parent.display().to_string();
+            std::fs::create_dir_all(parent).map_err(|_| {
+                let message =
+                    self.format_bundle_text("save.import.fail", &[parent_display.as_str()]);
+                self.load_game_error = Some(message.clone());
+                message
             })?;
         }
-        std::fs::write(&destination, &bytes).map_err(|error| {
-            format!(
-                "failed to import save {} -> {}: {error}",
-                source.display(),
-                destination.display()
-            )
+        let destination_display = destination.display().to_string();
+        std::fs::write(&destination, &bytes).map_err(|_| {
+            let message =
+                self.format_bundle_text("save.import.fail", &[destination_display.as_str()]);
+            self.load_game_error = Some(message.clone());
+            message
         })?;
         let imported_name = source
             .file_stem()
@@ -29165,6 +29172,7 @@ impl DesktopLauncher {
             SaveSlotRecord::new(destination.clone()).name_setting_key(),
             imported_name,
         );
+        self.load_game_error = None;
         self.refresh_load_game_slots();
         let result = DesktopLoadGameImportResult {
             source: source.display().to_string(),
@@ -79208,6 +79216,29 @@ repo: "Beta/Override"
         assert_eq!(request.extension, "msav");
         assert_eq!(launcher.last_load_game_import_request, Some(request));
 
+        let invalid_source = root.join("invalid.msav");
+        std::fs::write(&invalid_source, b"not a valid save")
+            .expect("invalid import fixture should write");
+        let invalid_error = launcher
+            .import_load_game_save_file(&invalid_source)
+            .expect_err("invalid save should be rejected");
+        assert_eq!(invalid_error, "@save.import.invalid");
+        assert_eq!(
+            launcher.load_game_error.as_deref(),
+            Some("@save.import.invalid")
+        );
+        assert!(!invalid_error.contains(':'));
+
+        let missing_source = root.join("missing.msav");
+        let missing_display = missing_source.display().to_string();
+        let expected_missing_error =
+            launcher.format_bundle_text("save.import.fail", &[missing_display.as_str()]);
+        let missing_error = launcher
+            .import_load_game_save_file(&missing_source)
+            .expect_err("missing imported save should surface a user import failure");
+        assert_eq!(missing_error, expected_missing_error);
+        assert!(!missing_error.contains("failed to read imported save"));
+
         let mut imported_tags = BTreeMap::new();
         imported_tags.insert("mapname".into(), "Imported Map".into());
         imported_tags.insert("saved".into(), "999".into());
@@ -79224,6 +79255,7 @@ repo: "Beta/Override"
         assert_eq!(imported.map_name.as_deref(), Some("Imported Map"));
         assert_eq!(imported.timestamp, 999);
         assert_eq!(imported.status, "imported");
+        assert_eq!(launcher.load_game_error, None);
         assert!(save_dir.join("0.msav").exists());
         assert_eq!(launcher.last_load_game_import_result, Some(imported));
         assert_eq!(launcher.load_game_slots.len(), 3);

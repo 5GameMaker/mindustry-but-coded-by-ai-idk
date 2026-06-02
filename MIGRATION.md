@@ -17,6 +17,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 777. LoadDialog 导入失败文案对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **91.1%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `LoadDialog` 对无效导入显示 `@save.import.invalid`，IO 类失败显示 `@save.import.fail`，不会把解析异常细节拼进用户界面；
+  - Rust 此前返回 `@save.import.invalid: {error}` 或英文调试字符串。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 补齐 `save.import.fail` 的 EN、zh_CN、zh_TW 内置文案和格式化测试。
+  - `desktop/src/lib.rs`
+    - 导入解析失败改为纯 `@save.import.invalid`；
+    - 读源文件、建目录、写目标文件失败改为格式化 `save.import.fail` 用户文案，并同步写入 `load_game_error`；
+    - 成功导入后清除旧导入错误；
+    - 扩展 LoadDialog 导入测试，覆盖 invalid save、missing source 和成功导入清错。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle_entries_cover_menu_fragment_buttons --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core upstream_menu_bundle_locale_entries_cover_chinese_menu_fragment_buttons --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Settings 设置项 label 本地化仍需继续；
+  - 其他 Load/Save 细节仍需持续对照 Java；
+  - 完整客户端可玩性和联机 smoke test 仍未达成。
+
 ## 776. SettingsMenuDialog description tooltip 对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

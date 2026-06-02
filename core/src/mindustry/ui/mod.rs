@@ -417,6 +417,10 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("save.delete.confirm", "Are you sure you want to delete this save?"),
     ("save.import", "Import Save"),
     ("save.import.invalid", "[accent]This save is invalid!"),
+    (
+        "save.import.fail",
+        "[scarlet]Failed to import save: [accent]{0}",
+    ),
     ("save.new", "New Save"),
     ("save.newslot", "Save name:"),
     (
@@ -879,6 +883,7 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES: &[(&str, &str)] = &[
     ("save.delete.confirm", "确定要删除这个存档吗？"),
     ("save.import", "导入存档"),
     ("save.import.invalid", "[accent]此存档无效！"),
+    ("save.import.fail", "[scarlet]导入存档失败：[accent]{0}"),
     ("save.new", "新的存档"),
     ("save.newslot", "存档名称："),
     ("save.nocampaign", "无法导入战役模式的独立存档文件。"),
@@ -1344,6 +1349,7 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
     ("save.delete.confirm", "您確定要刪除這個存檔嗎？"),
     ("save.import", "匯入存檔"),
     ("save.import.invalid", "[accent]這是個無效的存檔！"),
+    ("save.import.fail", "[crimson]無法匯入存檔：[accent]{0}"),
     ("save.new", "新存檔"),
     ("save.newslot", "存檔名稱："),
     ("save.nocampaign", "無法匯入單一戰役中的存檔。"),
@@ -1633,6 +1639,11 @@ mod tests {
             upstream_bundle_en_value("setting.alwaysmusic.description"),
             Some("When enabled, music will always play on loop in-game.\\nWhen disabled, it only plays at random intervals.")
         );
+        assert_eq!(
+            upstream_menu_bundle_format_for_locale("en", "save.import.fail", &["broken.msav"])
+                .as_deref(),
+            Some("[scarlet]Failed to import save: [accent]broken.msav")
+        );
         assert_eq!(upstream_bundle_en_value("missing.menu.key"), None);
     }
 
@@ -1790,6 +1801,11 @@ mod tests {
             Some("在UI内部添加边距。有助于圆角屏或刘海屏的显示效果。")
         );
         assert_eq!(
+            upstream_menu_bundle_format_for_locale("zh_CN", "save.import.fail", &["broken.msav"])
+                .as_deref(),
+            Some("[scarlet]导入存档失败：[accent]broken.msav")
+        );
+        assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "keybind.chat.name"),
             Some("聊天")
         );
@@ -1888,6 +1904,11 @@ mod tests {
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_TW", "setting.uiscale.description"),
             Some("需要重新啟動遊戲以更改大小")
+        );
+        assert_eq!(
+            upstream_menu_bundle_format_for_locale("zh_TW", "save.import.fail", &["broken.msav"])
+                .as_deref(),
+            Some("[crimson]無法匯入存檔：[accent]broken.msav")
         );
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_TW", "server.invalidaddress"),
