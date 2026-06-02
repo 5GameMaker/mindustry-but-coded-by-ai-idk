@@ -254,6 +254,7 @@ const MAP_LIST_SETTING_PRIORITIZE_MODDED: &str = "editorprioritizemodded";
 const MAP_LIST_SETTING_FILTER_PLANETS: &str = "editorfilterplanets";
 const ROUTE_BACK_BUTTON_WIDTH: f32 = 210.0;
 const ROUTE_BACK_BUTTON_HEIGHT: f32 = 64.0;
+const MODS_ROUTE_MOD_SHORT_DESCRIPTION_MAX_LEN: usize = 40;
 const PAUSE_OVERLAY_PANEL_WIDTH: f32 = 304.0;
 const PAUSE_OVERLAY_PANEL_TOP_MARGIN: f32 = 54.0;
 const PAUSE_OVERLAY_TITLE_HEIGHT: f32 = 34.0;
@@ -30827,7 +30828,7 @@ impl DesktopLauncher {
     }
 
     fn join_add_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
-        let width = (panel.width * 0.58).clamp(360.0, 520.0);
+        let width = (panel.width * 0.58).clamp(474.0, 520.0);
         let height = 214.0;
         RenderRect::new(
             panel.center().x - width * 0.5,
@@ -30891,18 +30892,18 @@ impl DesktopLauncher {
         let total = width * 2.0 + gap;
         RenderRect::new(
             dialog.center().x - total * 0.5 + index as f32 * (width + gap),
-            dialog.y + 22.0,
+            dialog.y + 18.0,
             width,
-            46.0,
+            60.0,
         )
     }
 
     fn join_add_dialog_text_rect(dialog: RenderRect) -> RenderRect {
         RenderRect::new(
             dialog.x + 120.0,
-            dialog.y + dialog.height - 110.0,
-            dialog.width - 154.0,
-            42.0,
+            dialog.y + dialog.height - 116.0,
+            320.0,
+            54.0,
         )
     }
 
@@ -48345,6 +48346,11 @@ impl DesktopLauncher {
         )
     }
 
+    fn mods_route_mod_card_icon_rect(card: RenderRect) -> RenderRect {
+        let size = (card.height - 10.0).max(28.0);
+        RenderRect::new(card.x + 8.0, card.y + 5.0, size, size)
+    }
+
     fn mods_route_mod_card_action_button_rect(card: RenderRect, action_index: usize) -> RenderRect {
         let size = 24.0;
         let gap = 6.0;
@@ -48672,6 +48678,18 @@ impl DesktopLauncher {
             "@mods.browser.add"
         }));
         summary_parts.join(" | ")
+    }
+
+    fn mods_route_mod_short_description_at_index(&self, index: usize) -> Option<String> {
+        let description = self
+            .mods_route_mod_meta_at_index(index)?
+            .description
+            .as_deref()?
+            .replace('\r', " ")
+            .replace('\n', " ");
+        let description = description.trim();
+        (!description.is_empty())
+            .then(|| schematic_text_snippet(description, MODS_ROUTE_MOD_SHORT_DESCRIPTION_MAX_LEN))
     }
 
     fn mods_browser_empty_state_texts(&self) -> (String, String) {
@@ -50154,6 +50172,8 @@ impl DesktopLauncher {
             }
             for (visible_index, index) in filtered_indices.into_iter().take(6).enumerate() {
                 let card = Self::mods_route_mod_card_rect_for_panel(panel, visible_index);
+                let icon = Self::mods_route_mod_card_icon_rect(card);
+                let text_x = icon.right() + 10.0;
                 let display_name = self
                     .mods_route_mod_display_name_at_index(index)
                     .unwrap_or("@mods.unknown");
@@ -50164,27 +50184,56 @@ impl DesktopLauncher {
                     0.0,
                     Layer::END_PIXELED + 0.030 + visible_index as f32 * 0.001,
                 ));
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_drawable_symbol("nomap"),
+                    icon,
+                    [1.0, 1.0, 1.0, 0.78],
+                    0.0,
+                    Layer::END_PIXELED + 0.0305 + visible_index as f32 * 0.001,
+                ));
+                pass.push(RenderCommand::stroke_rect(
+                    icon,
+                    [0.56, 0.72, 0.86, 0.88],
+                    1.0,
+                    Layer::END_PIXELED + 0.0306 + visible_index as f32 * 0.001,
+                ));
                 pass.push(RenderCommand::draw_text_styled(
                     display_name.to_string(),
-                    RenderPoint::new(card.center().x, card.center().y - 8.0),
+                    RenderPoint::new(text_x, card.y + 35.0),
                     [0.94, 0.98, 1.0, 1.0],
                     12.0,
                     0.0,
-                    RenderTextStyle::new(RenderTextAlign::Center)
+                    RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_outline(true)
                         .with_integer_position(true),
                     Layer::END_PIXELED + 0.031 + visible_index as f32 * 0.001,
                 ));
+                if let Some(short_description) =
+                    self.mods_route_mod_short_description_at_index(index)
+                {
+                    pass.push(RenderCommand::draw_text_styled(
+                        short_description,
+                        RenderPoint::new(text_x, card.y + 22.0),
+                        [0.72, 0.82, 0.9, 1.0],
+                        9.5,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.032 + visible_index as f32 * 0.001,
+                    ));
+                }
                 pass.push(RenderCommand::draw_text_styled(
                     self.mods_route_mod_summary_at_index(index),
-                    RenderPoint::new(card.center().x, card.center().y + 12.0),
-                    [0.72, 0.82, 0.9, 1.0],
-                    10.0,
+                    RenderPoint::new(text_x, card.y + 10.0),
+                    [0.62, 0.72, 0.80, 1.0],
+                    8.5,
                     0.0,
-                    RenderTextStyle::new(RenderTextAlign::Center)
+                    RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_integer_position(true),
-                    Layer::END_PIXELED + 0.032 + visible_index as f32 * 0.001,
+                    Layer::END_PIXELED + 0.033 + visible_index as f32 * 0.001,
                 ));
                 let enabled = self.mods_route_mod_enabled_at_index(index);
                 let supported = self.mods_route_mod_is_supported_at_index(index);
@@ -66618,6 +66667,66 @@ repo: "Beta/Override"
         );
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseRoute);
         assert_eq!(launcher.active_menu_route, None);
+    }
+
+    #[test]
+    fn desktop_launcher_mods_route_renders_java_like_card_icon_and_short_description() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.last_mods_directory_mod_names = vec!["alpha".into()];
+        launcher.last_mods_directory_mod_roots = vec!["C:/mods/alpha pack".into()];
+        launcher.last_mods_directory_mod_metas = vec![ModMetadata::from_source_text(
+            "alpha",
+            Some("mod.hjson"),
+            r#"
+name: alpha
+displayName: "Alpha Pack"
+author: "Alpha Author"
+version: "1.0.0"
+description: "Alpha fixture mod."
+"#,
+        )];
+        launcher.last_mods_directory_merge_count = Some(1);
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let card = DesktopLauncher::mods_route_mod_card_rect_for_panel(panel, 0);
+        let icon_rect = DesktopLauncher::mods_route_mod_card_icon_rect(card);
+        let short_description = launcher
+            .mods_route_mod_short_description_at_index(0)
+            .expect("alpha mod should expose a short description");
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods route should render a frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let texts = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let icon_symbol = DesktopLauncher::settings_drawable_symbol("nomap");
+        assert!(commands.iter().any(|command| match command {
+            RenderCommand::DrawSprite { symbol, rect, .. } => {
+                symbol == &icon_symbol && rect == &icon_rect
+            }
+            _ => false,
+        }));
+        assert!(texts.contains(&"Alpha Pack"));
+        assert!(texts.contains(&short_description.as_str()));
+        assert!(texts.contains(&"Back"));
     }
 
     #[test]
@@ -84851,6 +84960,19 @@ repo: "Beta/Override"
 
         let dialog = DesktopLauncher::join_add_dialog_rect_for_panel(panel);
         let field = DesktopLauncher::join_add_dialog_text_rect(dialog);
+        assert_eq!(field.width, 320.0);
+        assert_eq!(field.height, 54.0);
+        assert_eq!(
+            field.x,
+            dialog.x + 120.0,
+            "Java JoinDialog Add Server field sits to the right of @joingame.ip label"
+        );
+        let cancel_rect = DesktopLauncher::join_add_dialog_button_rect(dialog, 0);
+        let ok_rect = DesktopLauncher::join_add_dialog_button_rect(dialog, 1);
+        assert_eq!(cancel_rect.width, 140.0);
+        assert_eq!(cancel_rect.height, 60.0);
+        assert_eq!(ok_rect.width, 140.0);
+        assert_eq!(ok_rect.height, 60.0);
         let ok = DesktopLauncher::join_add_dialog_button_rect(dialog, 1).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(

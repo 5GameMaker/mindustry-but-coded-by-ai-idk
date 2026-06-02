@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 784. JoinDialog Add Server 输入框尺寸对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **91.8%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `JoinDialog` 的 Add Server 子弹窗 IP 输入框为 `320f x 54f`，底部按钮默认 `140f x 60f`；
+  - Rust 此前输入框高度 42、按钮高度 46，视觉和点击区域偏瘦。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Join Add Server dialog 最小宽度提高到可容纳 `@joingame.ip` label + 320px 输入框；
+    - 输入框固定为 `320 x 54`，位于 label 右侧；
+    - Cancel/OK 按钮固定为 `140 x 60`；
+    - 扩展 Join skeleton 测试，锁定输入框与按钮尺寸、位置和 Focus/Confirm 命中。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_persists_saved_servers_like_java_settings_json --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - LoadDialog 模式筛选 tooltip 与 Editor 模式按钮仍需对齐；
+  - ModsDialog 卡片缩略图/短描述仍需继续；
+  - 完整客户端可玩性和联机 smoke test 仍未达成。
+
 ## 783. JoinDialog 保存服务器卡片动作按钮对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
