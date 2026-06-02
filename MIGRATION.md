@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 745. Native OpenGL 候选策略补齐 legacy 兼容分支
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **88.1%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- Java 对照依据：
+  - `desktop/src/mindustry/desktop/DesktopLauncher.java` 对 Intel GPU 走保守分支：关闭 core profile，只尝试 `2.1 / 2.0`；
+  - macOS 保持 `4.1 / 3.2 / 2.1 / 2.0`；
+  - 其他平台保持 `4.6 / 4.5 / 4.4 / 4.1 / 3.3 / 3.2 / 3.1 / 2.1 / 2.0`；
+  - `-gl` 显式指定仍覆盖为单一版本，`-coreGl` / `-compatibilityGl` 切换 profile。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - 新增 `desktop_native_opengl_default_context_candidates_for_platform(...)`，把 macOS、现代高版本、legacy 2.x 兼容分支拆成可测试策略；
+    - `desktop_native_opengl_context_candidates_from_args(...)` 在未显式 `--gl` 时也会把 `--compatibilityGl` 应用到高版本候选；
+    - Windows 默认走 legacy-first，`MINDUSTRY_DESKTOP_LEGACY_GL=0/modern/off` 可关闭；`MINDUSTRY_DESKTOP_GPU_VENDOR=intel` 会触发 legacy hint；
+    - 显式 `--gl <major.minor>` 仍保持最高优先级，并按 `--coreGl` / `--compatibilityGl` 使用指定 profile。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime native_opengl_context_candidates -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime native_opengl -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 仍需把 Java `IntelGpuCheck.wasIntel()` 的真实硬件/驱动检测迁为 Rust 原生实现，当前先用 Windows 默认 legacy 与 env/vendor hint 收敛黑屏风险；
+  - 菜单背景还未迁到 Java `MenuRenderer.generate/cache/render` 等价缓存模型；
+  - 输入坐标唯一入口仍需继续加回归，避免未来再次出现点击反转。
+
 ## 744. Mods 本地详情补齐 Repo 与 Reinstall 动作
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

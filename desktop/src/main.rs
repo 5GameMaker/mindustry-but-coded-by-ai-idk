@@ -707,14 +707,29 @@ impl DesktopNativeOpenGlContextCandidate {
 }
 
 #[cfg(feature = "opengl-native-runtime")]
-fn desktop_native_opengl_default_context_candidates() -> Vec<DesktopNativeOpenGlContextCandidate> {
+fn desktop_native_opengl_default_context_candidates_for_platform(
+    is_macos: bool,
+    prefer_legacy: bool,
+    high_version_profile: DesktopNativeOpenGlContextProfile,
+) -> Vec<DesktopNativeOpenGlContextCandidate> {
     let mut candidates = Vec::new();
-    if cfg!(target_os = "macos") {
+    if prefer_legacy {
+        for (major, minor) in [(2, 1), (2, 0)] {
+            candidates.push(DesktopNativeOpenGlContextCandidate::versioned(
+                major,
+                minor,
+                DesktopNativeOpenGlContextProfile::Compatibility,
+            ));
+        }
+        candidates.push(DesktopNativeOpenGlContextCandidate::generic());
+        return candidates;
+    }
+    if is_macos {
         for (major, minor) in [(4, 1), (3, 2)] {
             candidates.push(DesktopNativeOpenGlContextCandidate::versioned(
                 major,
                 minor,
-                DesktopNativeOpenGlContextProfile::Core,
+                high_version_profile,
             ));
         }
     } else {
@@ -722,7 +737,7 @@ fn desktop_native_opengl_default_context_candidates() -> Vec<DesktopNativeOpenGl
             candidates.push(DesktopNativeOpenGlContextCandidate::versioned(
                 major,
                 minor,
-                DesktopNativeOpenGlContextProfile::Core,
+                high_version_profile,
             ));
         }
     }
@@ -735,6 +750,41 @@ fn desktop_native_opengl_default_context_candidates() -> Vec<DesktopNativeOpenGl
     }
     candidates.push(DesktopNativeOpenGlContextCandidate::generic());
     candidates
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_opengl_default_context_candidates(
+    high_version_profile: DesktopNativeOpenGlContextProfile,
+) -> Vec<DesktopNativeOpenGlContextCandidate> {
+    desktop_native_opengl_default_context_candidates_for_platform(
+        cfg!(target_os = "macos"),
+        desktop_native_opengl_prefers_legacy_context(),
+        high_version_profile,
+    )
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_parse_bool_env_flag(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" | "legacy" => Some(true),
+        "0" | "false" | "no" | "off" | "modern" => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_opengl_prefers_legacy_context() -> bool {
+    if let Ok(value) = std::env::var("MINDUSTRY_DESKTOP_LEGACY_GL") {
+        if let Some(enabled) = desktop_native_parse_bool_env_flag(&value) {
+            return enabled;
+        }
+    }
+    if let Ok(value) = std::env::var("MINDUSTRY_DESKTOP_GPU_VENDOR") {
+        if value.to_ascii_lowercase().contains("intel") {
+            return true;
+        }
+    }
+    cfg!(target_os = "windows")
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -786,7 +836,7 @@ where
         ];
     }
 
-    desktop_native_opengl_default_context_candidates()
+    desktop_native_opengl_default_context_candidates(profile)
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -3311,58 +3361,87 @@ mod tests {
 
     #[test]
     fn native_opengl_context_candidates_follow_upstream_version_fallback_order() {
-        let candidates = desktop_native_opengl_context_candidates_from_args(["mindustry-desktop"]);
-
-        if cfg!(target_os = "macos") {
-            assert_eq!(
-                candidates.first().copied(),
-                Some(DesktopNativeOpenGlContextCandidate::versioned(
-                    4,
-                    1,
-                    DesktopNativeOpenGlContextProfile::Core
-                ))
-            );
-            assert!(
-                candidates.contains(&DesktopNativeOpenGlContextCandidate::versioned(
-                    3,
-                    2,
-                    DesktopNativeOpenGlContextProfile::Core
-                ))
-            );
-        } else {
-            assert_eq!(
-                candidates.first().copied(),
-                Some(DesktopNativeOpenGlContextCandidate::versioned(
-                    4,
-                    6,
-                    DesktopNativeOpenGlContextProfile::Core
-                ))
-            );
-            assert!(
-                candidates.contains(&DesktopNativeOpenGlContextCandidate::versioned(
-                    3,
-                    3,
-                    DesktopNativeOpenGlContextProfile::Core
-                ))
-            );
-        }
+        let macos = desktop_native_opengl_default_context_candidates_for_platform(
+            true,
+            false,
+            DesktopNativeOpenGlContextProfile::Core,
+        );
+        assert_eq!(
+            macos.first().copied(),
+            Some(DesktopNativeOpenGlContextCandidate::versioned(
+                4,
+                1,
+                DesktopNativeOpenGlContextProfile::Core
+            ))
+        );
         assert!(
-            candidates.contains(&DesktopNativeOpenGlContextCandidate::versioned(
+            macos.contains(&DesktopNativeOpenGlContextCandidate::versioned(
+                3,
+                2,
+                DesktopNativeOpenGlContextProfile::Core
+            ))
+        );
+
+        let modern = desktop_native_opengl_default_context_candidates_for_platform(
+            false,
+            false,
+            DesktopNativeOpenGlContextProfile::Core,
+        );
+        assert_eq!(
+            modern.first().copied(),
+            Some(DesktopNativeOpenGlContextCandidate::versioned(
+                4,
+                6,
+                DesktopNativeOpenGlContextProfile::Core
+            ))
+        );
+        assert!(
+            modern.contains(&DesktopNativeOpenGlContextCandidate::versioned(
+                3,
+                3,
+                DesktopNativeOpenGlContextProfile::Core
+            ))
+        );
+        assert!(
+            modern.contains(&DesktopNativeOpenGlContextCandidate::versioned(
                 2,
                 1,
                 DesktopNativeOpenGlContextProfile::Compatibility
             ))
         );
         assert!(
-            candidates.contains(&DesktopNativeOpenGlContextCandidate::versioned(
+            modern.contains(&DesktopNativeOpenGlContextCandidate::versioned(
                 2,
                 0,
                 DesktopNativeOpenGlContextProfile::Compatibility
             ))
         );
         assert_eq!(
-            candidates.last().copied(),
+            modern.last().copied(),
             Some(DesktopNativeOpenGlContextCandidate::generic())
+        );
+
+        let legacy = desktop_native_opengl_default_context_candidates_for_platform(
+            false,
+            true,
+            DesktopNativeOpenGlContextProfile::Core,
+        );
+        assert_eq!(
+            legacy,
+            vec![
+                DesktopNativeOpenGlContextCandidate::versioned(
+                    2,
+                    1,
+                    DesktopNativeOpenGlContextProfile::Compatibility
+                ),
+                DesktopNativeOpenGlContextCandidate::versioned(
+                    2,
+                    0,
+                    DesktopNativeOpenGlContextProfile::Compatibility
+                ),
+                DesktopNativeOpenGlContextCandidate::generic()
+            ],
+            "Java Windows/Intel compatibility branch only tries 2.x compatibility contexts"
         );
     }
 
@@ -3374,6 +3453,12 @@ mod tests {
             "Java -gl expects <major>.<minor>"
         );
         assert_eq!(desktop_native_parse_gl_version("bad"), None);
+        assert_eq!(
+            desktop_native_parse_bool_env_flag("legacy"),
+            Some(true),
+            "runtime env hint accepts an Intel/legacy-like value"
+        );
+        assert_eq!(desktop_native_parse_bool_env_flag("modern"), Some(false));
 
         let explicit = desktop_native_opengl_context_candidates_from_args([
             "mindustry-desktop",
@@ -3407,6 +3492,21 @@ mod tests {
                 3,
                 DesktopNativeOpenGlContextProfile::Core
             ))
+        );
+
+        let compatibility_default = desktop_native_opengl_default_context_candidates_for_platform(
+            false,
+            false,
+            DesktopNativeOpenGlContextProfile::Compatibility,
+        );
+        assert_eq!(
+            compatibility_default.first().copied(),
+            Some(DesktopNativeOpenGlContextCandidate::versioned(
+                4,
+                6,
+                DesktopNativeOpenGlContextProfile::Compatibility
+            )),
+            "Java -compatibilityGl flips the profile without requiring an explicit -gl version"
         );
     }
 
