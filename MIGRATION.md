@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 743. BannedContentDialog 补齐 Blocks 分类筛选
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **87.9%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `core/src/mindustry/editor/BannedContentDialog.java` 在 `ContentType.block` 时渲染 `Category.values()` 分类按钮；
+  - 点击同一分类会清空 `selectedCategory`；
+  - 分类过滤只作用于 Blocks，过滤条件等价于 `((Block)content).category == selectedCategory`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 为 BannedContentDialog 条目增加 `category` 字段，并为 launcher 增加 `map_play_banned_content_selected_category` 状态；
+    - Blocks 弹窗在搜索栏下方渲染 `Category::ALL` 分类 icon toggle，点击后过滤候选列表并重置滚动；
+    - 再次点击已选分类可清空过滤，Units 仍保持无分类按钮；
+    - hit-test、渲染、批量添加/移除与滚动列表共用同一过滤模型；
+    - 由于 core 内容模型暂未携带 Java `Block.category` 字段，本轮在 desktop 层用 `BlockDef` 变体做过渡映射。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_banned_content_dialog_search_addall_and_scrolls --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop map_play --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 后续应把 Java `Block.category` 真实字段迁入 core 内容模型，替换 desktop 层 `BlockDef` 过渡映射；
+  - BannedContentDialog 条目仍需接近 Java 的 block/unit `uiIcon`、tooltip、grid pane 与 Scene2D 皮肤细节；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 742. MapListDialog 模式筛选遍历 `Gamemode.all`
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -98,7 +98,7 @@ use mindustry_core::mindustry::net::{
     StateSnapshotCallPacket,
 };
 use mindustry_core::mindustry::r#type::{
-    ItemStack, ParticleDrawParticlesPlan, ParticleNoiseLayerPlan, RainDrawPlan, Sector,
+    Category, ItemStack, ParticleDrawParticlesPlan, ParticleNoiseLayerPlan, RainDrawPlan, Sector,
     SectorPreset, SplashDrawPlan, UnitDrawStage, Weapon, WeatherEntry, WeatherState,
     UNIT_SHADOW_TX, UNIT_SHADOW_TY,
 };
@@ -1313,6 +1313,7 @@ pub enum DesktopBannedContentKind {
 struct DesktopBannedContentEntry {
     name: String,
     label: String,
+    category: Option<Category>,
 }
 
 impl DesktopBannedContentKind {
@@ -1409,6 +1410,7 @@ pub enum DesktopMapCardActionKind {
     CloseBannedContent,
     FocusBannedContentSearch(DesktopBannedContentKind),
     ClearBannedContentSearch(DesktopBannedContentKind),
+    ToggleBannedContentCategory(Category),
     ToggleBannedContent(DesktopBannedContentKind, usize),
     AddAllBannedContent(DesktopBannedContentKind),
     RemoveAllBannedContent(DesktopBannedContentKind),
@@ -17710,6 +17712,7 @@ pub struct DesktopLauncher {
     pub map_play_banned_content_search: String,
     pub map_play_banned_content_search_focused: bool,
     pub map_play_banned_content_scroll_offset: usize,
+    pub map_play_banned_content_selected_category: Option<Category>,
     pub map_play_weather_dialog_open: bool,
     pub map_play_weather_add_dialog_open: bool,
     pub map_play_team_rules_dialog_open: bool,
@@ -18885,6 +18888,7 @@ impl DesktopLauncher {
             map_play_banned_content_search: String::new(),
             map_play_banned_content_search_focused: false,
             map_play_banned_content_scroll_offset: 0,
+            map_play_banned_content_selected_category: None,
             map_play_weather_dialog_open: false,
             map_play_weather_add_dialog_open: false,
             map_play_team_rules_dialog_open: false,
@@ -31616,6 +31620,18 @@ impl DesktopLauncher {
         RenderRect::new(search.right() - 34.0, search.y + 3.0, 28.0, 28.0)
     }
 
+    fn map_play_banned_content_category_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let width = 32.0;
+        let gap = 2.0;
+        let total = Category::ALL.len() as f32 * width + (Category::ALL.len() - 1) as f32 * gap;
+        RenderRect::new(
+            dialog.center().x - total * 0.5 + index as f32 * (width + gap),
+            dialog.y + dialog.height - 120.0,
+            width,
+            28.0,
+        )
+    }
+
     fn map_play_banned_content_add_all_rect(dialog: RenderRect, selected_side: bool) -> RenderRect {
         let column = Self::map_play_banned_content_item_rect(dialog, selected_side, 0);
         RenderRect::new(column.x, dialog.y + 62.0, column.width, 28.0)
@@ -31638,10 +31654,45 @@ impl DesktopLauncher {
         };
         RenderRect::new(
             x,
-            dialog.y + dialog.height - 154.0 - row_index as f32 * 28.0,
+            dialog.y + dialog.height - 168.0 - row_index as f32 * 26.0,
             column_width,
-            22.0,
+            20.0,
         )
+    }
+
+    fn map_play_banned_content_block_category(block: &BlockDef) -> Category {
+        match block {
+            BlockDef::Turret(_) => Category::Turret,
+            BlockDef::Production(_) | BlockDef::Ore(_) => Category::Production,
+            BlockDef::Distribution(_) | BlockDef::PayloadMassDriver(_) => Category::Distribution,
+            BlockDef::Liquid(_) => Category::Liquid,
+            BlockDef::Power(_) => Category::Power,
+            BlockDef::DefenseWall(_) => Category::Defense,
+            BlockDef::Crafting(_) => Category::Crafting,
+            BlockDef::UnitFactory(_)
+            | BlockDef::UnitReconstructor(_)
+            | BlockDef::UnitAssembler(_)
+            | BlockDef::UnitAssemblerModule(_)
+            | BlockDef::UnitRepairTower(_) => Category::Units,
+            BlockDef::Logic(_) => Category::Logic,
+            BlockDef::Storage(_)
+            | BlockDef::Effect(_)
+            | BlockDef::Payload(_)
+            | BlockDef::PayloadDeconstructor(_)
+            | BlockDef::PayloadConstructor(_)
+            | BlockDef::PayloadLoader(_)
+            | BlockDef::Sandbox(_)
+            | BlockDef::Light(_)
+            | BlockDef::Campaign(_) => Category::Effect,
+            BlockDef::Plain(_)
+            | BlockDef::Floor(_)
+            | BlockDef::StaticWall(_)
+            | BlockDef::StaticTree(_)
+            | BlockDef::TreeBlock(_)
+            | BlockDef::TallBlock(_)
+            | BlockDef::Prop(_)
+            | BlockDef::Legacy(_) => Category::Effect,
+        }
     }
 
     fn map_play_banned_content_candidate_entries(
@@ -31661,6 +31712,7 @@ impl DesktopLauncher {
                     DesktopBannedContentEntry {
                         name: base.name.clone(),
                         label: base.display_name().to_string(),
+                        category: Some(Self::map_play_banned_content_block_category(block)),
                     }
                 })
                 .collect::<Vec<_>>(),
@@ -31672,6 +31724,7 @@ impl DesktopLauncher {
                 .map(|unit| DesktopBannedContentEntry {
                     name: unit.name().to_string(),
                     label: unit.localized_name().to_string(),
+                    category: None,
                 })
                 .collect::<Vec<_>>(),
         };
@@ -31686,6 +31739,11 @@ impl DesktopLauncher {
                 schematic_search_normalize(&entry.label).contains(&query)
                     || schematic_search_normalize(&entry.name).contains(&query)
             });
+        }
+        if kind == DesktopBannedContentKind::Blocks {
+            if let Some(category) = self.map_play_banned_content_selected_category {
+                entries.retain(|entry| entry.category == Some(category));
+            }
         }
         entries
     }
@@ -33973,6 +34031,27 @@ impl DesktopLauncher {
                                         DesktopMapCardActionKind::FocusBannedContentSearch(kind),
                                     ),
                                 ));
+                            }
+                            if kind == DesktopBannedContentKind::Blocks {
+                                for (category_index, category) in
+                                    Category::ALL.into_iter().enumerate()
+                                {
+                                    if Self::map_play_banned_content_category_rect(
+                                        banned_dialog,
+                                        category_index,
+                                    )
+                                    .contains_point(point)
+                                    {
+                                        return Some(DesktopMenuRouteShellAction::MapCard(
+                                            DesktopMapCardAction::new(
+                                                index,
+                                                DesktopMapCardActionKind::ToggleBannedContentCategory(
+                                                    category,
+                                                ),
+                                            ),
+                                        ));
+                                    }
+                                }
                             }
                             if Self::map_play_banned_content_add_all_rect(banned_dialog, true)
                                 .contains_point(point)
@@ -36314,6 +36393,21 @@ impl DesktopLauncher {
                             self.map_play_banned_content_search_focused = true;
                             self.map_play_banned_content_scroll_offset = 0;
                             self.map_play_banned_content_dialog = Some(kind);
+                        }
+                        DesktopMapCardActionKind::ToggleBannedContentCategory(category) => {
+                            self.map_play_banned_content_selected_category =
+                                if self.map_play_banned_content_selected_category == Some(category)
+                                {
+                                    None
+                                } else {
+                                    Some(category)
+                                };
+                            self.map_play_banned_content_scroll_offset = 0;
+                            self.map_play_banned_content_dialog =
+                                Some(DesktopBannedContentKind::Blocks);
+                            self.map_play_banned_content_search_focused = false;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
                         }
                         DesktopMapCardActionKind::ToggleBannedContent(kind, candidate_index) => {
                             self.toggle_map_play_banned_content(
@@ -42306,6 +42400,31 @@ impl DesktopLauncher {
                 .with_outline(true),
             layer + 0.008,
         ));
+        if kind == DesktopBannedContentKind::Blocks {
+            for (category_index, category) in Category::ALL.into_iter().enumerate() {
+                self.push_map_list_filter_icon_toggle(
+                    pass,
+                    Self::map_play_banned_content_category_rect(dialog, category_index),
+                    desktop_ui_icon_glyph_or_label(category.wire_name(), category.wire_name()),
+                    self.map_play_banned_content_selected_category == Some(category),
+                    true,
+                    layer + 0.009 + category_index as f32 * 0.0002,
+                );
+            }
+            if let Some(category) = self.map_play_banned_content_selected_category {
+                pass.push(RenderCommand::draw_text_styled(
+                    category.wire_name(),
+                    RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 132.0),
+                    [0.62, 0.74, 0.84, 0.92],
+                    8.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    layer + 0.011,
+                ));
+            }
+        }
         for (selected_side, label, color) in [
             (true, kind.selected_label_key(), [0.95, 0.44, 0.42, 1.0]),
             (
@@ -42317,7 +42436,7 @@ impl DesktopLauncher {
             let column = Self::map_play_banned_content_item_rect(dialog, selected_side, 0);
             pass.push(RenderCommand::draw_text_styled(
                 self.localize_bundle_markup_text(label),
-                RenderPoint::new(column.center().x, dialog.y + dialog.height - 114.0),
+                RenderPoint::new(column.center().x, dialog.y + dialog.height - 138.0),
                 color,
                 11.0,
                 0.0,
@@ -42330,7 +42449,7 @@ impl DesktopLauncher {
             pass.push(RenderCommand::stroke_rect(
                 RenderRect::new(
                     column.x,
-                    dialog.y + dialog.height - 126.0,
+                    dialog.y + dialog.height - 150.0,
                     column.width,
                     1.0,
                 ),
@@ -51066,7 +51185,9 @@ mod tests {
             type_io, BuildingRef, LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks,
             TeamId, TypeValue, UnitRef, Vec2 as IoVec2,
         },
-        r#type::{ErrorContent, ItemStack, PayloadKey, PayloadSeq, Sector, UnitType, Weapon},
+        r#type::{
+            Category, ErrorContent, ItemStack, PayloadKey, PayloadSeq, Sector, UnitType, Weapon,
+        },
         world::blocks::campaign::{AcceleratorState, LandingPadState},
         world::blocks::payloads::{PayloadBlockBuildState, PayloadLoaderState, PayloadRef},
         world::blocks::units::{
@@ -70083,6 +70204,64 @@ version: "2.0.0"
         let all_entries = launcher
             .map_play_banned_content_candidate_entries(super::DesktopBannedContentKind::Blocks);
         assert!(all_entries.len() > DesktopLauncher::map_play_banned_content_visible_rows() + 1);
+
+        let distribution_center = DesktopLauncher::map_play_banned_content_category_rect(
+            banned_dialog,
+            Category::Distribution.ordinal(),
+        )
+        .center();
+        let toggle_distribution =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::ToggleBannedContentCategory(
+                    Category::Distribution,
+                ),
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                distribution_center.x,
+                distribution_center.y
+            ),
+            Some(toggle_distribution)
+        );
+        launcher.dispatch_menu_route_shell_action(toggle_distribution);
+        assert_eq!(
+            launcher.map_play_banned_content_selected_category,
+            Some(Category::Distribution)
+        );
+        let distribution_entries = launcher
+            .map_play_banned_content_candidate_entries(super::DesktopBannedContentKind::Blocks);
+        assert!(
+            !distribution_entries.is_empty(),
+            "vanilla block list should include distribution candidates"
+        );
+        assert!(distribution_entries
+            .iter()
+            .all(|entry| entry.category == Some(Category::Distribution)));
+        let category_frame = launcher.menu_graphics_frame_for_surface(0, render_viewport);
+        let category_texts = category_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("categorized BannedContentDialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(category_texts.contains(&"distribution"));
+        launcher.dispatch_menu_route_shell_action(toggle_distribution);
+        assert_eq!(launcher.map_play_banned_content_selected_category, None);
+        assert_eq!(
+            launcher
+                .map_play_banned_content_candidate_entries(super::DesktopBannedContentKind::Blocks)
+                .len(),
+            all_entries.len()
+        );
 
         let search_target = all_entries
             .iter()
