@@ -17,6 +17,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 772. JoinDialog fallback 卡片调试文案清理
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **90.6%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `JoinDialog` 的主机卡片与连接失败提示不会在 UI 中显示裸调试字符串；
+  - Rust Join route 的 local fallback 卡片第二行仍残留 `target: not selected`，破坏原版感。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 将 fallback 卡片第二行替换为本地化 `@host.invalid`；
+    - 扩展 Join route 渲染测试，确保不再出现 `target: not selected`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_drive_server_cards_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_uses_java_like_grid_slots_for_local_and_saved_servers --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Join/Load/Save/Settings/Mods 等前端 route 仍需持续对照 Java 原版细节；
+  - 最终仍需真实可玩客户端和 Java↔Rust 联机 smoke test。
+
 ## 771. CustomRulesDialog allowedit ruleInfo 提示对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

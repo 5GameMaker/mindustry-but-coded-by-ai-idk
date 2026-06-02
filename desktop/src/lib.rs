@@ -40069,7 +40069,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.034,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                "target: not selected",
+                self.localize_bundle_markup_text("@host.invalid"),
                 RenderPoint::new(card.x + 14.0, card.y + card.height - 50.0),
                 [0.62, 0.72, 0.82, 1.0],
                 11.0,
@@ -84507,6 +84507,9 @@ repo: "Beta/Override"
             .any(|text| text.contains("Map: custom map") && text.contains("Attack")));
         assert!(texts.iter().any(|text| text.contains("31ms")));
         assert!(texts.iter().any(|text| text.contains("Refreshing server")));
+        assert!(!texts
+            .iter()
+            .any(|text| text.contains("target: not selected")));
     }
 
     #[test]
