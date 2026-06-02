@@ -17,6 +17,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 778. SettingsMenuDialog 设置项 label 本地化对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **91.2%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `SettingsMenuDialog` 设置项显示走 `@setting.<key>.name` bundle；
+  - Rust 此前多数控件 label 仍直接显示 raw bundle key，视觉上明显不像原版。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 内置 bundle miss 时 fallback 到上游 `bundle.properties / bundle_zh_CN.properties / bundle_zh_TW.properties`；
+    - `upstream_menu_bundle_value_for_locale()` 统一按当前 locale 查询真实 upstream properties，再 fallback 英文。
+  - `desktop/src/lib.rs`
+    - Settings checkbox / slider label 从 raw `@setting.*.name` 改成本地化显示；
+    - Settings 相关测试改为按当前 locale 的本地化结果断言，避免中文/英文环境差异导致不稳定。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle_entries_cover_menu_fragment_buttons --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core upstream_menu_bundle_locale_entries_cover_chinese_menu_fragment_buttons --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - CustomRulesDialog 的 Weather 列表仍存在条目截断和 `Always` 英文硬编码；
+  - Settings 仍需继续清理更深层子页的视觉/交互差异；
+  - 完整客户端可玩性和联机 smoke test 仍未达成。
+
 ## 777. LoadDialog 导入失败文案对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

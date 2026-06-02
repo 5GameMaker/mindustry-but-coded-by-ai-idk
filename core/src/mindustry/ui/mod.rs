@@ -9,6 +9,12 @@ pub mod styles;
 pub mod warning_bar;
 
 pub const UPSTREAM_BUNDLE_PROPERTIES_SOURCE_PATH: &str = "core/assets/bundles/bundle.properties";
+const UPSTREAM_BUNDLE_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle.properties");
+const UPSTREAM_BUNDLE_ZH_CN_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_zh_CN.properties");
+const UPSTREAM_BUNDLE_ZH_TW_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_zh_TW.properties");
 
 pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("play", "Play"),
@@ -1445,6 +1451,9 @@ pub fn upstream_bundle_en_value(key: &str) -> Option<&'static str> {
     UPSTREAM_MENU_BUNDLE_ENTRIES
         .iter()
         .find_map(|(candidate, value)| (*candidate == key).then_some(*value))
+        .or_else(|| {
+            upstream_bundle_value_from_properties_source(UPSTREAM_BUNDLE_PROPERTIES_SOURCE, key)
+        })
 }
 
 fn upstream_bundle_value_from_entries(
@@ -1454,6 +1463,34 @@ fn upstream_bundle_value_from_entries(
     entries
         .iter()
         .find_map(|(candidate, value)| (*candidate == key).then_some(*value))
+}
+
+fn upstream_bundle_value_from_properties_source(
+    source: &'static str,
+    key: &str,
+) -> Option<&'static str> {
+    source.lines().find_map(|line| {
+        let line = line.trim_end_matches('\r');
+        if line.trim_start().starts_with('#') || line.trim().is_empty() {
+            return None;
+        }
+        let (candidate, value) = line.split_once('=')?;
+        (candidate.trim() == key).then(|| value.trim_start())
+    })
+}
+
+fn upstream_menu_bundle_properties_source_for_locale(locale: &str) -> &'static str {
+    let locale = locale.trim().replace('-', "_");
+    if locale.eq_ignore_ascii_case("zh_TW") || locale.eq_ignore_ascii_case("zh_HK") {
+        UPSTREAM_BUNDLE_ZH_TW_PROPERTIES_SOURCE
+    } else if locale.eq_ignore_ascii_case("zh_CN")
+        || locale.eq_ignore_ascii_case("zh")
+        || locale.eq_ignore_ascii_case("zh_Hans")
+    {
+        UPSTREAM_BUNDLE_ZH_CN_PROPERTIES_SOURCE
+    } else {
+        UPSTREAM_BUNDLE_PROPERTIES_SOURCE
+    }
 }
 
 pub fn upstream_menu_bundle_entries_for_locale(
@@ -1474,6 +1511,12 @@ pub fn upstream_menu_bundle_entries_for_locale(
 
 pub fn upstream_menu_bundle_value_for_locale(locale: &str, key: &str) -> Option<&'static str> {
     upstream_bundle_value_from_entries(upstream_menu_bundle_entries_for_locale(locale), key)
+        .or_else(|| {
+            upstream_bundle_value_from_properties_source(
+                upstream_menu_bundle_properties_source_for_locale(locale),
+                key,
+            )
+        })
         .or_else(|| upstream_bundle_en_value(key))
 }
 

@@ -26720,7 +26720,7 @@ impl DesktopLauncher {
                     let control = Self::settings_pref_widget_check_box_rect(row);
                     let label_point = Self::settings_pref_widget_check_label_point(row);
                     pass.push(RenderCommand::draw_text_styled(
-                        Self::settings_pref_label(spec.key),
+                        self.localize_bundle_markup_text(Self::settings_pref_label(spec.key)),
                         label_point,
                         [0.82, 0.9, 0.96, 1.0],
                         12.0,
@@ -26777,7 +26777,7 @@ impl DesktopLauncher {
                         Layer::END_PIXELED + 0.033,
                     ));
                     pass.push(RenderCommand::draw_text_styled(
-                        Self::settings_pref_label(spec.key),
+                        self.localize_bundle_markup_text(Self::settings_pref_label(spec.key)),
                         RenderPoint::new(content.x, row.y + row.height * 0.5),
                         [0.82, 0.9, 0.96, 1.0],
                         12.0,
@@ -82673,8 +82673,10 @@ repo: "Beta/Override"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@setting.saveinterval.name"));
-        assert!(texts.contains(&"@setting.communityservers.name"));
+        assert!(texts.contains(&"Save Interval"));
+        assert!(texts.contains(&"Fetch Community Server List"));
+        assert!(!texts.contains(&"@setting.saveinterval.name"));
+        assert!(!texts.contains(&"@setting.communityservers.name"));
         assert!(!texts.contains(&"@setting.autotarget.name"));
         assert!(!texts.contains(&"@setting.keyboard.name"));
         assert!(!texts.contains(&"@setting.playerlimit.name"));
@@ -82708,10 +82710,11 @@ repo: "Beta/Override"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(graphics_texts.contains(&"@setting.fullscreen.name"));
+        assert!(graphics_texts.contains(&"Fullscreen"));
+        assert!(!graphics_texts.contains(&"@setting.fullscreen.name"));
         assert!(!graphics_texts.contains(&"@setting.landscape.name"));
         if cfg!(target_os = "macos") {
-            assert!(graphics_texts.contains(&"@setting.macnotch.name"));
+            assert!(graphics_texts.contains(&"Adapt interface to display notch"));
         } else {
             assert!(!graphics_texts.contains(&"@setting.macnotch.name"));
         }
@@ -82776,7 +82779,8 @@ repo: "Beta/Override"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(sound_texts.contains(&"@setting.musicvol.name"));
+        assert!(sound_texts.contains(&"Music Volume"));
+        assert!(!sound_texts.contains(&"@setting.musicvol.name"));
         assert!(sound_texts.contains(&"100%"));
         assert!(!sound_texts.iter().any(|text| text.starts_with("value: ")));
     }
@@ -82837,9 +82841,7 @@ repo: "Beta/Override"
         let save_label_position = commands
             .iter()
             .find_map(|command| match command {
-                RenderCommand::DrawText { text, position, .. }
-                    if text == "@setting.saveinterval.name" =>
-                {
+                RenderCommand::DrawText { text, position, .. } if text == "Save Interval" => {
                     Some(*position)
                 }
                 _ => None,
@@ -82918,12 +82920,12 @@ repo: "Beta/Override"
             })
             .collect::<Vec<_>>();
         assert!(check_on_rects.contains(&check));
+        let expected_label = launcher
+            .localize_bundle_markup_text(DesktopLauncher::settings_pref_label("communityservers"));
         let community_label_position = commands
             .iter()
             .find_map(|command| match command {
-                RenderCommand::DrawText { text, position, .. }
-                    if text == "@setting.communityservers.name" =>
-                {
+                RenderCommand::DrawText { text, position, .. } if text == &expected_label => {
                     Some(*position)
                 }
                 _ => None,
