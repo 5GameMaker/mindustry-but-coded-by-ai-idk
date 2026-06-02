@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 762. ModsDialog 浏览器搜索与排序语义对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **89.6%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `ModsDialog.rebuildBrowser()` 默认 `orderDate = true`，保持远端 listing 的“recent/date”顺序；
+  - 点击排序按钮后才切到 stars 模式；
+  - Java browser 搜索只用 `Strings.matches(searchtxt, mod.name)` 与 `Strings.matches(searchtxt, mod.repo)`，不会因为 author/version 命中。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `mods_browser_sort_date` 默认值与各类 route reset 收口改为 `true`；
+    - `filtered_mods_browser_indices()` 在 date 模式保持源 listing 顺序，stars 模式才进入 Rust fallback 排序；
+    - `mods_browser_entry_matches_search(...)` 收窄为 display/internal name + repo，不再匹配 author/version；
+    - Mods browser 回归测试用 `gamma, beta, alpha` 源顺序锁定 date/source order，并验证切换 stars 后顺序变化。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop mods_browser --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop mods_route --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Java browser 的真实 GitHub listing/stars/date 字段和 repo icon cache 仍需继续接入；
+  - Releases picker 目前仍更偏外部打开 URI，尚未完整还原 Java 内嵌 releases 列表弹窗。
+
 ## 761. LoadDialog 缺失 mod 确认 Enter 行为对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

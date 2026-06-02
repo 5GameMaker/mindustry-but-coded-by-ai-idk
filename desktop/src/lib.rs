@@ -19117,7 +19117,7 @@ impl DesktopLauncher {
             mods_search: String::new(),
             mods_search_focused: false,
             mods_browser_search: String::new(),
-            mods_browser_sort_date: false,
+            mods_browser_sort_date: true,
             last_mods_import_action: None,
             last_mods_browser_action: None,
             last_mods_import_file_request: None,
@@ -23187,7 +23187,7 @@ impl DesktopLauncher {
             self.mods_browser_dialog_open = false;
             self.mods_search_focused = false;
             self.mods_browser_search.clear();
-            self.mods_browser_sort_date = false;
+            self.mods_browser_sort_date = true;
             self.tech_tree_select_dialog_open = false;
             self.tech_tree_selected_node = None;
             self.map_list_filter_dialog_open = false;
@@ -23281,7 +23281,7 @@ impl DesktopLauncher {
             self.mods_browser_dialog_open = false;
             self.mods_search_focused = false;
             self.mods_browser_search.clear();
-            self.mods_browser_sort_date = false;
+            self.mods_browser_sort_date = true;
             self.tech_tree_select_dialog_open = false;
             self.tech_tree_selected_node = None;
             self.map_list_filter_dialog_open = false;
@@ -23314,7 +23314,7 @@ impl DesktopLauncher {
                 self.mods_import_dialog_open = false;
                 self.mods_browser_dialog_open = false;
                 self.mods_browser_search.clear();
-                self.mods_browser_sort_date = false;
+                self.mods_browser_sort_date = true;
                 self.tech_tree_selected_node = None;
                 self.map_list_planet_filter_dialog_open = false;
                 self.map_list_search_focused = false;
@@ -23357,7 +23357,7 @@ impl DesktopLauncher {
             self.mods_browser_dialog_open = false;
             self.mods_search_focused = false;
             self.mods_browser_search.clear();
-            self.mods_browser_sort_date = false;
+            self.mods_browser_sort_date = true;
             self.tech_tree_select_dialog_open = false;
             self.tech_tree_selected_node = None;
             self.map_list_filter_dialog_open = false;
@@ -23381,7 +23381,7 @@ impl DesktopLauncher {
             self.mods_browser_dialog_open = false;
             self.mods_search_focused = false;
             self.mods_browser_search.clear();
-            self.mods_browser_sort_date = false;
+            self.mods_browser_sort_date = true;
             self.tech_tree_select_dialog_open = false;
             self.tech_tree_selected_node = None;
             self.map_list_filter_dialog_open = false;
@@ -23480,7 +23480,7 @@ impl DesktopLauncher {
             self.mods_import_dialog_open = false;
             self.mods_browser_dialog_open = false;
             self.mods_browser_search.clear();
-            self.mods_browser_sort_date = false;
+            self.mods_browser_sort_date = true;
             self.tech_tree_selected_node = None;
             self.map_list_search_focused = false;
             self.clear_editor_new_map_dialog();
@@ -36140,7 +36140,7 @@ impl DesktopLauncher {
                 self.mods_import_dialog_open = false;
                 self.mods_browser_dialog_open = false;
                 self.mods_browser_search.clear();
-                self.mods_browser_sort_date = false;
+                self.mods_browser_sort_date = true;
                 self.tech_tree_select_dialog_open = false;
                 self.tech_tree_selected_node = None;
                 self.map_list_filter_dialog_open = false;
@@ -47737,24 +47737,25 @@ impl DesktopLauncher {
     }
 
     fn mods_browser_entry_matches_search(&self, index: usize) -> bool {
-        if self.mods_browser_search.is_empty() {
+        let query = self.mods_browser_search.trim().to_ascii_lowercase();
+        if query.is_empty() {
             return true;
         }
-        let query = self.mods_browser_search.to_ascii_lowercase();
-        let name = self
+        let display_name = self
             .mods_route_mod_display_name_at_index(index)
             .unwrap_or_default()
             .to_ascii_lowercase();
+        let internal_name = self
+            .last_mods_directory_mod_names
+            .get(index)
+            .map(|name| name.to_ascii_lowercase())
+            .unwrap_or_default();
         let meta = self.mods_route_mod_meta_at_index(index);
-        let author = meta
-            .and_then(|meta| meta.author.as_deref())
+        let repo = meta
+            .and_then(|meta| meta.repo.as_deref())
             .unwrap_or_default()
             .to_ascii_lowercase();
-        let version = meta
-            .and_then(|meta| meta.version.as_deref())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        name.contains(&query) || author.contains(&query) || version.contains(&query)
+        display_name.contains(&query) || internal_name.contains(&query) || repo.contains(&query)
     }
 
     fn filtered_mods_browser_indices(&self) -> Vec<usize> {
@@ -47767,9 +47768,7 @@ impl DesktopLauncher {
                     .then_some(index)
             })
             .collect::<Vec<_>>();
-        if self.mods_browser_sort_date {
-            indices.reverse();
-        } else {
+        if !self.mods_browser_sort_date {
             indices.sort_by_key(|index| {
                 self.mods_route_mod_display_name_at_index(*index)
                     .unwrap_or_default()
@@ -65758,16 +65757,16 @@ version: "2.0.0"
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.settings_locale = "en".into();
         launcher.last_mods_directory_mod_names =
-            vec!["alpha".into(), "beta".into(), "gamma".into()];
+            vec!["gamma".into(), "beta".into(), "alpha".into()];
         launcher.last_mods_directory_mod_metas = vec![
             ModMetadata::from_source_text(
-                "alpha",
+                "gamma",
                 Some("mod.hjson"),
                 r#"
-name: alpha
-displayName: "Alpha Pack"
-author: "Alpha Author"
-version: "1.0.0"
+name: gamma
+displayName: "Gamma Tools"
+author: "Gamma Author"
+version: "3.0.0"
 "#,
             ),
             ModMetadata::from_source_text(
@@ -65782,13 +65781,13 @@ repo: "Beta/Override"
 "#,
             ),
             ModMetadata::from_source_text(
-                "gamma",
+                "alpha",
                 Some("mod.hjson"),
                 r#"
-name: gamma
-displayName: "Gamma Tools"
-author: "Gamma Author"
-version: "3.0.0"
+name: alpha
+displayName: "Alpha Pack"
+author: "Alpha Author"
+version: "1.0.0"
 "#,
             ),
         ];
@@ -65813,6 +65812,12 @@ version: "3.0.0"
         launcher
             .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::OpenModsBrowser);
         assert!(launcher.mods_browser_dialog_open);
+        assert!(launcher.mods_browser_sort_date);
+        assert_eq!(
+            launcher.filtered_mods_browser_indices(),
+            vec![0, 1, 2],
+            "Java ModsDialog keeps the fetched/date listing order while orderDate is true"
+        );
 
         let dialog = DesktopLauncher::mods_browser_dialog_rect_for_panel(panel);
         let search = DesktopLauncher::mods_browser_search_rect_for_dialog(dialog).center();
@@ -65839,7 +65844,7 @@ version: "3.0.0"
             .collect::<Vec<_>>();
         assert!(texts.contains(&"Mod Browser"));
         assert!(texts.contains(&"beta"));
-        assert!(texts.contains(&"Sort by stars"));
+        assert!(texts.contains(&"Sort by recent"));
         assert!(texts.contains(&"Beta Override"));
         assert!(texts
             .iter()
@@ -65851,6 +65856,22 @@ version: "3.0.0"
         assert!(texts.contains(&"Repo"));
         assert!(texts.contains(&"View Releases"));
         assert_eq!(launcher.filtered_mods_browser_indices(), vec![1]);
+        launcher.mods_browser_search = "Beta Author".into();
+        assert!(
+            launcher.filtered_mods_browser_indices().is_empty(),
+            "Java ModsDialog browser search only matches listing name/repo, not author"
+        );
+        launcher.mods_browser_search = "2.0.0".into();
+        assert!(
+            launcher.filtered_mods_browser_indices().is_empty(),
+            "Java ModsDialog browser search only matches listing name/repo, not version"
+        );
+        launcher.mods_browser_search = "Beta/Override".into();
+        assert_eq!(
+            launcher.filtered_mods_browser_indices(),
+            vec![1],
+            "Java ModsDialog browser search matches repo"
+        );
         assert!(!texts.contains(&"browser search: Icon.zoom + Icon.list"));
 
         launcher.mods_browser_search = "missing".into();
@@ -65944,16 +65965,16 @@ version: "3.0.0"
         );
 
         launcher.mods_browser_search = "alpha".into();
-        assert_eq!(launcher.filtered_mods_browser_indices(), vec![0]);
+        assert_eq!(launcher.filtered_mods_browser_indices(), vec![2]);
         let alpha_entry = DesktopLauncher::mods_browser_entry_rect_for_list(list, 0);
         let add = DesktopLauncher::mods_browser_entry_action_button_rect(alpha_entry, 0).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(surface, add.x, add.y),
-            Some(super::DesktopMenuRouteShellAction::ModsBrowserAdd(0))
+            Some(super::DesktopMenuRouteShellAction::ModsBrowserAdd(2))
         );
         launcher
             .dispatch_mods_browser_action_with_platform(
-                0,
+                2,
                 super::DesktopModsBrowserActionKind::Add,
                 &mut platform,
             )
@@ -65965,7 +65986,12 @@ version: "3.0.0"
                 .map(|action| action.kind),
             Some(super::DesktopModsBrowserActionKind::Add)
         );
-        launcher.mods_browser_search = "beta".into();
+        launcher.mods_browser_search.clear();
+        assert_eq!(
+            launcher.filtered_mods_browser_indices(),
+            vec![0, 1, 2],
+            "date sort keeps fetched order before toggling"
+        );
 
         let sort = DesktopLauncher::mods_browser_sort_button_rect_for_dialog(dialog).center();
         assert_eq!(
@@ -65975,12 +66001,18 @@ version: "3.0.0"
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::ToggleModsBrowserSort,
         );
-        assert!(launcher.mods_browser_sort_date);
+        assert!(!launcher.mods_browser_sort_date);
+        assert_eq!(
+            launcher.filtered_mods_browser_indices(),
+            vec![2, 1, 0],
+            "Rust fallback for Java stars mode should no longer use the date/source order"
+        );
         let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Mods);
         assert!(lines
             .iter()
             .any(|line| line.contains("modal: @mods.browser")
-                && line.contains("@mods.browser.sortdate")));
+                && line.contains("@mods.browser.sortstars")));
+        launcher.mods_browser_search = "beta".into();
 
         let entry = DesktopLauncher::mods_browser_entry_rect_for_list(list, 0).center();
         assert_eq!(
