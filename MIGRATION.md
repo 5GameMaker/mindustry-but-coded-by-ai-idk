@@ -17,6 +17,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 783. JoinDialog 保存服务器卡片动作按钮对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **91.7%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `JoinDialog.setupRemote()` 中保存服务器卡片右上动作按钮位于更厚的标题条中，按钮视觉和点击面积明显大于 Rust 此前的 `26 x 26`；
+  - Rust 此前 up/down/refresh/edit/delete 按钮偏小，点击手感和原版差距明显。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 Join server card header/action button 尺寸常量；
+    - 保存/本地服务器卡标题条高度从 34 提升到 58；
+    - 保存服务器卡 up/down/refresh/edit/delete 动作按钮改为 `50 x 50`，相邻按钮间距 4；
+    - 动作图标字号提升到 18；
+    - 卡片描述和状态行下移，避免被更厚标题条覆盖；
+    - 扩展 Join skeleton 测试，锁定动作按钮大小、间距和 hit-test。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_follow_reorder_delete_and_poll --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_hides_info_button_on_steam_or_mobile_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Add Server 子弹窗 IP 输入框仍需继续对齐 Java `320f x 54f`；
+  - LoadDialog 模式筛选 tooltip 与 ModsDialog 卡片缩略图/短描述仍需继续；
+  - 完整客户端可玩性和联机 smoke test 仍未达成。
+
 ## 782. JoinDialog 顶部动作按钮高度对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

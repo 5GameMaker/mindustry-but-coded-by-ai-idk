@@ -178,6 +178,7 @@ const SETTINGS_KEYBIND_RESET_ALL_HEIGHT: f32 = 50.0;
 const SETTINGS_KEYBIND_VISIBLE_ROWS: usize = 6;
 const MAP_PLAY_CUSTOM_RULE_SEARCH_MAX_LENGTH: usize = 96;
 const JOIN_SERVER_CARD_HEIGHT: f32 = 132.0;
+const JOIN_SERVER_CARD_HEADER_HEIGHT: f32 = 58.0;
 const JOIN_SERVER_CARD_GAP: f32 = 10.0;
 const JOIN_SERVER_CARD_COLUMN_GAP: f32 = 8.0;
 const JOIN_SERVER_CARD_TARGET_WIDTH: f32 = 520.0;
@@ -192,6 +193,8 @@ const JOIN_ACTION_BUTTON_HEIGHT: f32 = 64.0;
 const JOIN_SEARCH_TEXT_MAX_LENGTH: usize = 64;
 const JOIN_ADD_SERVER_TEXT_MAX_LENGTH: usize = 96;
 const JOIN_SERVER_CARD_ACTION_BUTTONS: usize = 5;
+const JOIN_SERVER_CARD_ACTION_BUTTON_SIZE: f32 = 50.0;
+const JOIN_SERVER_CARD_ACTION_BUTTON_GAP: f32 = 4.0;
 const JOIN_CONNECTING_CANCEL_BUTTON_WIDTH: f32 = 180.0;
 const JOIN_CONNECTING_CANCEL_BUTTON_HEIGHT: f32 = 46.0;
 const JOIN_CONNECTING_CANCEL_BUTTON_GAP: f32 = 34.0;
@@ -31242,12 +31245,18 @@ impl DesktopLauncher {
         card: RenderRect,
         button_index: usize,
     ) -> RenderRect {
-        let header = RenderRect::new(card.x, card.y + card.height - 34.0, card.width, 34.0);
+        let header = RenderRect::new(
+            card.x,
+            card.y + card.height - JOIN_SERVER_CARD_HEADER_HEIGHT,
+            card.width,
+            JOIN_SERVER_CARD_HEADER_HEIGHT,
+        );
+        let step = JOIN_SERVER_CARD_ACTION_BUTTON_SIZE + JOIN_SERVER_CARD_ACTION_BUTTON_GAP;
         RenderRect::new(
-            card.x + card.width - 36.0 - button_index as f32 * 32.0,
-            header.center().y - 13.0,
-            26.0,
-            26.0,
+            card.right() - 8.0 - JOIN_SERVER_CARD_ACTION_BUTTON_SIZE - button_index as f32 * step,
+            header.center().y - JOIN_SERVER_CARD_ACTION_BUTTON_SIZE * 0.5,
+            JOIN_SERVER_CARD_ACTION_BUTTON_SIZE,
+            JOIN_SERVER_CARD_ACTION_BUTTON_SIZE,
         )
     }
 
@@ -40162,7 +40171,12 @@ impl DesktopLauncher {
                 1.0,
                 layer + 0.001,
             ));
-            let header = RenderRect::new(card.x, card.y + card.height - 34.0, card.width, 34.0);
+            let header = RenderRect::new(
+                card.x,
+                card.y + card.height - JOIN_SERVER_CARD_HEADER_HEIGHT,
+                card.width,
+                JOIN_SERVER_CARD_HEADER_HEIGHT,
+            );
             pass.push(RenderCommand::fill_rect(
                 header,
                 [
@@ -40242,7 +40256,10 @@ impl DesktopLauncher {
                     self.localize_bundle_markup_text(line),
                     RenderPoint::new(
                         card.x + 14.0,
-                        card.y + card.height - 58.0 - index as f32 * 16.0,
+                        card.y + card.height
+                            - JOIN_SERVER_CARD_HEADER_HEIGHT
+                            - 18.0
+                            - index as f32 * 16.0,
                     ),
                     [0.74, 0.84, 0.90, 1.0],
                     10.0,
@@ -40334,7 +40351,12 @@ impl DesktopLauncher {
                     1.0,
                     layer + 0.001,
                 ));
-                let header = RenderRect::new(card.x, card.y + card.height - 34.0, card.width, 34.0);
+                let header = RenderRect::new(
+                    card.x,
+                    card.y + card.height - JOIN_SERVER_CARD_HEADER_HEIGHT,
+                    card.width,
+                    JOIN_SERVER_CARD_HEADER_HEIGHT,
+                );
                 pass.push(RenderCommand::fill_rect(
                     header,
                     [0.30, 0.36, 0.42, 0.44],
@@ -40367,7 +40389,7 @@ impl DesktopLauncher {
                         desktop_ui_icon_glyph_or_label(icon, icon),
                         button.center(),
                         [0.78, 0.88, 0.96, 1.0],
-                        13.0,
+                        18.0,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Center)
                             .with_font(RenderFontId::Icon)
@@ -40382,7 +40404,10 @@ impl DesktopLauncher {
                         "[gray]{}",
                         snapshot.description.replace('\n', " ")
                     )),
-                    RenderPoint::new(card.x + 14.0, card.y + card.height - 58.0),
+                    RenderPoint::new(
+                        card.x + 14.0,
+                        card.y + card.height - JOIN_SERVER_CARD_HEADER_HEIGHT - 16.0,
+                    ),
                     [0.62, 0.72, 0.82, 1.0],
                     11.0,
                     0.0,
@@ -40422,7 +40447,10 @@ impl DesktopLauncher {
                         self.localize_bundle_markup_text(line),
                         RenderPoint::new(
                             card.x + 14.0,
-                            card.y + card.height - 82.0 - index as f32 * 18.0,
+                            card.y + card.height
+                                - JOIN_SERVER_CARD_HEADER_HEIGHT
+                                - 40.0
+                                - index as f32 * 18.0,
                         ),
                         [0.72, 0.80, 0.86, 1.0],
                         10.0,
@@ -84643,6 +84671,16 @@ repo: "Beta/Override"
             add.y + add.height,
             panel.y + panel.height - 88.0,
             "Java JoinDialog top action buttons use a thick 64px button row without colliding with the name row"
+        );
+        let card_action0 = DesktopLauncher::join_route_server_card_action_button_rect(card, 0);
+        let card_action1 = DesktopLauncher::join_route_server_card_action_button_rect(card, 1);
+        assert_eq!(card_action0.width, 50.0);
+        assert_eq!(card_action0.height, 50.0);
+        assert_eq!(card_action1.width, 50.0);
+        assert_eq!(
+            (card_action0.x - card_action1.right()).abs(),
+            4.0,
+            "Java JoinDialog saved-server header actions are large icon buttons with tight table padding"
         );
         let card_up = DesktopLauncher::join_route_server_card_action_button_rect(card, 0).center();
         let card_down =
