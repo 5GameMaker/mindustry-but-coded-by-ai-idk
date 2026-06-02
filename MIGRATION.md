@@ -17,6 +17,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 773. TeamRules 行级 ruleInfo 提示对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **90.7%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `CustomRulesDialog` 的 team rule 行同样通过 `ruleInfo(...)` 给存在 `.info` 的规则显示桌面 tooltip；
+  - Rust 此前仅补了 `Allow Editing Rules` 的提示，`Protect Cores / Check Placement` 行还没有对应悬停说明。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopTeamRuleToggle` 新增 `info_key()`，只给原版存在 `.info` 的 `ProtectCores / CheckPlacement` 返回说明 key；
+    - TeamRules 悬停 tooltip 扩展到行级 ruleInfo，且高亮框跟随当前悬停行；
+    - 扩展 MapPlay/CustomRules 测试，锁定 `Protect Cores` 行悬停出现 core no-build radius 说明。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop map_play_dialog --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `CustomRulesDialog` 的天气编辑器、完整文本/数值输入与全部规则项仍需继续对齐 Java；
+  - 当前前端 route 仍需继续向 Java Scene2D 的滚动、表格宽度和弹窗动画靠拢；
+  - 最终还需把规则编辑结果贯通到真实可玩 CustomGame/Editor/联机规则同步链路。
+
 ## 772. JoinDialog fallback 卡片调试文案清理
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

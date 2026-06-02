@@ -1042,6 +1042,14 @@ impl DesktopTeamRuleToggle {
         }
     }
 
+    fn info_key(self) -> Option<&'static str> {
+        match self {
+            Self::ProtectCores => Some("@rules.protectcores.info"),
+            Self::CheckPlacement => Some("@rules.checkplacement.info"),
+            Self::InfiniteResources | Self::FillItems | Self::RtsAi | Self::BuildAi => None,
+        }
+    }
+
     fn value(self, rule: &TeamRule) -> bool {
         match self {
             Self::ProtectCores => rule.protect_cores,
@@ -32601,6 +32609,34 @@ impl DesktopLauncher {
         if Self::map_play_team_rules_allow_edit_rect(dialog).contains_point(cursor) {
             return Some(self.localize_bundle_markup_text("@rules.allowedit.info"));
         }
+        for (field_index, toggle) in DesktopTeamRuleToggle::ALL.into_iter().enumerate() {
+            if let Some(info_key) = toggle.info_key() {
+                if Self::map_play_team_rules_field_rect(dialog, field_index).contains_point(cursor)
+                {
+                    return Some(self.localize_bundle_markup_text(info_key));
+                }
+            }
+        }
+        None
+    }
+
+    fn map_play_team_rules_hover_tooltip_target_rect(
+        &self,
+        dialog: RenderRect,
+    ) -> Option<RenderRect> {
+        let cursor = self.last_menu_cursor?;
+        let allow_edit = Self::map_play_team_rules_allow_edit_rect(dialog);
+        if allow_edit.contains_point(cursor) {
+            return Some(allow_edit);
+        }
+        for (field_index, toggle) in DesktopTeamRuleToggle::ALL.into_iter().enumerate() {
+            if toggle.info_key().is_some() {
+                let row = Self::map_play_team_rules_field_rect(dialog, field_index);
+                if row.contains_point(cursor) {
+                    return Some(row);
+                }
+            }
+        }
         None
     }
 
@@ -44045,7 +44081,8 @@ impl DesktopLauncher {
             layer + 0.001,
         ));
         pass.push(RenderCommand::stroke_rect(
-            Self::map_play_team_rules_allow_edit_rect(dialog),
+            self.map_play_team_rules_hover_tooltip_target_rect(dialog)
+                .unwrap_or_else(|| Self::map_play_team_rules_allow_edit_rect(dialog)),
             [0.86, 0.94, 1.0, 0.98],
             2.0,
             layer + 0.0015,
@@ -72658,6 +72695,24 @@ repo: "Beta/Override"
             ))
         );
         let protect_row = DesktopLauncher::map_play_team_rules_field_rect(team_dialog, 0);
+        launcher.last_menu_cursor = Some(protect_row.center());
+        let protect_hover_frame = launcher.menu_graphics_frame_for_surface(8, render_viewport);
+        let protect_hover_texts = protect_hover_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("team rule tooltip should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(protect_hover_texts
+            .iter()
+            .any(|text| text.contains("core no-build radius")));
         let protect_toggle_center =
             DesktopLauncher::map_play_team_rules_field_toggle_rect(protect_row).center();
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
