@@ -17,6 +17,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 771. CustomRulesDialog allowedit ruleInfo 提示对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **90.5%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `CustomRulesDialog.ruleInfo(...)` 在桌面端会给存在 `.info` 文案的规则单元格挂 tooltip；
+  - TeamRules 开头的 `@rules.allowedit` 依赖 `rules.allowedit.info`，Rust 侧此前未完整接入内置 bundle 与悬停提示。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 补齐 `rules.allowedit / rules.allowedit.info / rules.alloweditworldprocessors.info / rules.title.teams / rules.playerteam / rules.enemyteam / rules.weather* / rules.*.info` 等前端规则文案；
+    - 扩展 EN、zh_CN、zh_TW bundle 回归断言，避免 UI 裸显 key。
+  - `desktop/src/lib.rs`
+    - TeamRules 的 `Allow Editing Rules` 行接入桌面悬停 tooltip；
+    - 悬停时使用本地化 `@rules.allowedit.info`，同时保持原有点击区域仍只负责切换 `Rules.allowEditRules`；
+    - 扩展 MapPlay/CustomRules 测试，锁定 allowedit 文案和 tooltip 文案渲染。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle_entries_cover_menu_fragment_buttons --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core upstream_menu_bundle_locale_entries_cover_chinese_menu_fragment_buttons --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop map_play_dialog --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `CustomRulesDialog` 的天气、team 子弹窗剩余 ruleInfo 行、完整数值文本输入与全部 Java 规则项仍需继续补齐；
+  - 当前前端 route 仍需继续向 Java Scene2D 的滚动、表格宽度和弹窗动画靠拢；
+  - 最终还需把规则编辑结果贯通到真实可玩 CustomGame/Editor/联机规则同步链路。
+
 ## 770. CustomRulesDialog banned policy 搜索紧凑布局对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

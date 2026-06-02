@@ -263,6 +263,19 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("rules.corecapture", "Capture Core On Destruction"),
     ("rules.infiniteresources", "Infinite Resources"),
     ("rules.schematic", "Schematics Allowed"),
+    ("rules.allowedit", "Allow Editing Rules"),
+    (
+        "rules.allowedit.info",
+        "When enabled, the player can edit rules in-game via the button in the bottom left corner of the Pause menu.",
+    ),
+    (
+        "rules.alloweditworldprocessors",
+        "Allow Editing World Processors",
+    ),
+    (
+        "rules.alloweditworldprocessors.info",
+        "When enabled, world logic blocks can be placed and edited even outside the editor.",
+    ),
     ("rules.hidebannedblocks", "Hide Banned Blocks"),
     ("bannedblocks", "Banned Blocks"),
     ("unbannedblocks", "Unbanned Blocks"),
@@ -281,6 +294,25 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("rules.title.resourcesbuilding", "Resources & Building"),
     ("rules.title.enemy", "Enemies"),
     ("rules.title.planet", "Planet"),
+    ("rules.title.teams", "Teams"),
+    ("rules.enemyteam", "Enemy Team"),
+    ("rules.playerteam", "Player Team"),
+    ("rules.weather", "Weather"),
+    ("rules.weather.frequency", "Frequency:"),
+    ("rules.weather.always", "Always"),
+    ("rules.weather.duration", "Duration:"),
+    (
+        "rules.protectcores.info",
+        "When disabled, the core no-build radius won't affect this team.\\nPlayers won't be assigned to unprotected teams.",
+    ),
+    (
+        "rules.checkplacement.info",
+        "When disabled, buildings of this team are ignored in placement range checks.",
+    ),
+    (
+        "rules.randomwaveai.info",
+        "Makes units spawned in waves target random structures instead of directly attacking the core or power generators.",
+    ),
     ("settings", "Settings"),
     ("settings.game", "Game"),
     ("settings.graphics", "Graphics"),
@@ -687,6 +719,16 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES: &[(&str, &str)] = &[
     ("rules.corecapture", "摧毁后占领核心"),
     ("rules.infiniteresources", "无限资源"),
     ("rules.schematic", "允许使用蓝图"),
+    ("rules.allowedit", "允许规则编辑"),
+    (
+        "rules.allowedit.info",
+        "启用后，玩家可以通过暂停菜单左下角的按钮编辑游戏中的规则。",
+    ),
+    ("rules.alloweditworldprocessors", "允许编辑世界处理器"),
+    (
+        "rules.alloweditworldprocessors.info",
+        "启用后，即使不在编辑器中，也可以放置和编辑世界处理器。",
+    ),
     ("rules.hidebannedblocks", "隐藏禁用的建筑"),
     ("bannedblocks", "禁用建筑"),
     ("unbannedblocks", "可用建筑"),
@@ -705,6 +747,25 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES: &[(&str, &str)] = &[
     ("rules.title.resourcesbuilding", "资源与建筑"),
     ("rules.title.enemy", "敌对阵营"),
     ("rules.title.planet", "行星"),
+    ("rules.title.teams", "队伍"),
+    ("rules.enemyteam", "敌方队伍"),
+    ("rules.playerteam", "玩家队伍"),
+    ("rules.weather", "天气"),
+    ("rules.weather.frequency", "周期："),
+    ("rules.weather.always", "永久"),
+    ("rules.weather.duration", "时长："),
+    (
+        "rules.protectcores.info",
+        "禁用后，核心禁建区将不会影响该队伍。\\n玩家不会被分配到不受保护的队伍。",
+    ),
+    (
+        "rules.checkplacement.info",
+        "禁用后，该队伍的建筑物在放置范围检查中将被忽略。",
+    ),
+    (
+        "rules.randomwaveai.info",
+        "使波次中生成的单位随机攻击建筑，而非直接攻击核心或发电建筑。",
+    ),
     ("settings", "设置"),
     ("settings.game", "游戏"),
     ("settings.graphics", "图形"),
@@ -1090,6 +1151,19 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
     ("rules.corecapture", "佔領摧毀的核心"),
     ("rules.infiniteresources", "無限資源"),
     ("rules.schematic", "允許使用藍圖"),
+    ("rules.allowedit", "Allow Editing Rules"),
+    (
+        "rules.allowedit.info",
+        "When enabled, the player can edit rules in-game via the button in the bottom left corner of the Pause menu.",
+    ),
+    (
+        "rules.alloweditworldprocessors",
+        "Allow Editing World Processors",
+    ),
+    (
+        "rules.alloweditworldprocessors.info",
+        "When enabled, world logic blocks can be placed and edited even outside the editor.",
+    ),
     ("rules.hidebannedblocks", "隱藏禁用的建築"),
     ("bannedblocks", "禁用方塊"),
     ("unbannedblocks", "Unbanned Blocks"),
@@ -1108,6 +1182,25 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
     ("rules.title.resourcesbuilding", "資源與建築"),
     ("rules.title.enemy", "敵人"),
     ("rules.title.planet", "星球"),
+    ("rules.title.teams", "分隊"),
+    ("rules.enemyteam", "敵方隊伍"),
+    ("rules.playerteam", "玩家隊伍"),
+    ("rules.weather", "天氣"),
+    ("rules.weather.frequency", "頻率："),
+    ("rules.weather.always", "永遠"),
+    ("rules.weather.duration", "持續時間："),
+    (
+        "rules.protectcores.info",
+        "When disabled, the core no-build radius won't affect this team.\\nPlayers won't be assigned to unprotected teams.",
+    ),
+    (
+        "rules.checkplacement.info",
+        "When disabled, buildings of this team are ignored in placement range checks.",
+    ),
+    (
+        "rules.randomwaveai.info",
+        "Makes units spawned in waves target random structures instead of directly attacking the core or power generators.",
+    ),
     ("settings", "設定"),
     ("settings.game", "遊戲"),
     ("settings.graphics", "圖形"),
@@ -1448,6 +1541,24 @@ mod tests {
             upstream_bundle_en_value("bannedunits.whitelist"),
             Some("Banned Units As Whitelist")
         );
+        assert_eq!(
+            upstream_bundle_en_value("rules.allowedit"),
+            Some("Allow Editing Rules")
+        );
+        assert_eq!(
+            upstream_bundle_en_value("rules.allowedit.info"),
+            Some("When enabled, the player can edit rules in-game via the button in the bottom left corner of the Pause menu.")
+        );
+        assert_eq!(upstream_bundle_en_value("rules.title.teams"), Some("Teams"));
+        assert_eq!(
+            upstream_bundle_en_value("rules.playerteam"),
+            Some("Player Team")
+        );
+        assert_eq!(
+            upstream_bundle_en_value("rules.enemyteam"),
+            Some("Enemy Team")
+        );
+        assert_eq!(upstream_bundle_en_value("rules.weather"), Some("Weather"));
         assert_eq!(upstream_bundle_en_value("missing.menu.key"), None);
     }
 
@@ -1573,6 +1684,30 @@ mod tests {
             Some("将禁用单位列入白名单")
         );
         assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "rules.allowedit"),
+            Some("允许规则编辑")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "rules.allowedit.info"),
+            Some("启用后，玩家可以通过暂停菜单左下角的按钮编辑游戏中的规则。")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "rules.title.teams"),
+            Some("队伍")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "rules.playerteam"),
+            Some("玩家队伍")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "rules.enemyteam"),
+            Some("敌方队伍")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "rules.weather"),
+            Some("天气")
+        );
+        assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "keybind.chat.name"),
             Some("聊天")
         );
@@ -1647,6 +1782,26 @@ mod tests {
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_TW", "bannedunits.whitelist"),
             Some("Banned Units As Whitelist")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "rules.allowedit"),
+            Some("Allow Editing Rules")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "rules.title.teams"),
+            Some("分隊")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "rules.playerteam"),
+            Some("玩家隊伍")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "rules.enemyteam"),
+            Some("敵方隊伍")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "rules.weather"),
+            Some("天氣")
         );
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_TW", "server.invalidaddress"),

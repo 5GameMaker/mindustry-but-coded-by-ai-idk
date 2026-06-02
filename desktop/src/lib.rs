@@ -32563,6 +32563,26 @@ impl DesktopLauncher {
         )
     }
 
+    fn map_play_rule_info_tooltip_rect(
+        bounds: RenderRect,
+        cursor: RenderPoint,
+        text: &str,
+    ) -> RenderRect {
+        let tooltip_width = (text.chars().count() as f32 * 6.0 + 28.0).clamp(220.0, 420.0);
+        let wrap_width = tooltip_width - 24.0;
+        let estimated_lines = ((text.chars().count() as f32 * 6.0) / wrap_width)
+            .ceil()
+            .max(1.0);
+        let tooltip_height = (estimated_lines * 18.0 + 20.0).clamp(38.0, 116.0);
+        let tooltip_x = (cursor.x + 14.0)
+            .min(bounds.right() - tooltip_width - 4.0)
+            .max(bounds.x + 4.0);
+        let tooltip_y = (cursor.y + 14.0)
+            .min(bounds.y + bounds.height - tooltip_height - 4.0)
+            .max(bounds.y + 4.0);
+        RenderRect::new(tooltip_x, tooltip_y, tooltip_width, tooltip_height)
+    }
+
     fn map_play_team_rules_selector_rect(
         dialog: RenderRect,
         row_index: usize,
@@ -32574,6 +32594,14 @@ impl DesktopLauncher {
             58.0,
             30.0,
         )
+    }
+
+    fn map_play_team_rules_hover_tooltip_text(&self, dialog: RenderRect) -> Option<String> {
+        let cursor = self.last_menu_cursor?;
+        if Self::map_play_team_rules_allow_edit_rect(dialog).contains_point(cursor) {
+            return Some(self.localize_bundle_markup_text("@rules.allowedit.info"));
+        }
+        None
     }
 
     fn map_play_team_rules_section_rect(dialog: RenderRect, team_index: usize) -> RenderRect {
@@ -43986,6 +44014,55 @@ impl DesktopLauncher {
             Some("left"),
             layer + 0.090,
         );
+        self.push_map_play_team_rules_hover_tooltip(pass, child, dialog, layer + 0.110);
+    }
+
+    fn push_map_play_team_rules_hover_tooltip(
+        &self,
+        pass: &mut RenderPass,
+        bounds: RenderRect,
+        dialog: RenderRect,
+        layer: f32,
+    ) {
+        let Some(label) = self.map_play_team_rules_hover_tooltip_text(dialog) else {
+            return;
+        };
+        let Some(cursor) = self.last_menu_cursor else {
+            return;
+        };
+        let tooltip = Self::map_play_rule_info_tooltip_rect(bounds, cursor, &label);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            tooltip,
+            [1.0, 1.0, 1.0, 0.96],
+            0.0,
+            layer,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            tooltip,
+            [0.42, 0.58, 0.70, 0.94],
+            1.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            Self::map_play_team_rules_allow_edit_rect(dialog),
+            [0.86, 0.94, 1.0, 0.98],
+            2.0,
+            layer + 0.0015,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            label,
+            RenderPoint::new(tooltip.x + 12.0, tooltip.center().y),
+            [0.94, 0.98, 1.0, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_wrap_width(tooltip.width - 24.0)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.002,
+        ));
     }
 
     fn push_map_play_rules_edit_dialog(
@@ -72470,10 +72547,35 @@ repo: "Beta/Override"
         assert!(team_texts
             .iter()
             .any(|text| text.contains("Enemy Team") || text.contains("rules.enemyteam")));
+        assert!(team_texts
+            .iter()
+            .any(|text| text.contains("Allow Editing Rules")));
+        assert!(!team_texts
+            .iter()
+            .any(|text| text.contains("@rules.allowedit")));
         assert!(team_texts.contains(&"sharded"));
         let team_dialog = DesktopLauncher::map_play_team_rules_dialog_rect(child);
         let allow_edit_center =
             DesktopLauncher::map_play_team_rules_allow_edit_rect(team_dialog).center();
+        launcher.last_menu_cursor = Some(allow_edit_center);
+        let team_hover_frame = launcher.menu_graphics_frame_for_surface(7, render_viewport);
+        let team_hover_texts = team_hover_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("team rules tooltip should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(team_hover_texts
+            .iter()
+            .any(|text| text
+                .contains("When enabled, the player can edit rules in-game via the button")));
         let toggle_allow_edit =
             super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
                 0,
