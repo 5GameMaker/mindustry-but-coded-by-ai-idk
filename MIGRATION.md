@@ -17,6 +17,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 749. ModsDialog 状态视图与详情内容按钮分层
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **88.3%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `ModsDialog` 的列表与详情会展示 `@mod.disabled`、依赖缺失、内容错误等状态，并在需要时显示 `@mod.reloadrequired`；
+  - Rust Mods 路由已有扫描列表、搜索、导入、浏览器、详情、内容弹窗，但缺少 Java 风格的状态视图层；
+  - Java `showMod()` 中 `View Content` 是独立内容块，不应和 Back/Open Folder/GitHub/Reinstall 顶部动作混成同一排。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopModsRouteModStateKind` 与 `DesktopModsRouteModStateSnapshot`，作为后续 enable/disable、delete、依赖/错误状态接入真实 Mods runtime 的视图层；
+    - 扫描/合并 mods 时为本地 mod 建立默认 loaded/enabled 状态，缺省不污染既有列表；
+    - Mods 列表卡片 summary、route debug lines、详情弹窗接入 disabled/unmet dependencies/content errors 等状态文本与详情；
+    - Mods route 顶部接入 `@mod.reloadrequired` banner；
+    - `mods_route_detail_button_specs(...)` 改为只返回 Java 顶部动作行，`View Content` 改用独立 `mods_route_detail_content_button_rect(...)`；
+    - 对当前 `localize_bundle_markup_text` 未命中 `@mod.*` 状态键的情况补原版英文 fallback，避免 UI 显示裸 key。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_renders_state_and_reload_required_like_java_dialog --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop mods --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 状态视图层仍是 desktop snapshot，后续必须接入真实 Mods runtime 的 enabled/state/dependencies/contentErrors/requiresReload；
+  - enable/disable、delete confirmation、requiresReload 后的 reload/exit 流程仍需继续对齐 Java `ModsDialog`/`Mods`；
+  - `@mod.*` bundle 查询范围应继续从 fallback 收敛为直接复用上游完整 bundle。
+
 ## 748. Settings Keybind 默认显示值接入 core Binding 真源
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

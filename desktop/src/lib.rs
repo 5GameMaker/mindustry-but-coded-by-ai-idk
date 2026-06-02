@@ -3708,6 +3708,39 @@ pub struct DesktopModsBrowserAction {
     pub opened: Option<bool>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DesktopModsRouteModStateKind {
+    #[default]
+    Loaded,
+    IncompatibleGame,
+    IncompatibleMod,
+    Blacklisted,
+    UnmetDependencies,
+    ErroredContent,
+    CircularDependencies,
+    IncompleteDependencies,
+    Hidden,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopModsRouteModStateSnapshot {
+    pub enabled: bool,
+    pub state: DesktopModsRouteModStateKind,
+    pub dependencies: Vec<String>,
+    pub requires_reload: bool,
+}
+
+impl Default for DesktopModsRouteModStateSnapshot {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            state: DesktopModsRouteModStateKind::Loaded,
+            dependencies: Vec::new(),
+            requires_reload: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DesktopModsContentEntry {
     title: String,
@@ -17866,6 +17899,7 @@ pub struct DesktopLauncher {
     pub last_mods_directory_mod_names: Vec<String>,
     pub last_mods_directory_mod_roots: Vec<String>,
     pub last_mods_directory_mod_metas: Vec<ModMetadata>,
+    pub last_mods_directory_mod_states: Vec<DesktopModsRouteModStateSnapshot>,
     pub mods_selected_mod_index: Option<usize>,
     pub last_mods_folder_action: Option<DesktopModsFolderAction>,
     pub last_mods_content_index: Option<usize>,
@@ -19040,6 +19074,7 @@ impl DesktopLauncher {
             last_mods_directory_mod_names: Vec::new(),
             last_mods_directory_mod_roots: Vec::new(),
             last_mods_directory_mod_metas: Vec::new(),
+            last_mods_directory_mod_states: Vec::new(),
             mods_selected_mod_index: None,
             last_mods_folder_action: None,
             last_mods_content_index: None,
@@ -19127,6 +19162,7 @@ impl DesktopLauncher {
         self.last_mods_directory_mod_names = vec![mod_name];
         self.last_mods_directory_mod_roots = vec![plan.root.to_string_lossy().into_owned()];
         self.last_mods_directory_mod_metas = vec![plan.meta.clone()];
+        self.last_mods_directory_mod_states = vec![DesktopModsRouteModStateSnapshot::default()];
         self.mods_selected_mod_index = None;
         Ok(self.merge_mod_resource_plan_into_texture_atlas(&plan.resource_plan))
     }
@@ -19159,6 +19195,8 @@ impl DesktopLauncher {
             .iter()
             .map(|mod_dir| mod_dir.meta.clone())
             .collect();
+        self.last_mods_directory_mod_states =
+            vec![DesktopModsRouteModStateSnapshot::default(); container.mods.len()];
         self.mods_selected_mod_index = None;
         container
             .mods
@@ -19174,6 +19212,7 @@ impl DesktopLauncher {
             self.last_mods_directory_mod_names.clear();
             self.last_mods_directory_mod_roots.clear();
             self.last_mods_directory_mod_metas.clear();
+            self.last_mods_directory_mod_states.clear();
             self.mods_selected_mod_index = None;
             return Ok(0);
         };
@@ -19191,6 +19230,7 @@ impl DesktopLauncher {
                 self.last_mods_directory_mod_names.clear();
                 self.last_mods_directory_mod_roots.clear();
                 self.last_mods_directory_mod_metas.clear();
+                self.last_mods_directory_mod_states.clear();
                 self.mods_selected_mod_index = None;
                 Err(error)
             }
@@ -46689,6 +46729,9 @@ impl DesktopLauncher {
         if let Some(count) = self.last_mods_directory_merge_count {
             lines.push(format!("mods scanned: {count}"));
         }
+        if self.mods_route_requires_reload() {
+            lines.push("banner: @mod.reloadrequired".into());
+        }
         if !self.mods_search.is_empty() {
             lines.push(format!(
                 "search: {} matches {}",
@@ -46706,6 +46749,20 @@ impl DesktopLauncher {
             let (empty_text, hint_text) = self.mods_browser_empty_state_texts();
             lines.push(format!("empty: {empty_text}"));
             lines.push(format!("hint: {hint_text}"));
+        }
+        for index in self.filtered_mods_route_indices().into_iter().take(6) {
+            if let Some(state_text) = self.mods_route_mod_state_text_at_index(index) {
+                let name = self
+                    .mods_route_mod_display_name_at_index(index)
+                    .unwrap_or("@mods.unknown");
+                lines.push(format!("mod state: {name} {state_text}"));
+            }
+            for detail in self.mods_route_mod_state_details_at_index(index) {
+                let name = self
+                    .mods_route_mod_display_name_at_index(index)
+                    .unwrap_or("@mods.unknown");
+                lines.push(format!("mod state details: {name} {detail}"));
+            }
         }
         if self.mods_browser_dialog_open {
             lines.push(format!(
@@ -46816,6 +46873,129 @@ impl DesktopLauncher {
         self.last_mods_directory_mod_metas.get(index)
     }
 
+    fn mods_route_mod_state_snapshot_at_index(
+        &self,
+        index: usize,
+    ) -> DesktopModsRouteModStateSnapshot {
+        if self.last_mods_directory_mod_names.get(index).is_none() {
+            return DesktopModsRouteModStateSnapshot::default();
+        }
+        self.last_mods_directory_mod_states
+            .get(index)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn mods_route_mod_state_text_key(state: DesktopModsRouteModStateKind) -> Option<&'static str> {
+        match state {
+            DesktopModsRouteModStateKind::Loaded => None,
+            DesktopModsRouteModStateKind::IncompatibleGame => Some("@mod.incompatiblegame"),
+            DesktopModsRouteModStateKind::IncompatibleMod => Some("@mod.incompatiblemod"),
+            DesktopModsRouteModStateKind::Blacklisted => Some("@mod.blacklisted"),
+            DesktopModsRouteModStateKind::UnmetDependencies => Some("@mod.unmetdependencies"),
+            DesktopModsRouteModStateKind::ErroredContent => Some("@mod.erroredcontent"),
+            DesktopModsRouteModStateKind::CircularDependencies => Some("@mod.circulardependencies"),
+            DesktopModsRouteModStateKind::IncompleteDependencies => {
+                Some("@mod.incompletedependencies")
+            }
+            DesktopModsRouteModStateKind::Hidden => Some("@server.hidden"),
+        }
+    }
+
+    fn mods_route_mod_state_details_key(
+        state: DesktopModsRouteModStateKind,
+    ) -> Option<&'static str> {
+        match state {
+            DesktopModsRouteModStateKind::Loaded
+            | DesktopModsRouteModStateKind::IncompatibleGame
+            | DesktopModsRouteModStateKind::Hidden => None,
+            DesktopModsRouteModStateKind::IncompatibleMod => Some("@mod.incompatiblemod.details"),
+            DesktopModsRouteModStateKind::Blacklisted => Some("@mod.blacklisted.details"),
+            DesktopModsRouteModStateKind::UnmetDependencies => {
+                Some("@mod.missingdependencies.details")
+            }
+            DesktopModsRouteModStateKind::ErroredContent => Some("@mod.erroredcontent.details"),
+            DesktopModsRouteModStateKind::CircularDependencies => {
+                Some("@mod.circulardependencies.details")
+            }
+            DesktopModsRouteModStateKind::IncompleteDependencies => {
+                Some("@mod.incompletedependencies.details")
+            }
+        }
+    }
+
+    fn mods_route_format_mod_state_details(
+        &self,
+        key: &'static str,
+        dependencies: &[String],
+    ) -> String {
+        let dependency_list = if dependencies.is_empty() {
+            self.localize_bundle_markup_text("@none")
+        } else {
+            dependencies.join(", ")
+        };
+        self.mods_route_localize_status_bundle_text(key)
+            .replace("{0}", &dependency_list)
+    }
+
+    fn mods_route_localize_status_bundle_text(&self, key: &'static str) -> String {
+        let localized = self.localize_bundle_markup_text(key);
+        if localized != key {
+            return localized;
+        }
+        match key {
+            "@mod.disabled" => "[red]Disabled",
+            "@mod.incompatiblegame" => "[red]Outdated Game",
+            "@mod.incompatiblemod" => "[red]Incompatible",
+            "@mod.blacklisted" => "[red]Unsupported",
+            "@mod.unmetdependencies" => "[red]Unmet Dependencies",
+            "@mod.erroredcontent" => "[red]Content Errors",
+            "@mod.circulardependencies" => "[red]Circular Dependencies",
+            "@mod.incompletedependencies" => "[red]Incomplete Dependencies",
+            "@mod.reloadrequired" => "[red]Restart Required",
+            "@mod.incompatiblemod.details" => "This mod is incompatible with the latest version of the game. The author must update it, and add [accent]minGameVersion: 154[] to its [accent]mod.json[] file.",
+            "@mod.blacklisted.details" => "This mod has been manually blacklisted for causing crashes or other issues with this version of the game. Do not use it.",
+            "@mod.missingdependencies.details" => "This mod is missing dependencies: {0}",
+            "@mod.erroredcontent.details" => "This mod caused errors when loading. Ask the mod author to fix them.",
+            "@mod.circulardependencies.details" => {
+                "This mod has dependencies that depends on each other."
+            }
+            "@mod.incompletedependencies.details" => {
+                "This mod is unable to be loaded due to invalid or missing dependencies: {0}."
+            }
+            "@server.hidden" => "Hidden",
+            _ => key,
+        }
+        .to_string()
+    }
+
+    fn mods_route_mod_state_text_at_index(&self, index: usize) -> Option<String> {
+        let snapshot = self.mods_route_mod_state_snapshot_at_index(index);
+        if !snapshot.enabled {
+            return Some(self.mods_route_localize_status_bundle_text("@mod.disabled"));
+        }
+        Self::mods_route_mod_state_text_key(snapshot.state)
+            .map(|key| self.mods_route_localize_status_bundle_text(key))
+    }
+
+    fn mods_route_mod_state_details_at_index(&self, index: usize) -> Vec<String> {
+        let snapshot = self.mods_route_mod_state_snapshot_at_index(index);
+        let mut details = Vec::new();
+        if !snapshot.enabled {
+            details.push(self.mods_route_localize_status_bundle_text("@mod.disabled"));
+        }
+        if let Some(key) = Self::mods_route_mod_state_details_key(snapshot.state) {
+            details.push(self.mods_route_format_mod_state_details(key, &snapshot.dependencies));
+        }
+        details
+    }
+
+    fn mods_route_requires_reload(&self) -> bool {
+        self.last_mods_directory_mod_states
+            .iter()
+            .any(|state| state.requires_reload)
+    }
+
     fn mods_route_mod_repo_at_index(&self, index: usize) -> Option<&str> {
         self.mods_route_mod_meta_at_index(index)
             .and_then(|meta| meta.repo.as_deref())
@@ -46835,6 +47015,9 @@ impl DesktopLauncher {
 
     fn mods_route_mod_summary_at_index(&self, index: usize) -> String {
         let mut summary_parts = Vec::new();
+        if let Some(state_text) = self.mods_route_mod_state_text_at_index(index) {
+            summary_parts.push(state_text);
+        }
         let repo = self.mods_route_mod_repo_at_index(index);
         if let Some(repo) = repo {
             summary_parts.push(format!(
@@ -47069,11 +47252,6 @@ impl DesktopLauncher {
                 "download",
             ));
         }
-        specs.push((
-            DesktopMenuRouteShellAction::OpenModsContent(index),
-            "@mods.viewcontent",
-            "book",
-        ));
         specs
     }
 
@@ -47098,6 +47276,16 @@ impl DesktopLauncher {
         )
     }
 
+    fn mods_route_detail_content_button_rect(dialog: RenderRect) -> RenderRect {
+        let width = (dialog.width - 68.0).clamp(220.0, 360.0);
+        RenderRect::new(
+            dialog.center().x - width * 0.5,
+            dialog.y + 70.0,
+            width,
+            46.0,
+        )
+    }
+
     fn mods_route_detail_action_at_point(
         &self,
         panel: RenderRect,
@@ -47112,6 +47300,9 @@ impl DesktopLauncher {
             {
                 return Some(*action);
             }
+        }
+        if Self::mods_route_detail_content_button_rect(dialog).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::OpenModsContent(index));
         }
         None
     }
@@ -47334,6 +47525,10 @@ impl DesktopLauncher {
                 self.localize_bundle_markup_text("@mods.github.open")
             ));
         }
+        if let Some(state_text) = self.mods_route_mod_state_text_at_index(index) {
+            details.push(state_text);
+        }
+        details.extend(self.mods_route_mod_state_details_at_index(index));
         for (row, detail) in details.iter().enumerate() {
             pass.push(RenderCommand::draw_text_styled(
                 detail,
@@ -47360,6 +47555,13 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.083 + button_index as f32 * 0.0005,
             );
         }
+        self.push_settings_text_button(
+            pass,
+            Self::mods_route_detail_content_button_rect(dialog),
+            self.localize_bundle_markup_text("@mods.viewcontent"),
+            Some("book"),
+            Layer::END_PIXELED + 0.086,
+        );
     }
 
     fn push_mods_content_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -47843,6 +48045,21 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.025,
         ));
+
+        if self.mods_route_requires_reload() {
+            pass.push(RenderCommand::draw_text_styled(
+                self.mods_route_localize_status_bundle_text("@mod.reloadrequired"),
+                RenderPoint::new(panel.center().x, panel.y + panel.height - 92.0),
+                [1.0, 0.48, 0.42, 1.0],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.0255,
+            ));
+        }
 
         for (index, (label, icon)) in [
             ("@mods.guide", "link"),
@@ -64474,6 +64691,111 @@ version: "3.0.0"
     }
 
     #[test]
+    fn desktop_launcher_mods_route_renders_state_and_reload_required_like_java_dialog() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
+        launcher.last_mods_directory_mod_names = vec!["alpha".into(), "beta".into()];
+        launcher.last_mods_directory_mod_roots =
+            vec!["C:/mods/alpha pack".into(), "C:/mods/beta".into()];
+        launcher.last_mods_directory_mod_metas = vec![
+            ModMetadata::from_source_text(
+                "alpha",
+                Some("mod.hjson"),
+                r#"
+name: alpha
+displayName: "Alpha Pack"
+author: "Alpha Author"
+version: "1.0.0"
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "beta",
+                Some("mod.hjson"),
+                r#"
+name: beta
+displayName: "Beta Override"
+author: "Beta Author"
+version: "2.0.0"
+"#,
+            ),
+        ];
+        launcher.last_mods_directory_mod_states = vec![
+            super::DesktopModsRouteModStateSnapshot {
+                enabled: false,
+                state: super::DesktopModsRouteModStateKind::UnmetDependencies,
+                dependencies: vec!["alpha-lib".into(), "core-ext".into()],
+                requires_reload: true,
+            },
+            super::DesktopModsRouteModStateSnapshot {
+                enabled: true,
+                state: super::DesktopModsRouteModStateKind::ErroredContent,
+                dependencies: Vec::new(),
+                requires_reload: false,
+            },
+        ];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+
+        assert!(launcher.mods_route_requires_reload());
+        let alpha_summary = launcher.mods_route_mod_summary_at_index(0);
+        assert!(alpha_summary.contains("Disabled"), "{alpha_summary}");
+        assert!(launcher
+            .mods_route_mod_state_details_at_index(0)
+            .iter()
+            .any(|detail| detail.contains("alpha-lib") && detail.contains("core-ext")));
+
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Mods);
+        assert!(lines.contains(&"banner: @mod.reloadrequired".to_string()));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("mod state: Alpha Pack") && line.contains("Disabled")));
+        assert!(lines.iter().any(|line| line.contains("Content Errors")));
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods state frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.iter().any(|text| text.contains("Restart Required")));
+        assert!(texts.iter().any(|text| text.contains("Disabled")));
+        assert!(texts.iter().any(|text| text.contains("Content Errors")));
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsDetail(0),
+        );
+        let detail_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let detail_texts = detail_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods detail state frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(detail_texts.iter().any(|text| text.contains("Disabled")));
+        assert!(detail_texts
+            .iter()
+            .any(|text| text.contains("missing dependencies") && text.contains("alpha-lib")));
+        assert!(detail_texts.contains(&"View Content"));
+    }
+
+    #[test]
     fn desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.settings_locale = "en".into();
@@ -64907,7 +65229,7 @@ repo: "Beta/Override"
             vec!["file:///C:/mods/alpha%20pack".to_string()]
         );
 
-        let view_content = DesktopLauncher::schematic_info_button_rect(dialog, 2).center();
+        let view_content = DesktopLauncher::mods_route_detail_content_button_rect(dialog).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
@@ -65017,8 +65339,8 @@ repo: "Beta/Override"
         assert!(beta_texts.contains(&"Reinstall"));
         let beta_button_count = launcher.mods_route_detail_button_specs(1).len();
         assert_eq!(
-            beta_button_count, 5,
-            "Java showMod with folder + repo exposes back, folder, repo, reinstall and view content"
+            beta_button_count, 4,
+            "Java showMod top row exposes back, folder, repo and reinstall; view content is a separate block"
         );
         let repo_button =
             DesktopLauncher::mods_route_detail_button_rect(dialog, 2, beta_button_count).center();
@@ -65041,7 +65363,7 @@ repo: "Beta/Override"
             Some(super::DesktopMenuRouteShellAction::ModsDetailReinstall(1))
         );
         let view_content_button =
-            DesktopLauncher::mods_route_detail_button_rect(dialog, 4, beta_button_count).center();
+            DesktopLauncher::mods_route_detail_content_button_rect(dialog).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
