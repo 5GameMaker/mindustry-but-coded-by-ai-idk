@@ -259,6 +259,7 @@ const MODS_ROUTE_MOD_CARD_WIDTH_MAX: f32 = 520.0;
 const MODS_ROUTE_MOD_CARD_HEIGHT: f32 = 110.0;
 const MODS_ROUTE_MOD_CARD_GAP: f32 = 8.0;
 const MODS_ROUTE_MOD_CARD_ACTION_SIZE: f32 = 50.0;
+const MODS_ROUTE_MAIN_ACTION_COUNT: usize = 4;
 const PAUSE_OVERLAY_PANEL_WIDTH: f32 = 304.0;
 const PAUSE_OVERLAY_PANEL_TOP_MARGIN: f32 = 54.0;
 const PAUSE_OVERLAY_TITLE_HEIGHT: f32 = 34.0;
@@ -3652,6 +3653,7 @@ pub enum DesktopMenuRouteShellAction {
     CloseTechTreeNode,
     FocusModsSearch,
     ClearModsSearch,
+    OpenModsDirectory,
     OpenModsImport,
     CloseModsImport,
     ModsImportFile,
@@ -3765,6 +3767,13 @@ pub enum DesktopMenuPlatformAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopModsFolderAction {
     pub index: usize,
+    pub path: String,
+    pub uri: String,
+    pub opened: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopModsDirectoryAction {
     pub path: String,
     pub uri: String,
     pub opened: bool,
@@ -18033,6 +18042,7 @@ pub struct DesktopLauncher {
     pub last_mods_reload_action: Option<DesktopModsReloadAction>,
     pub last_mods_delete_result: Option<DesktopModsDeleteResult>,
     pub last_mods_folder_action: Option<DesktopModsFolderAction>,
+    pub last_mods_directory_action: Option<DesktopModsDirectoryAction>,
     pub last_mods_content_index: Option<usize>,
     pub last_mods_content_entry_index: Option<usize>,
     pub mods_content_dialog_index: Option<usize>,
@@ -19223,6 +19233,7 @@ impl DesktopLauncher {
             last_mods_reload_action: None,
             last_mods_delete_result: None,
             last_mods_folder_action: None,
+            last_mods_directory_action: None,
             last_mods_content_index: None,
             last_mods_content_entry_index: None,
             mods_content_dialog_index: None,
@@ -36364,9 +36375,12 @@ impl DesktopLauncher {
                 return Some(DesktopMenuRouteShellAction::FocusModsSearch);
             }
             if Self::mods_route_action_button_rect_for_panel(panel, 1).contains_point(point) {
-                return Some(DesktopMenuRouteShellAction::OpenModsImport);
+                return Some(DesktopMenuRouteShellAction::OpenModsDirectory);
             }
             if Self::mods_route_action_button_rect_for_panel(panel, 2).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::OpenModsImport);
+            }
+            if Self::mods_route_action_button_rect_for_panel(panel, 3).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::OpenModsBrowser);
             }
             if self.mods_selected_mod_index.is_none() {
@@ -36778,6 +36792,27 @@ impl DesktopLauncher {
         };
         self.last_mods_folder_action = Some(action.clone());
         Some(action)
+    }
+
+    fn mods_route_directory_path(&self) -> String {
+        self.mods_directory_arg
+            .as_deref()
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| self.client.context.paths.mod_dir.clone())
+    }
+
+    fn dispatch_mods_directory_action_with_platform<P: Platform>(
+        &mut self,
+        platform: &mut P,
+    ) -> DesktopModsDirectoryAction {
+        let path = self.mods_route_directory_path();
+        let uri = Self::mods_folder_uri_for_path(&path);
+        let opened = platform.open_uri(&uri);
+        let action = DesktopModsDirectoryAction { path, uri, opened };
+        self.last_mods_directory_action = Some(action.clone());
+        action
     }
 
     fn dispatch_mods_listing_action_with_platform<P: Platform>(
@@ -38150,6 +38185,10 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::ClearModsSearch => {
                 self.mods_search.clear();
                 self.mods_search_focused = true;
+            }
+            DesktopMenuRouteShellAction::OpenModsDirectory => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_mods_directory_action_with_platform(&mut platform);
             }
             DesktopMenuRouteShellAction::OpenModsImport => {
                 self.mods_import_dialog_open = true;
@@ -48333,6 +48372,7 @@ impl DesktopLauncher {
     fn mods_route_lines(&self) -> Vec<String> {
         let mut lines = vec![
             "button: @mods.guide Icon.link".into(),
+            "button: @mods.openfolder Icon.link".into(),
             "button: @mod.import Icon.add".into(),
             "button: @mods.browser Icon.menu".into(),
         ];
@@ -48535,9 +48575,11 @@ impl DesktopLauncher {
 
     fn mods_route_action_button_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
         let gap = 8.0;
-        let width = ((panel.width - 56.0 - gap * 2.0) / 3.0).clamp(120.0, 220.0);
+        let count = MODS_ROUTE_MAIN_ACTION_COUNT as f32;
+        let width = ((panel.width - 56.0 - gap * (count - 1.0)) / count).clamp(76.0, 180.0);
+        let total = width * count + gap * (count - 1.0);
         RenderRect::new(
-            panel.x + 28.0 + index as f32 * (width + gap),
+            panel.center().x - total * 0.5 + index as f32 * (width + gap),
             panel.y + panel.height - 128.0,
             width,
             44.0,
@@ -50121,6 +50163,7 @@ impl DesktopLauncher {
 
         for (index, (label, icon)) in [
             ("@mods.guide", "link"),
+            ("@mods.openfolder", "link"),
             ("@mod.import", "add"),
             ("@mods.browser", "menu"),
         ]
@@ -66661,6 +66704,7 @@ version: "2.0.0"
     fn desktop_launcher_mods_route_renders_scanned_mod_cards_and_back_button() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.settings_locale = "en".into();
+        launcher.mods_directory_arg = Some("C:/mods directory".into());
         launcher.last_mods_directory_mod_names =
             vec!["alpha".into(), "beta".into(), "gamma".into()];
         launcher.last_mods_directory_mod_roots =
@@ -66724,10 +66768,38 @@ repo: "Beta/Override"
             .any(|text| text.contains("Repo Beta/Override") && text.contains("Reinstall")));
         assert!(!texts.iter().any(|text| text.contains("Install")));
         assert!(texts.contains(&"Back"));
+        assert!(texts.contains(&"Open Folder"));
         assert!(texts.contains(&"Import Mod"));
         assert!(!texts.contains(&"browser search: Icon.zoom + Icon.list"));
         let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Mods);
         assert!(lines.contains(&"browser: BaseDialog @mods.browser".to_string()));
+
+        let open_folder =
+            DesktopLauncher::mods_route_action_button_rect_for_panel(panel, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                open_folder.x,
+                open_folder.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::OpenModsDirectory)
+        );
+        let mut platform = RecordingPlatform {
+            open_result: true,
+            ..Default::default()
+        };
+        let directory_action = launcher.dispatch_mods_directory_action_with_platform(&mut platform);
+        assert_eq!(directory_action.path, "C:/mods directory");
+        assert_eq!(directory_action.uri, "file:///C:/mods%20directory");
+        assert!(directory_action.opened);
+        assert_eq!(
+            launcher.last_mods_directory_action,
+            Some(directory_action.clone())
+        );
+        assert_eq!(
+            platform.opened_uris,
+            vec!["file:///C:/mods%20directory".to_string()]
+        );
 
         let back = DesktopLauncher::route_back_button_rect_for_panel(panel).center();
         assert_eq!(
@@ -67396,7 +67468,7 @@ version: "1.0.0"
             super::DesktopMenuRoute::Mods,
         );
         let browser_button =
-            DesktopLauncher::mods_route_action_button_rect_for_panel(panel, 2).center();
+            DesktopLauncher::mods_route_action_button_rect_for_panel(panel, 3).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
@@ -67733,7 +67805,7 @@ version: "1.0.0"
             viewport,
             super::DesktopMenuRoute::Mods,
         );
-        let import = DesktopLauncher::mods_route_action_button_rect_for_panel(panel, 1).center();
+        let import = DesktopLauncher::mods_route_action_button_rect_for_panel(panel, 2).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(surface, import.x, import.y),
             Some(super::DesktopMenuRouteShellAction::OpenModsImport)
@@ -71194,6 +71266,7 @@ repo: "Beta/Override"
                 super::DesktopMenuRoute::Mods,
                 &[
                     "button: @mods.guide Icon.link",
+                    "button: @mods.openfolder Icon.link",
                     "button: @mod.import Icon.add",
                     "empty: [lightgray]No mods found!",
                     "hint: Import Mod / Mod Browser",

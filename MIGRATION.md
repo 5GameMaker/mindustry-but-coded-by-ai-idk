@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 787. ModsDialog 桌面端打开模组目录入口对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **92.1%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容、性能收口与所有子菜单接近原版。
+- 背景：
+  - Java `ModsDialog` 在桌面端通过 `buttons.button("@mods.openfolder", Icon.link, ...)` 提供打开整个 mods 目录入口；
+  - Rust 此前 Mods 主页只有 `@mods.guide`、`@mod.import`、`@mods.browser`，只有详情页能打开单个 mod 根目录。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopModsDirectoryAction` 与 `OpenModsDirectory` 路由动作；
+    - Mods 主按钮区从 3 个改为 4 个：Guide / Open Folder / Import / Browser；
+    - 主入口打开的是整个 mods 目录：优先使用 `--mods`/`--mods-dir` 参数，否则回退到 `client.context.paths.mod_dir`；
+    - 保留原有 `OpenModsFolder(index)` 作为单个 mod 根目录动作，避免混用假 index；
+    - 扩展 Mods 主路由测试，锁定 `@mods.openfolder` 文案、命中动作、file URI 转义和平台打开记录。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop mods_route --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Mods detail 仍需按 Java 隐藏空内容的 `View Content`，Steam/workshop mod 详情页不应显示 reinstall；
+  - Mods Browser 仍需继续对齐 Java 的远端 listing、选择弹窗与真实 release 列表；
+  - 完整客户端可玩性、前端性能缓存/批处理和联机 smoke test 仍未达成。
+
 ## 786. ModsDialog 模组卡片尺寸与图标按钮对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
@@ -38,7 +62,6 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo check -p mindustry-desktop --features opengl-native-runtime`
   - `git diff --check`
 - 仍未完成：
-  - ModsDialog 主入口仍需补 `@mods.openfolder`；
   - Mods detail 仍需按 Java 隐藏空内容的 `View Content`，Steam/workshop mod 详情页不应显示 reinstall；
   - Mods Browser 仍需继续对齐 Java 的远端 listing、选择弹窗与真实 release 列表；
   - 完整客户端可玩性、前端性能缓存/批处理和联机 smoke test 仍未达成。
