@@ -39123,28 +39123,11 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.034,
         );
 
-        let local_detail = if self.join_route_section_collapsed(DesktopJoinSection::Local) {
-            "@collapsed".to_string()
-        } else if self.join_local_discovering {
-            "@hosts.discovering.any".to_string()
-        } else if self.join_local_hosts.is_empty() {
-            "@hosts.none".to_string()
-        } else {
-            let first = &self.join_local_hosts[0];
-            format!(
-                "{}  {}/{}  {}ms",
-                first.name, first.players, first.player_limit, first.ping
-            )
-        };
-        for (index, (section, detail)) in [
-            (DesktopJoinSection::Local, local_detail.as_str()),
-            (DesktopJoinSection::Remote, "@server.saved"),
-        ]
-        .into_iter()
-        .enumerate()
+        for (index, section) in [DesktopJoinSection::Local, DesktopJoinSection::Remote]
+            .into_iter()
+            .enumerate()
         {
             let label = self.localize_bundle_markup_text(self.join_route_section_label(section));
-            let detail = self.localize_bundle_markup_text(detail);
             let collapsed = self.join_route_section_collapsed(section);
             let y = Self::join_route_section_header_y_for_panel(panel, section);
             pass.push(RenderCommand::draw_text_styled(
@@ -39158,17 +39141,6 @@ impl DesktopLauncher {
                     .with_integer_position(true)
                     .with_outline(true),
                 Layer::END_PIXELED + 0.03 + index as f32 * 0.001,
-            ));
-            pass.push(RenderCommand::draw_text_styled(
-                detail,
-                RenderPoint::new(panel.x + 188.0, y),
-                [0.58, 0.68, 0.76, 1.0],
-                10.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Start)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
-                Layer::END_PIXELED + 0.031 + index as f32 * 0.001,
             ));
             let divider_start = RenderPoint::new(panel.x + 148.0, y - 1.0);
             let divider_end = RenderPoint::new(panel.x + panel.width - 76.0, y - 1.0);
@@ -82174,6 +82146,38 @@ repo: "Beta/Override"
 
         let surface = DesktopSurfaceSize::new(1280, 720);
         let viewport = launcher.default_render_viewport_for_surface(surface);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let route_texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("join route should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(route_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@servers.local")
+                .as_str()
+        ));
+        assert!(route_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@servers.remote")
+                .as_str()
+        ));
+        assert!(
+            !route_texts.contains(
+                &launcher
+                    .localize_bundle_markup_text("@server.saved")
+                    .as_str()
+            ),
+            "Java JoinDialog section headers do not render a Rust-only saved-server summary"
+        );
         let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
             viewport,
             super::DesktopMenuRoute::Join,

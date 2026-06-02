@@ -17,6 +17,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 758. JoinDialog section 标题栏摘要瘦身
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **89.2%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `JoinDialog` 的 local/remote section 标题栏主要显示 section label、分隔线与折叠按钮；
+  - Rust 此前在标题右侧额外绘制本地发现/首个 host 摘要和 `@server.saved` 文案，观感更像页面摘要而不是原版 dialog section。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_join_route_page(...)` 移除 Local/Remote section 标题栏右侧 detail 文案；
+    - 保留 section label、分隔线、折叠按钮和实际 server card 列表；
+    - Join route skeleton 测试断言仍渲染 `@servers.local`/`@servers.remote`，但不再渲染 `@server.saved` 标题栏摘要。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop join --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - JoinDialog 的整体 route shell 与 Java `BaseDialog` 底部按钮外壳仍有差异；
+  - 社区服区域仍需继续弱化双标题层级并对齐 Java `ServerGroup` 展示节奏。
+
 ## 757. JoinDialog F5 刷新快捷键对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
