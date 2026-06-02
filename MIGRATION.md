@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 763. ModsDialog releases 子弹窗与按钮图标对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **89.7%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `ModsDialog` 的 `@mods.browser.view-releases` 会打开内嵌 `@mods.browser.releases` 弹窗，展示 release 列表、`@mods.github.open-release`、`@mods.browser.add` 与 `@back`，而不是直接跳浏览器；
+  - Java sort 按钮在 `Icon.list`/`Icon.star` 间切换，browser 卡片动作按钮使用 `download/link/zoom` 图标。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 release modal 状态与 `DesktopModsBrowserReleaseEntry`；
+    - `ViewReleases` 改为打开内部 releases 弹窗，不再直接 `open_uri(.../releases)`；
+    - releases 弹窗支持 Back/Escape 收口、底层 browser 点击阻断、release page/install 按钮命中；
+    - sort stars 态图标从 `menu` 改为 `star`；
+    - browser 卡片动作按钮补 `download/link/zoom` 图标。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop mods_browser --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop mods_route --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - releases 列表目前是离线 front-end stub，后续需要接入真实 GitHub releases JSON、空态 `@mods.browser.noreleases` 和 release 下载导入链；
+  - browser 列表的真实 stars/date 字段仍需从 Java `ModListing` 等价数据源补齐。
+
 ## 762. ModsDialog 浏览器搜索与排序语义对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
