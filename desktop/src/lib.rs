@@ -176,6 +176,7 @@ const SETTINGS_KEYBIND_REBIND_WIDTH: f32 = 140.0;
 const SETTINGS_KEYBIND_RESET_WIDTH: f32 = 140.0;
 const SETTINGS_KEYBIND_RESET_ALL_HEIGHT: f32 = 50.0;
 const SETTINGS_KEYBIND_VISIBLE_ROWS: usize = 6;
+const MAP_PLAY_CUSTOM_RULE_SEARCH_MAX_LENGTH: usize = 96;
 const JOIN_SERVER_CARD_HEIGHT: f32 = 132.0;
 const JOIN_SERVER_CARD_GAP: f32 = 10.0;
 const JOIN_SERVER_CARD_COLUMN_GAP: f32 = 8.0;
@@ -1402,6 +1403,8 @@ pub enum DesktopMapCardActionKind {
     ShowModeHelp,
     ToggleCustomRule(DesktopCustomRulesToggle),
     AdjustCustomRuleNumber(DesktopCustomRulesNumber, i32),
+    FocusCustomRulesSearch,
+    ClearCustomRulesSearch,
     OpenCustomRulesEdit,
     CloseCustomRulesEdit,
     CopyCustomRules,
@@ -17756,6 +17759,8 @@ pub struct DesktopLauncher {
     pub map_play_selected_mode: Gamemode,
     pub map_play_mode_help_dialog_open: bool,
     pub map_play_customize_dialog_open: bool,
+    pub map_play_custom_rules_search: String,
+    pub map_play_custom_rules_search_focused: bool,
     pub map_play_rules_edit_dialog_open: bool,
     pub map_play_banned_content_dialog: Option<DesktopBannedContentKind>,
     pub map_play_banned_content_search: String,
@@ -18936,6 +18941,8 @@ impl DesktopLauncher {
             map_play_selected_mode: Gamemode::Survival,
             map_play_mode_help_dialog_open: false,
             map_play_customize_dialog_open: false,
+            map_play_custom_rules_search: String::new(),
+            map_play_custom_rules_search_focused: false,
             map_play_rules_edit_dialog_open: false,
             map_play_banned_content_dialog: None,
             map_play_banned_content_search: String::new(),
@@ -31753,6 +31760,19 @@ impl DesktopLauncher {
         )
     }
 
+    fn map_play_customize_search_rect(child: RenderRect) -> RenderRect {
+        RenderRect::new(
+            child.x + 32.0,
+            child.y + child.height - 78.0,
+            child.width - 64.0,
+            30.0,
+        )
+    }
+
+    fn map_play_customize_search_clear_rect(search: RenderRect) -> RenderRect {
+        RenderRect::new(search.right() - 34.0, search.y, 30.0, search.height)
+    }
+
     fn map_play_rules_edit_dialog_rect(child: RenderRect) -> RenderRect {
         let width = (child.width - 96.0).clamp(360.0, 460.0);
         let height = 250.0;
@@ -31776,21 +31796,30 @@ impl DesktopLauncher {
     }
 
     fn map_play_customize_toggle_rects(
+        &self,
         content: RenderRect,
     ) -> Vec<(DesktopCustomRulesToggle, RenderRect)> {
         let mut y = content.y + content.height - 20.0;
         let mut rects = Vec::new();
         for (_, toggles) in MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS {
+            let visible_toggles = toggles
+                .iter()
+                .copied()
+                .filter(|toggle| self.map_play_custom_rule_label_matches(toggle.label_key()))
+                .collect::<Vec<_>>();
+            if visible_toggles.is_empty() {
+                continue;
+            }
             if y < content.y + 34.0 {
                 break;
             }
             y -= 36.0;
-            for toggle in *toggles {
+            for toggle in visible_toggles {
                 if y < content.y + 18.0 {
                     return rects;
                 }
                 rects.push((
-                    *toggle,
+                    toggle,
                     RenderRect::new(content.x + 16.0, y - 12.0, content.width - 32.0, 22.0),
                 ));
                 y -= 24.0;
@@ -31829,6 +31858,15 @@ impl DesktopLauncher {
             (number_row.x - content.x - 28.0).max(150.0),
             number_row.height,
         )
+    }
+
+    fn map_play_custom_rule_label_matches(&self, label_key: &'static str) -> bool {
+        let query = schematic_search_normalize(self.map_play_custom_rules_search.trim());
+        if query.is_empty() {
+            return true;
+        }
+        let localized = self.localize_bundle_markup_text(label_key);
+        schematic_search_normalize(&localized).contains(query.as_str())
     }
 
     fn map_play_banned_content_dialog_rect(child: RenderRect) -> RenderRect {
@@ -34655,6 +34693,26 @@ impl DesktopLauncher {
                             }
                             return None;
                         }
+                        let search = Self::map_play_customize_search_rect(child);
+                        if search.contains_point(point) {
+                            if !self.map_play_custom_rules_search.is_empty()
+                                && Self::map_play_customize_search_clear_rect(search)
+                                    .contains_point(point)
+                            {
+                                return Some(DesktopMenuRouteShellAction::MapCard(
+                                    DesktopMapCardAction::new(
+                                        index,
+                                        DesktopMapCardActionKind::ClearCustomRulesSearch,
+                                    ),
+                                ));
+                            }
+                            return Some(DesktopMenuRouteShellAction::MapCard(
+                                DesktopMapCardAction::new(
+                                    index,
+                                    DesktopMapCardActionKind::FocusCustomRulesSearch,
+                                ),
+                            ));
+                        }
                         if Self::map_play_customize_edit_button_rect(child, 0).contains_point(point)
                         {
                             return Some(DesktopMenuRouteShellAction::MapCard(
@@ -34726,6 +34784,9 @@ impl DesktopLauncher {
                         for (number_index, number) in
                             DesktopCustomRulesNumber::ALL.into_iter().enumerate()
                         {
+                            if !self.map_play_custom_rule_label_matches(number.label_key()) {
+                                continue;
+                            }
                             if !number.enabled(&rules) {
                                 continue;
                             }
@@ -34756,6 +34817,9 @@ impl DesktopLauncher {
                             .iter()
                             .enumerate()
                         {
+                            if !self.map_play_custom_rule_label_matches(toggle.label_key()) {
+                                continue;
+                            }
                             let row = Self::map_play_customize_banned_policy_row_rect(
                                 content,
                                 policy_index,
@@ -34769,7 +34833,7 @@ impl DesktopLauncher {
                                 ));
                             }
                         }
-                        for (toggle, rect) in Self::map_play_customize_toggle_rects(content) {
+                        for (toggle, rect) in self.map_play_customize_toggle_rects(content) {
                             if rect.contains_point(point) && toggle.enabled(&rules) {
                                 return Some(DesktopMenuRouteShellAction::MapCard(
                                     DesktopMapCardAction::new(
@@ -36653,6 +36717,25 @@ impl DesktopLauncher {
                             self.map_play_banned_content_dialog = None;
                             self.map_play_weather_dialog_open = false;
                         }
+                        DesktopMapCardActionKind::FocusCustomRulesSearch => {
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_custom_rules_search_focused = true;
+                            self.map_play_mode_help_dialog_open = false;
+                            self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
+                            self.map_play_weather_dialog_open = false;
+                            self.map_play_team_rules_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::ClearCustomRulesSearch => {
+                            self.map_play_custom_rules_search.clear();
+                            self.map_play_custom_rules_search_focused = true;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                            self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
+                            self.map_play_weather_dialog_open = false;
+                            self.map_play_team_rules_dialog_open = false;
+                        }
                         DesktopMapCardActionKind::OpenCustomRulesEdit => {
                             self.map_play_rules_edit_dialog_open = true;
                             self.map_play_banned_content_dialog = None;
@@ -36660,6 +36743,7 @@ impl DesktopLauncher {
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_rules_error = None;
+                            self.map_play_custom_rules_search_focused = false;
                         }
                         DesktopMapCardActionKind::CloseCustomRulesEdit => {
                             self.map_play_rules_edit_dialog_open = false;
@@ -36672,6 +36756,7 @@ impl DesktopLauncher {
                                 &mut platform,
                             );
                             self.map_play_rules_edit_dialog_open = true;
+                            self.map_play_custom_rules_search_focused = false;
                         }
                         DesktopMapCardActionKind::LoadCustomRules => {
                             let mut platform = DefaultPlatform;
@@ -36680,6 +36765,7 @@ impl DesktopLauncher {
                                 &mut platform,
                             );
                             self.map_play_rules_edit_dialog_open = true;
+                            self.map_play_custom_rules_search_focused = false;
                         }
                         DesktopMapCardActionKind::ResetCustomRules => {
                             let _ = self.reset_map_play_rules_for_map(action.index);
@@ -36695,6 +36781,7 @@ impl DesktopLauncher {
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_rules_error = None;
+                            self.map_play_custom_rules_search_focused = false;
                         }
                         DesktopMapCardActionKind::CloseBannedContent => {
                             self.map_play_banned_content_dialog = None;
@@ -36761,6 +36848,7 @@ impl DesktopLauncher {
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_rules_error = None;
+                            self.map_play_custom_rules_search_focused = false;
                         }
                         DesktopMapCardActionKind::CloseWeather => {
                             self.map_play_weather_dialog_open = false;
@@ -36774,6 +36862,7 @@ impl DesktopLauncher {
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_rules_error = None;
+                            self.map_play_custom_rules_search_focused = false;
                         }
                         DesktopMapCardActionKind::CloseWeatherAdd => {
                             self.map_play_weather_add_dialog_open = false;
@@ -36834,6 +36923,7 @@ impl DesktopLauncher {
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_rules_error = None;
+                            self.map_play_custom_rules_search_focused = false;
                         }
                         DesktopMapCardActionKind::CloseTeamRules => {
                             self.map_play_team_rules_dialog_open = false;
@@ -36938,6 +37028,7 @@ impl DesktopLauncher {
                 self.editor_map_info_dialog_index = None;
                 self.map_play_mode_help_dialog_open = false;
                 self.map_play_customize_dialog_open = false;
+                self.map_play_custom_rules_search_focused = false;
                 self.map_play_rules_edit_dialog_open = false;
                 self.map_play_banned_content_dialog = None;
                 self.map_play_weather_dialog_open = false;
@@ -36950,6 +37041,7 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::CloseMapPlayCustomize => {
                 self.map_play_customize_dialog_open = false;
+                self.map_play_custom_rules_search_focused = false;
                 self.map_play_rules_edit_dialog_open = false;
                 self.map_play_banned_content_dialog = None;
                 self.map_play_weather_dialog_open = false;
@@ -42297,6 +42389,9 @@ impl DesktopLauncher {
         layer: f32,
     ) {
         for (index, number) in DesktopCustomRulesNumber::ALL.into_iter().enumerate() {
+            if !self.map_play_custom_rule_label_matches(number.label_key()) {
+                continue;
+            }
             let row = Self::map_play_customize_number_row_rect(content, index);
             let enabled = number.enabled(rules);
             pass.push(RenderCommand::draw_sprite(
@@ -42374,6 +42469,9 @@ impl DesktopLauncher {
             .copied()
             .enumerate()
         {
+            if !self.map_play_custom_rule_label_matches(toggle.label_key()) {
+                continue;
+            }
             let row = Self::map_play_customize_banned_policy_row_rect(content, index);
             let value = toggle.value(rules);
             pass.push(RenderCommand::draw_sprite(
@@ -42428,37 +42526,82 @@ impl DesktopLauncher {
             .map_play_rules
             .clone()
             .unwrap_or_else(|| Self::map_play_rules_for_mode(map, self.map_play_selected_mode));
-        let search = RenderRect::new(
-            child.x + 32.0,
-            child.y + child.height - 78.0,
-            child.width - 64.0,
-            30.0,
-        );
+        let search = Self::map_play_customize_search_rect(child);
         pass.push(RenderCommand::draw_sprite(
-            Self::settings_text_button_symbol("grayt", false, false),
+            Self::settings_text_button_symbol(
+                "grayt",
+                false,
+                self.map_play_custom_rules_search_focused,
+            ),
             search,
-            [1.0, 1.0, 1.0, 0.72],
+            if self.map_play_custom_rules_search_focused {
+                [1.0, 1.0, 1.0, 0.96]
+            } else {
+                [1.0, 1.0, 1.0, 0.84]
+            },
             0.0,
             layer + 0.004,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            format!(
-                "{} {}",
-                self.localize_bundle_markup_text("@search"),
-                self.localize_bundle_markup_text(format!(
-                    "@mode.{}.name",
-                    self.map_play_selected_mode.wire_name()
-                ))
-            ),
-            RenderPoint::new(search.x + 16.0, search.center().y),
-            [0.70, 0.82, 0.90, 1.0],
+            desktop_ui_icon_glyph_or_label("zoom", "zoom"),
+            RenderPoint::new(search.x + 20.0, search.center().y),
+            [0.72, 0.82, 0.9, 1.0],
+            13.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.0045,
+        ));
+        let search_text = if self.map_play_custom_rules_search.is_empty() {
+            self.localize_bundle_markup_text_or("@search", "Search")
+        } else {
+            self.map_play_custom_rules_search.clone()
+        };
+        pass.push(RenderCommand::draw_text_styled(
+            search_text,
+            RenderPoint::new(search.x + 40.0, search.center().y),
+            if self.map_play_custom_rules_search.is_empty() {
+                [0.60, 0.70, 0.78, 1.0]
+            } else {
+                [0.90, 0.96, 1.0, 1.0]
+            },
             10.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Start)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_wrap_width((search.width - 80.0).max(80.0))
                 .with_integer_position(true),
             layer + 0.005,
         ));
+        if self.map_play_custom_rules_search_focused {
+            let cursor_x =
+                (search.x + 40.0 + self.map_play_custom_rules_search.chars().count() as f32 * 6.0)
+                    .min(search.right() - 42.0);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_text_field_cursor_symbol(),
+                RenderRect::new(cursor_x, search.y + 6.0, 2.0, search.height - 12.0),
+                [1.0, 1.0, 1.0, 0.95],
+                0.0,
+                layer + 0.0055,
+            ));
+        }
+        if !self.map_play_custom_rules_search.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                "×",
+                Self::map_play_customize_search_clear_rect(search).center(),
+                [0.90, 0.96, 1.0, 1.0],
+                15.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.006,
+            ));
+        }
 
         let content = Self::map_play_customize_content_rect(child);
         pass.push(RenderCommand::draw_sprite(
@@ -42478,6 +42621,14 @@ impl DesktopLauncher {
         let mut y = content.y + content.height - 20.0;
         let mut row_index = 0usize;
         'categories: for (title_key, toggles) in MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS {
+            let visible_toggles = toggles
+                .iter()
+                .copied()
+                .filter(|toggle| self.map_play_custom_rule_label_matches(toggle.label_key()))
+                .collect::<Vec<_>>();
+            if visible_toggles.is_empty() {
+                continue;
+            }
             if y < content.y + 34.0 {
                 break;
             }
@@ -42501,7 +42652,7 @@ impl DesktopLauncher {
                 layer + 0.011 + row_index as f32 * 0.001,
             ));
             y -= 20.0;
-            for toggle in *toggles {
+            for toggle in visible_toggles {
                 if y < content.y + 18.0 {
                     break 'categories;
                 }
@@ -45835,6 +45986,26 @@ impl DesktopLauncher {
                             self.active_menu_route,
                             Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
                         )
+                        && self.map_play_customize_dialog_open
+                        && self.map_play_custom_rules_search_focused
+                        && !self.map_play_rules_edit_dialog_open
+                        && self.map_play_banned_content_dialog.is_none()
+                        && !self.map_play_weather_dialog_open
+                        && !self.map_play_team_rules_dialog_open
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.map_play_custom_rules_search.pop();
+                    } else {
+                        self.map_play_custom_rules_search.clear();
+                    }
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && matches!(
+                            self.active_menu_route,
+                            Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
+                        )
                         && self.map_play_banned_content_dialog.is_some()
                         && self.map_play_banned_content_search_focused
                         && matches!(key_code.as_str(), "Backspace" | "Delete") =>
@@ -46274,6 +46445,24 @@ impl DesktopLauncher {
                             self.editor_new_map_name_text.push(ch);
                         }
                         self.editor_new_map_error = None;
+                    } else if matches!(
+                        self.active_menu_route,
+                        Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
+                    ) && self.map_play_customize_dialog_open
+                        && self.map_play_custom_rules_search_focused
+                        && !self.map_play_rules_edit_dialog_open
+                        && self.map_play_banned_content_dialog.is_none()
+                        && !self.map_play_weather_dialog_open
+                        && !self.map_play_team_rules_dialog_open
+                    {
+                        for ch in text.chars().filter(|ch| !ch.is_control()) {
+                            if self.map_play_custom_rules_search.len()
+                                >= MAP_PLAY_CUSTOM_RULE_SEARCH_MAX_LENGTH
+                            {
+                                break;
+                            }
+                            self.map_play_custom_rules_search.push(ch);
+                        }
                     } else if matches!(
                         self.active_menu_route,
                         Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
@@ -70520,6 +70709,87 @@ repo: "Beta/Override"
                 .unwrap_or(false),
             "CustomRulesDialog hide banned blocks row should update Rules.hideBannedBlocks"
         );
+        let custom_search = DesktopLauncher::map_play_customize_search_rect(child);
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                custom_search.center().x,
+                custom_search.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(
+                    0,
+                    super::DesktopMapCardActionKind::FocusCustomRulesSearch
+                )
+            ))
+        );
+        launcher.apply_menu_input_events(
+            viewport,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: custom_search.center().x,
+                    y: custom_search.center().y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+                DesktopInputTickEvent::Text("pvp".into()),
+            ],
+        );
+        assert_eq!(launcher.map_play_custom_rules_search, "pvp");
+        assert!(launcher.map_play_custom_rules_search_focused);
+        let filtered_customize_frame = launcher.menu_graphics_frame_for_surface(3, render_viewport);
+        let filtered_customize_texts = filtered_customize_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("filtered custom rules dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(filtered_customize_texts.contains(&"pvp"));
+        assert!(filtered_customize_texts.contains(&"□ PvP"));
+        assert!(!filtered_customize_texts.contains(&"Waves"));
+        assert!(!filtered_customize_texts.contains(&"Map Ends After Wave"));
+        assert!(launcher
+            .map_play_customize_toggle_rects(content)
+            .into_iter()
+            .any(|(toggle, _)| toggle == super::DesktopCustomRulesToggle::Pvp));
+        assert!(!launcher
+            .map_play_customize_toggle_rects(content)
+            .into_iter()
+            .any(|(toggle, _)| toggle == super::DesktopCustomRulesToggle::Waves));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                hide_banned_center.x,
+                hide_banned_center.y
+            ),
+            None,
+            "Java CustomRulesDialog search removes nonmatching rows from hit testing"
+        );
+        let clear_custom_search =
+            DesktopLauncher::map_play_customize_search_clear_rect(custom_search).center();
+        launcher.apply_menu_input_events(
+            viewport,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: clear_custom_search.x,
+                    y: clear_custom_search.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert!(launcher.map_play_custom_rules_search.is_empty());
         let open_banned_blocks_center =
             DesktopLauncher::map_play_customize_edit_button_rect(child, 2).center();
         let open_banned_blocks =
@@ -71069,7 +71339,8 @@ repo: "Beta/Override"
                 .map(|rules| rules.wave_spacing),
             Some(1200.0)
         );
-        let attack_toggle = DesktopLauncher::map_play_customize_toggle_rects(content)
+        let attack_toggle = launcher
+            .map_play_customize_toggle_rects(content)
             .into_iter()
             .find(|(toggle, _)| *toggle == super::DesktopCustomRulesToggle::AttackMode)
             .map(|(_, rect)| rect.center())

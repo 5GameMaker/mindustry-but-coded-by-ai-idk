@@ -17,6 +17,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 755. CustomRulesDialog 搜索输入与规则过滤对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **88.9%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `CustomRulesDialog.setup()` 顶部有真实搜索输入框；
+  - `ruleSearch` 会被 trim/小写归一化，`check/number/team` 等行只有当对应 bundle 文案包含搜索词时才加入表格；
+  - 分类标题只在分类内存在可见行时显示，非匹配行也不会响应点击。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_play_custom_rules_search` 与 `map_play_custom_rules_search_focused` 状态；
+    - `DesktopMapCardActionKind` 新增 `FocusCustomRulesSearch` 与 `ClearCustomRulesSearch`；
+    - `push_map_play_customize_dialog(...)` 顶部静态 `@search + mode` 文案改为 Java 风格搜索输入框，支持放大镜、焦点光标与右侧清空按钮；
+    - 新增 `map_play_custom_rule_label_matches(...)`，按本地化规则文案过滤 toggle/number/banned policy 行；
+    - `map_play_customize_toggle_rects(...)` 改为实例方法，渲染和命中共用过滤后的可见行，避免隐藏行仍可点击；
+    - 键盘 `Text`、`Backspace`、`Delete` 接入 CustomRules 搜索；打开 rules edit/banned/weather/team 子弹窗时关闭搜索焦点；
+    - 测试覆盖聚焦搜索、输入 `pvp`、过滤显示、隐藏行不可点击、清空搜索恢复。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop map_play --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop map_list --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop editor --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `CustomRulesDialog` 仍未完全覆盖 Java 中全部规则项、额外规则 setup 与全部 team/weather 表格细节；
+  - `@waves.edit` 子弹窗仍有 Rust-only 摘要/错误展示，后续需要继续按 Java 弹窗瘦身。
+
 ## 754. MapPlay/MapList/Editor 地图子菜单视觉细节对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
