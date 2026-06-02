@@ -82963,6 +82963,47 @@ repo: "Beta/Override"
     }
 
     #[test]
+    fn desktop_frame_loop_mods_route_card_uses_single_window_to_surface_flip() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::Mods);
+        launcher.last_mods_directory_mod_names = vec!["alpha".into()];
+        let mut frame_loop =
+            DesktopFrameLoopState::new(Default::default(), DesktopFramePacing::uncapped());
+        let mut graphics_renderer = HeadlessDesktopGraphicsRenderer::default();
+        let mut effect_renderer = HeadlessDesktopEffectRenderer::default();
+        let viewport = launcher.default_render_viewport_for_surface(frame_loop.surface.size);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let card_center = DesktopLauncher::mods_route_mod_card_rect_for_panel(panel, 0).center();
+        let window_space_card_y = frame_loop.surface.size.height as f32 - card_center.y;
+
+        let result = launcher.step_desktop_frame_loop(
+            &mut frame_loop,
+            &[
+                DesktopFrameLoopEvent::Input(DesktopInputTickEvent::CursorMoved {
+                    x: card_center.x,
+                    y: window_space_card_y,
+                }),
+                DesktopFrameLoopEvent::Input(DesktopInputTickEvent::MouseButton {
+                    button: "MouseLeft".into(),
+                    pressed: true,
+                }),
+            ],
+            &mut graphics_renderer,
+            &mut effect_renderer,
+        );
+
+        assert!(!result.close_requested);
+        assert_eq!(
+            launcher.last_menu_route_shell_action,
+            Some(super::DesktopMenuRouteShellAction::OpenModsDetail(0))
+        );
+        assert_eq!(launcher.mods_selected_mod_index, Some(0));
+    }
+
+    #[test]
     fn desktop_frame_loop_main_menu_uses_single_window_to_surface_flip() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let mut frame_loop =

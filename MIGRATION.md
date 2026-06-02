@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 746. Frame loop 子菜单卡片点击单次坐标翻转回归
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度保持：约 **88.1%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - 用户此前反馈主页面点击出现上下反转；
+  - Rust 当前约定是 winit/window-space 坐标只在 frame-loop 入口 `menu_input_event_from_window_space(...)` 翻转一次；
+  - `menu_button_at_surface_point(...)`、`menu_chrome_action_at_surface_point(...)` 和 route-shell `*_at_surface_point(...)` 只接收 surface-space，不应再次翻转。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_frame_loop_mods_route_card_uses_single_window_to_surface_flip`；
+    - 覆盖窗口坐标点击 Mods route 内部卡片时，frame-loop 只翻转一次并命中 `OpenModsDetail(0)`；
+    - 与已有 main menu、Join route、menu chrome 单次翻转测试形成组合回归。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_mods_route_card_uses_single_window_to_surface_flip --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_frame_loop --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 后续新增任何 window event 输入入口时，必须继续走 `menu_input_event_from_window_space(...)`；
+  - 仍需补更完整的 route-shell 子菜单/弹窗点击回归，尤其是 MapPlay、Settings Controls、Mods Browser 与 Load/Save 子页面。
+
 ## 745. Native OpenGL 候选策略补齐 legacy 兼容分支
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
