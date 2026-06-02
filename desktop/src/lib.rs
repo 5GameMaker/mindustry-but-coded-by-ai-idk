@@ -28458,13 +28458,6 @@ impl DesktopLauncher {
                 if query.is_empty()
                     || schematic_search_normalize(&self.load_game_slot_display_title(slot))
                         .contains(&query)
-                    || schematic_search_normalize(&slot.index()).contains(&query)
-                    || slot
-                        .file
-                        .file_name()
-                        .and_then(|file| file.to_str())
-                        .map(schematic_search_normalize)
-                        .is_some_and(|file| file.contains(&query))
                 {
                     let mode = Self::load_game_slot_gamemode(slot);
                     (!self.load_game_hidden_modes.contains(&mode)).then_some(index)
@@ -79935,6 +79928,18 @@ repo: "Beta/Override"
             .collect::<Vec<_>>();
         assert!(empty_search_texts
             .contains(&launcher.localize_bundle_markup_text("@save.none").as_str()));
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ClearLoadGameSearch,
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::FocusLoadGameSearch,
+        );
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("2".into())]);
+        assert_eq!(launcher.load_game_search, "2");
+        assert!(
+            launcher.filtered_load_game_slot_indices().is_empty(),
+            "Java LoadDialog search matches slot.getName(), not the slot index or backing file name"
+        );
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::ClearLoadGameSearch,
         );

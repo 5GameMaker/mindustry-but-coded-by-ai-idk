@@ -17,6 +17,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 774. LoadDialog 搜索匹配范围对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **90.8%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `LoadDialog` 搜索只按 `slot.getName()` 过滤；
+  - Rust 之前额外按 slot index 和 `.msav` 文件名兜底匹配，会让搜索结果比原版更宽。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `filtered_load_game_slot_indices()` 只保留显示槽位名匹配；
+    - 扩展 LoadDialog 搜索/滚动测试，锁定地图名、slot index、后端文件名均不参与搜索，只有用户可见槽位名参与过滤。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - LoadDialog 导入失败文案仍需继续对齐 Java 的 `@save.import.invalid / @save.import.fail / @save.nocampaign`；
+  - Settings 子页条件过滤与 description tooltip 是下一批前端原版还原候选。
+
 ## 773. TeamRules 行级 ruleInfo 提示对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
