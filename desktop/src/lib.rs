@@ -45830,6 +45830,22 @@ impl DesktopLauncher {
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
                         && self.active_menu_route == Some(DesktopMenuRoute::Join)
+                        && !self.join_route_loadfrag_visible()
+                        && !self.join_add_dialog_open
+                        && !self.join_info_dialog_open
+                        && self.join_connection_error_dialog_message.is_none()
+                        && self.join_version_mismatch_dialog_message.is_none()
+                        && self.join_delete_dialog_index.is_none()
+                        && self.join_server_disclaimer_pending_target.is_none()
+                        && matches!(key_code.as_str(), "F5" | "f5") =>
+                {
+                    self.dispatch_menu_route_shell_action(
+                        DesktopMenuRouteShellAction::RefreshJoinServers,
+                    );
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Join)
                         && self.join_connection_error_dialog_message.is_some()
                         && matches!(
                             key_code.as_str(),
@@ -82300,6 +82316,19 @@ repo: "Beta/Override"
         assert_eq!(launcher.join_refresh_requests, 1);
         launcher.join_saved_servers = saved_servers_before_refresh;
         launcher.join_saved_server_refresh_states = saved_refresh_states_before_refresh;
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "F5".into(),
+                pressed: true,
+            }],
+        );
+        assert_eq!(
+            launcher.last_menu_route_shell_action,
+            Some(super::DesktopMenuRouteShellAction::RefreshJoinServers),
+            "Java JoinDialog binds F5 to refreshAll()"
+        );
+        assert_eq!(launcher.join_refresh_requests, 2);
 
         launcher.apply_menu_input_events(
             surface,

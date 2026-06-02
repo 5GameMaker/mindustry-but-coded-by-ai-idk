@@ -17,6 +17,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 757. JoinDialog F5 刷新快捷键对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **89.1%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `JoinDialog` 构造函数中通过 `keyDown(KeyCode.f5, this::refreshAll)` 绑定 F5 刷新本地/远程/社区服务器；
+  - Rust 此前已有刷新按钮和 `RefreshJoinServers` action，但键盘 F5 未映射到该 action。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `apply_menu_input_events(...)` 中 Join route 在无连接 overlay、无 add/info/delete/disclaimer/version/error 弹窗时，将 `F5`/`f5` 分发为 `RefreshJoinServers`；
+    - Join route 测试补充 F5 刷新断言，锁定 `join_refresh_requests` 自增和最后 action。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - JoinDialog 仍需继续审查社区服务器 release/cache、内嵌列表视觉和更多 Java 交互细节；
+  - Settings 动态 category 与 Mods release picker 是下一批更高复杂度前端扩展缺口。
+
 ## 756. CustomRules waves edit 弹窗瘦身
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
