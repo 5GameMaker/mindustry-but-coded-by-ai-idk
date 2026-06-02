@@ -35196,16 +35196,14 @@ impl DesktopLauncher {
                             }
                             visible_number_index += 1;
                         }
-                        for (policy_index, toggle) in MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES
-                            .iter()
-                            .enumerate()
-                        {
+                        let mut visible_policy_index = 0usize;
+                        for toggle in MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES {
                             if !self.map_play_custom_rule_label_matches(toggle.label_key()) {
                                 continue;
                             }
                             let row = Self::map_play_customize_banned_policy_row_rect(
                                 content,
-                                policy_index,
+                                visible_policy_index,
                             );
                             if row.contains_point(point) {
                                 return Some(DesktopMenuRouteShellAction::MapCard(
@@ -35215,6 +35213,7 @@ impl DesktopLauncher {
                                     ),
                                 ));
                             }
+                            visible_policy_index += 1;
                         }
                         for (toggle, rect) in self.map_play_customize_toggle_rects(content) {
                             if rect.contains_point(point) && toggle.enabled(&rules) {
@@ -42985,15 +42984,12 @@ impl DesktopLauncher {
         rules: &Rules,
         layer: f32,
     ) {
-        for (index, toggle) in MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES
-            .iter()
-            .copied()
-            .enumerate()
-        {
+        let mut visible_index = 0usize;
+        for toggle in MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES.iter().copied() {
             if !self.map_play_custom_rule_label_matches(toggle.label_key()) {
                 continue;
             }
-            let row = Self::map_play_customize_banned_policy_row_rect(content, index);
+            let row = Self::map_play_customize_banned_policy_row_rect(content, visible_index);
             let value = toggle.value(rules);
             pass.push(RenderCommand::draw_sprite(
                 Self::settings_drawable_symbol("button"),
@@ -43004,7 +43000,7 @@ impl DesktopLauncher {
                     [1.0, 1.0, 1.0, 0.15]
                 },
                 0.0,
-                layer + index as f32 * 0.001,
+                layer + visible_index as f32 * 0.001,
             ));
             pass.push(RenderCommand::draw_text_styled(
                 format!(
@@ -43025,8 +43021,9 @@ impl DesktopLauncher {
                     .with_markup(true)
                     .with_wrap_width((row.width - 16.0).max(80.0))
                     .with_integer_position(true),
-                layer + 0.002 + index as f32 * 0.001,
+                layer + 0.002 + visible_index as f32 * 0.001,
             ));
+            visible_index += 1;
         }
     }
 
@@ -72041,6 +72038,72 @@ repo: "Beta/Override"
             ),
             None,
             "filtered number rows should not keep their pre-search hit-test slot"
+        );
+        launcher.map_play_custom_rules_search.clear();
+        launcher.map_play_custom_rules_search = "whitelist".into();
+        let filtered_policy_frame = launcher.menu_graphics_frame_for_surface(5, render_viewport);
+        let filtered_policy_texts = filtered_policy_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("filtered custom rule policy rows should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(filtered_policy_texts.contains(&"whitelist"));
+        assert!(filtered_policy_texts.contains(&"□ Banned Blocks As Whitelist"));
+        assert!(filtered_policy_texts.contains(&"□ Banned Units As Whitelist"));
+        assert!(!filtered_policy_texts.contains(&"□ Hide Banned Blocks"));
+        let compact_block_whitelist =
+            DesktopLauncher::map_play_customize_banned_policy_row_rect(content, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                compact_block_whitelist.x,
+                compact_block_whitelist.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(
+                    0,
+                    super::DesktopMapCardActionKind::ToggleCustomRule(
+                        super::DesktopCustomRulesToggle::BlockWhitelist
+                    )
+                )
+            )),
+            "Java CustomRulesDialog rebuilds filtered policy rows without preserving the hidden Hide Banned Blocks slot"
+        );
+        let compact_unit_whitelist =
+            DesktopLauncher::map_play_customize_banned_policy_row_rect(content, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                compact_unit_whitelist.x,
+                compact_unit_whitelist.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(
+                    0,
+                    super::DesktopMapCardActionKind::ToggleCustomRule(
+                        super::DesktopCustomRulesToggle::UnitWhitelist
+                    )
+                )
+            ))
+        );
+        let stale_policy_row =
+            DesktopLauncher::map_play_customize_banned_policy_row_rect(content, 2).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                stale_policy_row.x,
+                stale_policy_row.y
+            ),
+            None,
+            "filtered policy rows should not keep an unused third hit-test slot"
         );
         launcher.map_play_custom_rules_search.clear();
         let open_banned_blocks_center =

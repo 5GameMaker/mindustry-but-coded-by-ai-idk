@@ -17,6 +17,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 770. CustomRulesDialog banned policy 搜索紧凑布局对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **90.4%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `CustomRulesDialog` 搜索后重建 rule table，不匹配的 banned policy 行不会留下旧位置；
+  - Rust 上一轮已把数值规则改为 filtered visible index，但 banned policy 行仍按原始 index 渲染/命中。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_map_play_customize_banned_policy_rows(...)` 改为按过滤后的 visible index 紧凑排列；
+    - banned policy hit-test 同步使用 visible index；
+    - 扩展 MapPlay/CustomRules 测试，锁定 `whitelist` 搜索时 `BlockWhitelist / UnitWhitelist` 从首行连续排列，`Hide Banned Blocks` 不保留空槽。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop map_play_dialog --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `CustomRulesDialog` 的天气、team 子弹窗、完整数值文本输入、rule info tooltip 与全部 Java 规则项仍需继续补齐；
+  - 当前前端 route 仍需继续向 Java Scene2D 的滚动、表格宽度和弹窗动画靠拢；
+  - 最终还需把规则编辑结果贯通到真实可玩 CustomGame/Editor/联机规则同步链路。
+
 ## 769. CustomRulesDialog 数值搜索紧凑布局对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
