@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 786. ModsDialog 模组卡片尺寸与图标按钮对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **92.0%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容、性能收口与所有子菜单接近原版。
+- 背景：
+  - Java `ModsDialog` 单个 mod 卡片使用 `w <= 520f`、`h = 110f` 的单列列表；
+  - 左侧 `BorderImage` 尺寸约为 `h - 8f`，缺省图标为 `Tex.nomap`，边框为 `Pal.accent`；
+  - 右侧启用/禁用与删除/Workshop 操作按钮均为 `50f` 纯图标按钮，不在卡片里显示 `Enable/Delete/View In Workshop` 文本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Mods 主列表卡片改为单列、最大宽度 `520`、高度 `110`；
+    - 左侧 `nomap` 图标区域扩大到接近 Java `h - 8f`，保留 accent 边框；
+    - 右侧操作按钮改为 `50 x 50`，并去掉卡片上的文字标签；
+    - 卡片列表按面板高度计算可见容量，渲染与 hit-test 共享同一可见窗口，避免搜索框和第一张卡片重叠；
+    - 主卡片正文只保留 display name、short description 和状态文本，移除此前混在卡片里的 open-folder/reinstall/install 摘要文字。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop mods_route --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - ModsDialog 主入口仍需补 `@mods.openfolder`；
+  - Mods detail 仍需按 Java 隐藏空内容的 `View Content`，Steam/workshop mod 详情页不应显示 reinstall；
+  - Mods Browser 仍需继续对齐 Java 的远端 listing、选择弹窗与真实 release 列表；
+  - 完整客户端可玩性、前端性能缓存/批处理和联机 smoke test 仍未达成。
+
 ## 785. LoadDialog 模式筛选 tooltip 与 Editor 按钮对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

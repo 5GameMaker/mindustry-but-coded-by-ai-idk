@@ -255,6 +255,10 @@ const MAP_LIST_SETTING_FILTER_PLANETS: &str = "editorfilterplanets";
 const ROUTE_BACK_BUTTON_WIDTH: f32 = 210.0;
 const ROUTE_BACK_BUTTON_HEIGHT: f32 = 64.0;
 const MODS_ROUTE_MOD_SHORT_DESCRIPTION_MAX_LEN: usize = 40;
+const MODS_ROUTE_MOD_CARD_WIDTH_MAX: f32 = 520.0;
+const MODS_ROUTE_MOD_CARD_HEIGHT: f32 = 110.0;
+const MODS_ROUTE_MOD_CARD_GAP: f32 = 8.0;
+const MODS_ROUTE_MOD_CARD_ACTION_SIZE: f32 = 50.0;
 const PAUSE_OVERLAY_PANEL_WIDTH: f32 = 304.0;
 const PAUSE_OVERLAY_PANEL_TOP_MARGIN: f32 = 54.0;
 const PAUSE_OVERLAY_TITLE_HEIGHT: f32 = 34.0;
@@ -48411,35 +48415,48 @@ impl DesktopLauncher {
     }
 
     fn mods_route_mod_card_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
-        let columns = 2usize;
-        let card_width = ((panel.width - 68.0) / columns as f32).max(160.0);
-        let card_height = 54.0;
-        let gap = 8.0;
-        let col = index % columns;
-        let row = index / columns;
+        let card_width = (panel.width - 56.0).min(MODS_ROUTE_MOD_CARD_WIDTH_MAX);
+        let row = index;
         RenderRect::new(
-            panel.x + 28.0 + col as f32 * (card_width + gap),
-            panel.y + panel.height - 244.0 - row as f32 * (card_height + gap),
+            panel.center().x - card_width * 0.5,
+            panel.y + panel.height
+                - 304.0
+                - row as f32 * (MODS_ROUTE_MOD_CARD_HEIGHT + MODS_ROUTE_MOD_CARD_GAP),
             card_width,
-            card_height,
+            MODS_ROUTE_MOD_CARD_HEIGHT,
         )
     }
 
     fn mods_route_mod_card_icon_rect(card: RenderRect) -> RenderRect {
-        let size = (card.height - 10.0).max(28.0);
-        RenderRect::new(card.x + 8.0, card.y + 5.0, size, size)
+        let size = (card.height - 8.0).max(28.0);
+        RenderRect::new(card.x + 4.0, card.y + 4.0, size, size)
     }
 
     fn mods_route_mod_card_action_button_rect(card: RenderRect, action_index: usize) -> RenderRect {
-        let size = 24.0;
         let gap = 6.0;
         let slot = action_index.min(1);
         RenderRect::new(
-            card.right() - 8.0 - (2 - slot) as f32 * size - (1 - slot) as f32 * gap,
-            card.y + 8.0,
-            size,
-            size,
+            card.right()
+                - 8.0
+                - (2 - slot) as f32 * MODS_ROUTE_MOD_CARD_ACTION_SIZE
+                - (1 - slot) as f32 * gap,
+            card.y + card.height - 58.0,
+            MODS_ROUTE_MOD_CARD_ACTION_SIZE,
+            MODS_ROUTE_MOD_CARD_ACTION_SIZE,
         )
+    }
+
+    fn mods_route_visible_card_capacity_for_panel(panel: RenderRect) -> usize {
+        let list_bottom = panel.y + 28.0;
+        let mut capacity = 0usize;
+        loop {
+            let card = Self::mods_route_mod_card_rect_for_panel(panel, capacity);
+            if card.y < list_bottom {
+                break;
+            }
+            capacity += 1;
+        }
+        capacity.max(1)
     }
 
     fn mods_route_search_rect_for_panel(panel: RenderRect) -> RenderRect {
@@ -48476,7 +48493,7 @@ impl DesktopLauncher {
     ) -> Option<DesktopMenuRouteShellAction> {
         self.filtered_mods_route_indices()
             .into_iter()
-            .take(6)
+            .take(Self::mods_route_visible_card_capacity_for_panel(panel))
             .enumerate()
             .find_map(|(visible_index, mod_index)| {
                 let card = Self::mods_route_mod_card_rect_for_panel(panel, visible_index);
@@ -48503,7 +48520,7 @@ impl DesktopLauncher {
     ) -> Option<usize> {
         self.filtered_mods_route_indices()
             .into_iter()
-            .take(6)
+            .take(Self::mods_route_visible_card_capacity_for_panel(panel))
             .enumerate()
             .find_map(|(visible_index, mod_index)| {
                 let card = Self::mods_route_mod_card_rect_for_panel(panel, visible_index);
@@ -50249,7 +50266,12 @@ impl DesktopLauncher {
                     Layer::END_PIXELED + 0.029,
                 ));
             }
-            for (visible_index, index) in filtered_indices.into_iter().take(6).enumerate() {
+            let visible_capacity = Self::mods_route_visible_card_capacity_for_panel(panel);
+            for (visible_index, index) in filtered_indices
+                .into_iter()
+                .take(visible_capacity)
+                .enumerate()
+            {
                 let card = Self::mods_route_mod_card_rect_for_panel(panel, visible_index);
                 let icon = Self::mods_route_mod_card_icon_rect(card);
                 let text_x = icon.right() + 10.0;
@@ -50278,9 +50300,9 @@ impl DesktopLauncher {
                 ));
                 pass.push(RenderCommand::draw_text_styled(
                     display_name.to_string(),
-                    RenderPoint::new(text_x, card.y + 35.0),
+                    RenderPoint::new(text_x, card.y + card.height - 26.0),
                     [0.94, 0.98, 1.0, 1.0],
-                    12.0,
+                    13.0,
                     0.0,
                     RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -50293,9 +50315,9 @@ impl DesktopLauncher {
                 {
                     pass.push(RenderCommand::draw_text_styled(
                         short_description,
-                        RenderPoint::new(text_x, card.y + 22.0),
+                        RenderPoint::new(text_x, card.y + card.height - 50.0),
                         [0.72, 0.82, 0.9, 1.0],
-                        9.5,
+                        10.5,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Start)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -50303,42 +50325,25 @@ impl DesktopLauncher {
                         Layer::END_PIXELED + 0.032 + visible_index as f32 * 0.001,
                     ));
                 }
-                pass.push(RenderCommand::draw_text_styled(
-                    self.mods_route_mod_summary_at_index(index),
-                    RenderPoint::new(text_x, card.y + 10.0),
-                    [0.62, 0.72, 0.80, 1.0],
-                    8.5,
-                    0.0,
-                    RenderTextStyle::new(RenderTextAlign::Start)
-                        .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true),
-                    Layer::END_PIXELED + 0.033 + visible_index as f32 * 0.001,
-                ));
+                if let Some(state_text) = self.mods_route_mod_state_text_at_index(index) {
+                    pass.push(RenderCommand::draw_text_styled(
+                        state_text,
+                        RenderPoint::new(text_x, card.y + 30.0),
+                        [0.84, 0.74, 0.66, 1.0],
+                        10.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.033 + visible_index as f32 * 0.001,
+                    ));
+                }
                 let enabled = self.mods_route_mod_enabled_at_index(index);
                 let supported = self.mods_route_mod_is_supported_at_index(index);
                 let has_steam_id = self.mods_route_mod_has_steam_id_at_index(index);
-                for (button_index, (label, icon, actionable)) in [
-                    (
-                        if enabled {
-                            self.mods_route_localize_status_bundle_text("@mod.disable")
-                        } else {
-                            self.mods_route_localize_status_bundle_text("@mod.enable")
-                        },
-                        if enabled { "down" } else { "up" },
-                        supported,
-                    ),
-                    (
-                        if has_steam_id {
-                            self.localize_bundle_markup_text_or(
-                                "@view.workshop",
-                                "View In Workshop",
-                            )
-                        } else {
-                            self.localize_bundle_markup_text("@delete")
-                        },
-                        if has_steam_id { "link" } else { "trash" },
-                        true,
-                    ),
+                for (button_index, (icon, actionable)) in [
+                    (if enabled { "down" } else { "up" }, supported),
+                    (if has_steam_id { "link" } else { "trash" }, true),
                 ]
                 .into_iter()
                 .enumerate()
@@ -50370,21 +50375,6 @@ impl DesktopLauncher {
                             .with_vertical_align(RenderTextVerticalAlign::Center)
                             .with_integer_position(true),
                         Layer::END_PIXELED + 0.0335 + visible_index as f32 * 0.001,
-                    ));
-                    pass.push(RenderCommand::draw_text_styled(
-                        label,
-                        RenderPoint::new(button.center().x, button.y - 7.0),
-                        if actionable {
-                            [0.70, 0.80, 0.88, 1.0]
-                        } else {
-                            [0.40, 0.46, 0.52, 0.82]
-                        },
-                        6.0,
-                        0.0,
-                        RenderTextStyle::new(RenderTextAlign::Center)
-                            .with_vertical_align(RenderTextVerticalAlign::Center)
-                            .with_integer_position(true),
-                        Layer::END_PIXELED + 0.0336 + visible_index as f32 * 0.001,
                     ));
                 }
             }
@@ -66726,13 +66716,13 @@ repo: "Beta/Override"
         assert!(texts.contains(&"Alpha Pack"));
         assert!(texts.contains(&"Beta Override"));
         assert!(texts.contains(&"gamma"));
-        assert!(texts
+        assert!(!texts
             .iter()
             .any(|text| text.contains("Open Folder: alpha pack")));
-        assert!(texts
+        assert!(!texts
             .iter()
             .any(|text| text.contains("Repo Beta/Override") && text.contains("Reinstall")));
-        assert!(texts.iter().any(|text| text.contains("Install")));
+        assert!(!texts.iter().any(|text| text.contains("Install")));
         assert!(texts.contains(&"Back"));
         assert!(texts.contains(&"Import Mod"));
         assert!(!texts.contains(&"browser search: Icon.zoom + Icon.list"));
@@ -66776,6 +66766,10 @@ description: "Alpha fixture mod."
         );
         let card = DesktopLauncher::mods_route_mod_card_rect_for_panel(panel, 0);
         let icon_rect = DesktopLauncher::mods_route_mod_card_icon_rect(card);
+        assert!((card.height - super::MODS_ROUTE_MOD_CARD_HEIGHT).abs() < f32::EPSILON);
+        assert!(card.width <= super::MODS_ROUTE_MOD_CARD_WIDTH_MAX);
+        assert!((icon_rect.width - (super::MODS_ROUTE_MOD_CARD_HEIGHT - 8.0)).abs() < f32::EPSILON);
+        assert!((icon_rect.height - icon_rect.width).abs() < f32::EPSILON);
         let short_description = launcher
             .mods_route_mod_short_description_at_index(0)
             .expect("alpha mod should expose a short description");
@@ -67180,7 +67174,10 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(texts.iter().any(|text| text.contains("Restart Required")));
-        assert!(texts.contains(&"Enable"));
+        assert!(
+            !texts.contains(&"Enable"),
+            "Java ModsDialog renders enable/disable as icon-only buttons on the mod card"
+        );
 
         let beta_card = DesktopLauncher::mods_route_mod_card_rect_for_panel(panel, 1);
         launcher.last_mods_directory_mod_states[1].state =
@@ -67321,7 +67318,10 @@ steamID: "987654321"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"View In Workshop"));
+        assert!(
+            !texts.contains(&"View In Workshop"),
+            "Java ModsDialog renders the workshop listing action as an icon-only card button"
+        );
         assert!(!texts.contains(&"Delete"));
 
         let mut platform = RecordingPlatform::default();
