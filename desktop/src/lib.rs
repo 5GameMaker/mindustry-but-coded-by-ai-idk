@@ -3587,6 +3587,10 @@ pub enum DesktopMenuRouteShellAction {
     ModsBrowserOpenGithub(usize),
     ModsBrowserViewReleases(usize),
     OpenModsDetail(usize),
+    ToggleModsEnabled(usize),
+    OpenModsDeleteConfirm(usize),
+    ConfirmModsDelete,
+    CancelModsDelete,
     OpenModsFolder(usize),
     ModsDetailOpenGithub(usize),
     ModsDetailReinstall(usize),
@@ -3706,6 +3710,15 @@ pub struct DesktopModsBrowserAction {
     pub repo: Option<String>,
     pub uri: Option<String>,
     pub opened: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopModsDeleteResult {
+    pub index: usize,
+    pub name: String,
+    pub path: Option<String>,
+    pub deleted: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -17901,6 +17914,9 @@ pub struct DesktopLauncher {
     pub last_mods_directory_mod_metas: Vec<ModMetadata>,
     pub last_mods_directory_mod_states: Vec<DesktopModsRouteModStateSnapshot>,
     pub mods_selected_mod_index: Option<usize>,
+    pub mods_delete_dialog_index: Option<usize>,
+    pub mods_route_requires_reload_flag: bool,
+    pub last_mods_delete_result: Option<DesktopModsDeleteResult>,
     pub last_mods_folder_action: Option<DesktopModsFolderAction>,
     pub last_mods_content_index: Option<usize>,
     pub last_mods_content_entry_index: Option<usize>,
@@ -19076,6 +19092,9 @@ impl DesktopLauncher {
             last_mods_directory_mod_metas: Vec::new(),
             last_mods_directory_mod_states: Vec::new(),
             mods_selected_mod_index: None,
+            mods_delete_dialog_index: None,
+            mods_route_requires_reload_flag: false,
+            last_mods_delete_result: None,
             last_mods_folder_action: None,
             last_mods_content_index: None,
             last_mods_content_entry_index: None,
@@ -19164,6 +19183,7 @@ impl DesktopLauncher {
         self.last_mods_directory_mod_metas = vec![plan.meta.clone()];
         self.last_mods_directory_mod_states = vec![DesktopModsRouteModStateSnapshot::default()];
         self.mods_selected_mod_index = None;
+        self.mods_delete_dialog_index = None;
         Ok(self.merge_mod_resource_plan_into_texture_atlas(&plan.resource_plan))
     }
 
@@ -19198,6 +19218,7 @@ impl DesktopLauncher {
         self.last_mods_directory_mod_states =
             vec![DesktopModsRouteModStateSnapshot::default(); container.mods.len()];
         self.mods_selected_mod_index = None;
+        self.mods_delete_dialog_index = None;
         container
             .mods
             .iter()
@@ -19214,6 +19235,7 @@ impl DesktopLauncher {
             self.last_mods_directory_mod_metas.clear();
             self.last_mods_directory_mod_states.clear();
             self.mods_selected_mod_index = None;
+            self.mods_delete_dialog_index = None;
             return Ok(0);
         };
 
@@ -19232,6 +19254,7 @@ impl DesktopLauncher {
                 self.last_mods_directory_mod_metas.clear();
                 self.last_mods_directory_mod_states.clear();
                 self.mods_selected_mod_index = None;
+                self.mods_delete_dialog_index = None;
                 Err(error)
             }
         }
@@ -23067,6 +23090,13 @@ impl DesktopLauncher {
             self.last_menu_route_shell_action = Some(DesktopMenuRouteShellAction::CloseModsBrowser);
             return true;
         }
+        if self.active_menu_route == Some(DesktopMenuRoute::Mods)
+            && self.mods_delete_dialog_index.is_some()
+        {
+            self.mods_delete_dialog_index = None;
+            self.last_menu_route_shell_action = Some(DesktopMenuRouteShellAction::CancelModsDelete);
+            return true;
+        }
         if self.active_menu_route == Some(DesktopMenuRoute::LoadGame)
             && self.load_game_rename_dialog_slot.is_some()
         {
@@ -23118,6 +23148,7 @@ impl DesktopLauncher {
             }
             self.mods_selected_mod_index = None;
             self.mods_content_dialog_index = None;
+            self.mods_delete_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.mods_browser_dialog_open = false;
             self.mods_search_focused = false;
@@ -23179,6 +23210,7 @@ impl DesktopLauncher {
             self.active_menu_route = None;
             self.mods_selected_mod_index = None;
             self.mods_content_dialog_index = None;
+            self.mods_delete_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.mods_browser_dialog_open = false;
             self.mods_search_focused = false;
@@ -23212,6 +23244,7 @@ impl DesktopLauncher {
                 self.active_menu_route = None;
                 self.mods_selected_mod_index = None;
                 self.mods_content_dialog_index = None;
+                self.mods_delete_dialog_index = None;
                 self.mods_import_dialog_open = false;
                 self.mods_browser_dialog_open = false;
                 self.mods_browser_search.clear();
@@ -23253,6 +23286,7 @@ impl DesktopLauncher {
             self.active_menu_route = None;
             self.mods_selected_mod_index = None;
             self.mods_content_dialog_index = None;
+            self.mods_delete_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.mods_browser_dialog_open = false;
             self.mods_search_focused = false;
@@ -23276,6 +23310,7 @@ impl DesktopLauncher {
             self.active_menu_route = Some(route);
             self.mods_selected_mod_index = None;
             self.mods_content_dialog_index = None;
+            self.mods_delete_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.mods_browser_dialog_open = false;
             self.mods_search_focused = false;
@@ -35276,6 +35311,9 @@ impl DesktopLauncher {
         if route == DesktopMenuRoute::Mods {
             let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
             let point = RenderPoint::new(x, y);
+            if self.mods_delete_dialog_index.is_some() {
+                return self.mods_delete_confirm_action_at_point(panel, point);
+            }
             if self.mods_browser_dialog_open {
                 return self.mods_browser_action_at_point(panel, point);
             }
@@ -35301,6 +35339,9 @@ impl DesktopLauncher {
                 return Some(DesktopMenuRouteShellAction::OpenModsBrowser);
             }
             if self.mods_selected_mod_index.is_none() {
+                if let Some(action) = self.mods_route_mod_card_action_at_point(panel, point) {
+                    return Some(action);
+                }
                 if let Some(index) = self.mods_route_mod_card_index_at_point(panel, point) {
                     return Some(DesktopMenuRouteShellAction::OpenModsDetail(index));
                 }
@@ -35690,6 +35731,78 @@ impl DesktopLauncher {
         };
         self.last_mods_folder_action = Some(action.clone());
         Some(action)
+    }
+
+    fn sync_mods_route_state_len(&mut self) {
+        let len = self.last_mods_directory_mod_names.len();
+        if self.last_mods_directory_mod_states.len() < len {
+            self.last_mods_directory_mod_states
+                .resize(len, DesktopModsRouteModStateSnapshot::default());
+        } else {
+            self.last_mods_directory_mod_states.truncate(len);
+        }
+    }
+
+    fn dispatch_mods_toggle_enabled(&mut self, index: usize) -> bool {
+        if self.last_mods_directory_mod_names.get(index).is_none() {
+            return false;
+        }
+        self.sync_mods_route_state_len();
+        let state = &mut self.last_mods_directory_mod_states[index];
+        state.enabled = !state.enabled;
+        state.requires_reload = true;
+        self.mods_route_requires_reload_flag = true;
+        self.mods_selected_mod_index = None;
+        self.mods_content_dialog_index = None;
+        true
+    }
+
+    fn dispatch_mods_delete_confirmed(&mut self) -> Option<DesktopModsDeleteResult> {
+        let index = self.mods_delete_dialog_index?;
+        let name = self.last_mods_directory_mod_names.get(index)?.clone();
+        let was_enabled = self.mods_route_mod_enabled_at_index(index);
+        let path = self.mods_route_mod_root_at_index(index).map(str::to_string);
+        let delete_result = path.as_deref().map(|path| {
+            let path = Path::new(path);
+            if path.is_dir() {
+                fs::remove_dir_all(path)
+            } else {
+                fs::remove_file(path)
+            }
+        });
+        let error = delete_result
+            .as_ref()
+            .and_then(|result| result.as_ref().err())
+            .map(ToString::to_string);
+        let deleted = error.is_none();
+        let result = DesktopModsDeleteResult {
+            index,
+            name,
+            path,
+            deleted,
+            error,
+        };
+        if deleted {
+            self.last_mods_directory_mod_names.remove(index);
+            if index < self.last_mods_directory_mod_roots.len() {
+                self.last_mods_directory_mod_roots.remove(index);
+            }
+            if index < self.last_mods_directory_mod_metas.len() {
+                self.last_mods_directory_mod_metas.remove(index);
+            }
+            if index < self.last_mods_directory_mod_states.len() {
+                self.last_mods_directory_mod_states.remove(index);
+            }
+            self.mods_selected_mod_index = None;
+            self.mods_content_dialog_index = None;
+            self.last_mods_content_entry_index = None;
+            if was_enabled {
+                self.mods_route_requires_reload_flag = true;
+            }
+        }
+        self.mods_delete_dialog_index = None;
+        self.last_mods_delete_result = Some(result.clone());
+        Some(result)
     }
 
     fn dispatch_mods_import_file_with_platform<P: Platform>(
@@ -36916,6 +37029,24 @@ impl DesktopLauncher {
                     self.mods_browser_dialog_open = false;
                     self.mods_search_focused = false;
                 }
+            }
+            DesktopMenuRouteShellAction::ToggleModsEnabled(index) => {
+                self.dispatch_mods_toggle_enabled(index);
+            }
+            DesktopMenuRouteShellAction::OpenModsDeleteConfirm(index) => {
+                if self.last_mods_directory_mod_names.get(index).is_some() {
+                    self.mods_delete_dialog_index = Some(index);
+                    self.mods_selected_mod_index = None;
+                    self.mods_content_dialog_index = None;
+                    self.mods_browser_dialog_open = false;
+                    self.mods_search_focused = false;
+                }
+            }
+            DesktopMenuRouteShellAction::ConfirmModsDelete => {
+                self.dispatch_mods_delete_confirmed();
+            }
+            DesktopMenuRouteShellAction::CancelModsDelete => {
+                self.mods_delete_dialog_index = None;
             }
             DesktopMenuRouteShellAction::OpenModsFolder(index) => {
                 let mut platform = DefaultPlatform;
@@ -46764,6 +46895,20 @@ impl DesktopLauncher {
                 lines.push(format!("mod state details: {name} {detail}"));
             }
         }
+        if let Some(index) = self.mods_delete_dialog_index {
+            let name = self
+                .mods_route_mod_display_name_at_index(index)
+                .unwrap_or("@mods.unknown");
+            lines.push(format!("modal: @mod.remove.confirm {name}"));
+        }
+        if let Some(result) = self
+            .last_mods_delete_result
+            .as_ref()
+            .filter(|result| !result.deleted)
+        {
+            let error = result.error.as_deref().unwrap_or("@mod.delete.error");
+            lines.push(format!("mods delete error: {} {error}", result.name));
+        }
         if self.mods_browser_dialog_open {
             lines.push(format!(
                 "modal: @mods.browser search={} sort={}",
@@ -46795,6 +46940,18 @@ impl DesktopLauncher {
         )
     }
 
+    fn mods_route_mod_card_action_button_rect(card: RenderRect, action_index: usize) -> RenderRect {
+        let size = 24.0;
+        let gap = 6.0;
+        let slot = action_index.min(1);
+        RenderRect::new(
+            card.right() - 8.0 - (2 - slot) as f32 * size - (1 - slot) as f32 * gap,
+            card.y + 8.0,
+            size,
+            size,
+        )
+    }
+
     fn mods_route_search_rect_for_panel(panel: RenderRect) -> RenderRect {
         RenderRect::new(
             panel.x + 28.0,
@@ -46820,6 +46977,29 @@ impl DesktopLauncher {
                 display_name.contains(&query).then_some(index)
             })
             .collect()
+    }
+
+    fn mods_route_mod_card_action_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        self.filtered_mods_route_indices()
+            .into_iter()
+            .take(6)
+            .enumerate()
+            .find_map(|(visible_index, mod_index)| {
+                let card = Self::mods_route_mod_card_rect_for_panel(panel, visible_index);
+                if Self::mods_route_mod_card_action_button_rect(card, 0).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::ToggleModsEnabled(mod_index));
+                }
+                if Self::mods_route_mod_card_action_button_rect(card, 1).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::OpenModsDeleteConfirm(
+                        mod_index,
+                    ));
+                }
+                None
+            })
     }
 
     fn mods_route_mod_card_index_at_point(
@@ -46945,6 +47125,9 @@ impl DesktopLauncher {
         }
         match key {
             "@mod.disabled" => "[red]Disabled",
+            "@mod.enabled" => "[lightgray]Enabled",
+            "@mod.disable" => "Disable",
+            "@mod.enable" => "Enable",
             "@mod.incompatiblegame" => "[red]Outdated Game",
             "@mod.incompatiblemod" => "[red]Incompatible",
             "@mod.blacklisted" => "[red]Unsupported",
@@ -46953,6 +47136,8 @@ impl DesktopLauncher {
             "@mod.circulardependencies" => "[red]Circular Dependencies",
             "@mod.incompletedependencies" => "[red]Incomplete Dependencies",
             "@mod.reloadrequired" => "[red]Restart Required",
+            "@mod.delete.error" => "Unable to delete mod. File may be in use.",
+            "@mod.remove.confirm" => "This mod will be deleted.",
             "@mod.incompatiblemod.details" => "This mod is incompatible with the latest version of the game. The author must update it, and add [accent]minGameVersion: 154[] to its [accent]mod.json[] file.",
             "@mod.blacklisted.details" => "This mod has been manually blacklisted for causing crashes or other issues with this version of the game. Do not use it.",
             "@mod.missingdependencies.details" => "This mod is missing dependencies: {0}",
@@ -46991,9 +47176,16 @@ impl DesktopLauncher {
     }
 
     fn mods_route_requires_reload(&self) -> bool {
+        if self.mods_route_requires_reload_flag {
+            return true;
+        }
         self.last_mods_directory_mod_states
             .iter()
             .any(|state| state.requires_reload)
+    }
+
+    fn mods_route_mod_enabled_at_index(&self, index: usize) -> bool {
+        self.mods_route_mod_state_snapshot_at_index(index).enabled
     }
 
     fn mods_route_mod_repo_at_index(&self, index: usize) -> Option<&str> {
@@ -47220,6 +47412,43 @@ impl DesktopLauncher {
         }
         if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseModsImport);
+        }
+        None
+    }
+
+    fn mods_delete_confirm_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width - 96.0).clamp(320.0, 520.0);
+        let height = 178.0;
+        RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn mods_delete_confirm_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let width = ((dialog.width - 66.0) / 2.0).clamp(120.0, 210.0);
+        RenderRect::new(
+            dialog.center().x - width - 8.0 + index as f32 * (width + 16.0),
+            dialog.y + 22.0,
+            width,
+            42.0,
+        )
+    }
+
+    fn mods_delete_confirm_action_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        self.mods_delete_dialog_index?;
+        let dialog = Self::mods_delete_confirm_dialog_rect_for_panel(panel);
+        if Self::mods_delete_confirm_button_rect(dialog, 0).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::CancelModsDelete);
+        }
+        if Self::mods_delete_confirm_button_rect(dialog, 1).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::ConfirmModsDelete);
         }
         None
     }
@@ -47687,6 +47916,72 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_mods_delete_confirm_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(index) = self.mods_delete_dialog_index else {
+            return;
+        };
+        let Some(mod_name) = self.mods_route_mod_display_name_at_index(index) else {
+            return;
+        };
+        let dialog = Self::mods_delete_confirm_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.48],
+            Layer::END_PIXELED + 0.088,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.089,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.86, 0.34, 0.30, 0.96],
+            2.0,
+            Layer::END_PIXELED + 0.090,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@confirm"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 32.0),
+            [0.96, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.091,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!(
+                "{}\n{mod_name}",
+                self.mods_route_localize_status_bundle_text("@mod.remove.confirm")
+            ),
+            RenderPoint::new(dialog.center().x, dialog.center().y + 8.0),
+            [0.86, 0.72, 0.68, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.092,
+        ));
+        for (button_index, (label, icon)) in [("@cancel", "left"), ("@delete", "trash")]
+            .into_iter()
+            .enumerate()
+        {
+            self.push_settings_text_button(
+                pass,
+                Self::mods_delete_confirm_button_rect(dialog, button_index),
+                self.localize_bundle_markup_text(label),
+                Some(icon),
+                Layer::END_PIXELED + 0.094 + button_index as f32 * 0.001,
+            );
+        }
+    }
+
     fn push_mods_import_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
         if !self.mods_import_dialog_open {
             return;
@@ -48119,6 +48414,28 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.028,
         ));
 
+        if let Some(result) = self
+            .last_mods_delete_result
+            .as_ref()
+            .filter(|result| !result.deleted)
+        {
+            pass.push(RenderCommand::draw_text_styled(
+                format!(
+                    "{}: {}",
+                    self.mods_route_localize_status_bundle_text("@mod.delete.error"),
+                    result.name
+                ),
+                RenderPoint::new(panel.center().x, search.y - 18.0),
+                [1.0, 0.50, 0.46, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.0285,
+            ));
+        }
+
         if let Some(error) = self.mods_directory_error.as_ref() {
             pass.push(RenderCommand::draw_text_styled(
                 format!("mods error: {error}"),
@@ -48220,11 +48537,59 @@ impl DesktopLauncher {
                         .with_integer_position(true),
                     Layer::END_PIXELED + 0.032 + visible_index as f32 * 0.001,
                 ));
+                let enabled = self.mods_route_mod_enabled_at_index(index);
+                for (button_index, (label, icon)) in [
+                    (
+                        if enabled {
+                            self.mods_route_localize_status_bundle_text("@mod.disable")
+                        } else {
+                            self.mods_route_localize_status_bundle_text("@mod.enable")
+                        },
+                        if enabled { "down" } else { "up" },
+                    ),
+                    (self.localize_bundle_markup_text("@delete"), "trash"),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let button = Self::mods_route_mod_card_action_button_rect(card, button_index);
+                    pass.push(RenderCommand::draw_sprite(
+                        Self::settings_text_button_symbol("grayt", false, false),
+                        button,
+                        [1.0, 1.0, 1.0, 0.76],
+                        0.0,
+                        Layer::END_PIXELED + 0.033 + visible_index as f32 * 0.001,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        desktop_ui_icon_glyph_or_label(icon, icon),
+                        RenderPoint::new(button.center().x, button.center().y + 4.0),
+                        [0.80, 0.90, 0.98, 1.0],
+                        10.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_font(RenderFontId::Icon)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.0335 + visible_index as f32 * 0.001,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        label,
+                        RenderPoint::new(button.center().x, button.y - 7.0),
+                        [0.70, 0.80, 0.88, 1.0],
+                        6.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.0336 + visible_index as f32 * 0.001,
+                    ));
+                }
             }
         }
 
         self.push_mods_detail_dialog(pass, panel);
         self.push_mods_content_dialog(pass, panel);
+        self.push_mods_delete_confirm_dialog(pass, panel);
         self.push_mods_import_dialog(pass, panel);
         self.push_mods_browser_dialog(pass, panel);
     }
@@ -64793,6 +65158,155 @@ version: "2.0.0"
             .iter()
             .any(|text| text.contains("missing dependencies") && text.contains("alpha-lib")));
         assert!(detail_texts.contains(&"View Content"));
+    }
+
+    #[test]
+    fn desktop_launcher_mods_route_toggle_enabled_and_delete_confirm_follow_java_semantics() {
+        let root = temp_desktop_path("mods-delete-confirm");
+        let alpha = root.join("alpha");
+        let beta = root.join("beta");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&alpha).expect("alpha mod dir should be creatable");
+        std::fs::create_dir_all(&beta).expect("beta mod dir should be creatable");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
+        launcher.last_mods_directory_mod_names = vec!["alpha".into(), "beta".into()];
+        launcher.last_mods_directory_mod_roots = vec![
+            alpha.to_string_lossy().into_owned(),
+            beta.to_string_lossy().into_owned(),
+        ];
+        launcher.last_mods_directory_mod_metas = vec![
+            ModMetadata::from_source_text(
+                "alpha",
+                Some("mod.hjson"),
+                r#"
+name: alpha
+displayName: "Alpha Pack"
+author: "Alpha Author"
+version: "1.0.0"
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "beta",
+                Some("mod.hjson"),
+                r#"
+name: beta
+displayName: "Beta Override"
+author: "Beta Author"
+version: "2.0.0"
+"#,
+            ),
+        ];
+        launcher.last_mods_directory_mod_states = vec![Default::default(), Default::default()];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let alpha_card = DesktopLauncher::mods_route_mod_card_rect_for_panel(panel, 0);
+        let toggle =
+            DesktopLauncher::mods_route_mod_card_action_button_rect(alpha_card, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, toggle.x, toggle.y),
+            Some(super::DesktopMenuRouteShellAction::ToggleModsEnabled(0))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ToggleModsEnabled(0),
+        );
+        assert!(!launcher.last_mods_directory_mod_states[0].enabled);
+        assert!(launcher.mods_route_requires_reload());
+        assert!(launcher
+            .mods_route_mod_summary_at_index(0)
+            .contains("Disabled"));
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods toggle frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.iter().any(|text| text.contains("Restart Required")));
+        assert!(texts.contains(&"Enable"));
+
+        let beta_card = DesktopLauncher::mods_route_mod_card_rect_for_panel(panel, 1);
+        let delete = DesktopLauncher::mods_route_mod_card_action_button_rect(beta_card, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, delete.x, delete.y),
+            Some(super::DesktopMenuRouteShellAction::OpenModsDeleteConfirm(1))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsDeleteConfirm(1),
+        );
+        assert_eq!(launcher.mods_delete_dialog_index, Some(1));
+        let delete_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let delete_texts = delete_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods delete confirm frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(delete_texts.contains(&"Confirm"));
+        assert!(delete_texts
+            .iter()
+            .any(|text| text.contains("This mod will be deleted")));
+        assert!(delete_texts
+            .iter()
+            .any(|text| text.contains("Beta Override")));
+        assert!(delete_texts.contains(&"Delete"));
+        assert!(delete_texts.contains(&"Cancel"));
+
+        let dialog = DesktopLauncher::mods_delete_confirm_dialog_rect_for_panel(panel);
+        let confirm = DesktopLauncher::mods_delete_confirm_button_rect(dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, confirm.x, confirm.y),
+            Some(super::DesktopMenuRouteShellAction::ConfirmModsDelete)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ConfirmModsDelete,
+        );
+        assert_eq!(launcher.mods_delete_dialog_index, None);
+        assert_eq!(launcher.last_mods_directory_mod_names, vec!["alpha"]);
+        assert!(!beta.exists());
+        let beta_delete = launcher
+            .last_mods_delete_result
+            .as_ref()
+            .expect("delete result should be recorded");
+        assert!(beta_delete.deleted);
+        assert_eq!(beta_delete.name, "beta");
+
+        launcher.mods_route_requires_reload_flag = false;
+        launcher.last_mods_directory_mod_states[0].enabled = false;
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsDeleteConfirm(0),
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ConfirmModsDelete,
+        );
+        assert!(launcher.last_mods_directory_mod_names.is_empty());
+        assert!(!launcher.mods_route_requires_reload());
+        assert!(!alpha.exists());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

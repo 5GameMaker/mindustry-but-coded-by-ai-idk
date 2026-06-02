@@ -17,6 +17,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 750. ModsDialog 启用/禁用与删除确认动作闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **88.4%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `ModsDialog` 的 mod 卡片右侧直接提供 enable/disable 和 delete/listing 动作；
+  - Java `Mods.setEnabled(...)` 会写入状态并标记 `requiresReload`；
+  - Java `Mods.removeMod(...)` 会弹 `@confirm`/`@mod.remove.confirm`，删除成功后按原状态决定是否置 `requiresReload`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuRouteShellAction` 新增 `ToggleModsEnabled`、`OpenModsDeleteConfirm`、`ConfirmModsDelete`、`CancelModsDelete`；
+    - 新增 `DesktopModsDeleteResult`、`mods_delete_dialog_index`、`mods_route_requires_reload_flag` 与 `last_mods_delete_result`；
+    - Mods 卡片右侧新增 Java 风格 enable/disable 与 delete 小按钮，点击优先级高于整卡详情；
+    - `dispatch_mods_toggle_enabled(...)` 翻转 enabled 状态并标记 reload；
+    - `dispatch_mods_delete_confirmed(...)` 删除 mod 文件/目录、移除列表项，并仅在原状态 enabled 时标记 reload；
+    - 新增 `push_mods_delete_confirm_dialog(...)`，渲染 `@confirm`、`@mod.remove.confirm`、Cancel/Delete 按钮；
+    - 返回键与 route 切换会关闭删除确认弹窗，避免弹窗状态泄漏。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_toggle_enabled_and_delete_confirm_follow_java_semantics --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop mods --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - enable/disable 仍只落在 desktop snapshot，后续必须接入真实 `LoadedMod`/settings 持久化和依赖重排；
+  - Steam/workshop listing 分支仍未接入；
+  - `requiresReload` 关闭 ModsDialog 后触发 reload/exit 的末端流程仍需继续对齐 Java `Mods.reload()`。
+
 ## 749. ModsDialog 状态视图与详情内容按钮分层
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
