@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 748. Settings Keybind 默认显示值接入 core Binding 真源
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **88.2%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `KeybindDialog` 的默认值来自全局 `KeyBind` registry；
+  - Rust desktop Controls 原先直接用 `SETTINGS_KEYBIND_SPECS.default_value` 作为默认显示；
+  - 上一闭环已让测试直接对齐 core `Binding::defaults(false)`，本轮继续把运行时默认显示接到 core input 模型。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 core `KeyBindingInput/KeyCode` 到 desktop 显示文本的映射；
+    - `settings_keybind_effective_value(...)` 在没有 override 时优先通过 `Binding::find(name, false)` 推导默认显示值，静态 `default_value` 只作为 fallback；
+    - Keybind 覆盖测试新增 default display 派生断言，并覆盖 `move_x` / `menu` 的实际 effective value。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_keybind_specs_cover_upstream_binding_java_names --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop settings_keybind --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `SETTINGS_KEYBIND_SPECS` 的 name/category 列表仍是 desktop 手写表，后续应继续从 core `Binding::defaults(false)` 派生或集中生成；
+  - Controls dialog 仍需继续对齐 Java 的输入捕获视觉、移动端条件项与 reset-all ScrollPane 尾部细节。
+
 ## 747. Settings Keybind 规格测试改为直接对齐 core `Binding::defaults`
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

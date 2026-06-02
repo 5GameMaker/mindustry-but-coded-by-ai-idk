@@ -79,6 +79,7 @@ use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
     OtherPlayerPreviewOverlayPlan,
 };
+use mindustry_core::mindustry::input::{Binding, KeyBindingInput, KeyCode};
 use mindustry_core::mindustry::io::versions::read_legacy_servers;
 use mindustry_core::mindustry::io::{
     backup_file_for_path, collect_valid_save_slot_records, is_map_image_bytes, read_bullet_sync,
@@ -27245,11 +27246,96 @@ impl DesktopLauncher {
         format!("@keybind.{name}.name")
     }
 
-    fn settings_keybind_effective_value<'a>(&'a self, spec: &'a DesktopKeybindSpec) -> &'a str {
+    fn settings_keybind_effective_value(&self, spec: &DesktopKeybindSpec) -> String {
         self.settings_keybind_overrides
             .get(spec.name)
-            .map(String::as_str)
-            .unwrap_or(spec.default_value)
+            .cloned()
+            .unwrap_or_else(|| {
+                Self::settings_keybind_core_default_display_value(spec.name)
+                    .unwrap_or_else(|| spec.default_value.to_string())
+            })
+    }
+
+    fn settings_keybind_core_default_display_value(name: &str) -> Option<String> {
+        Binding::find(name, false)
+            .map(|binding| Self::settings_keybind_input_display(binding.input))
+    }
+
+    fn settings_keybind_input_display(input: KeyBindingInput) -> String {
+        match input {
+            KeyBindingInput::Key(code) | KeyBindingInput::AxisSingle(code) => {
+                Self::settings_key_code_display_for_core_key(code).to_string()
+            }
+            KeyBindingInput::AxisPair { min, max } => format!(
+                "{} / {}",
+                Self::settings_key_code_display_for_core_key(min),
+                Self::settings_key_code_display_for_core_key(max)
+            ),
+        }
+    }
+
+    fn settings_key_code_display_for_core_key(code: KeyCode) -> &'static str {
+        match code {
+            KeyCode::A => "A",
+            KeyCode::D => "D",
+            KeyCode::S => "S",
+            KeyCode::W => "W",
+            KeyCode::MouseBack => "Mouse Back",
+            KeyCode::MouseForward => "Mouse Forward",
+            KeyCode::ShiftLeft => "Shift Left",
+            KeyCode::V => "V",
+            KeyCode::ControlLeft => "Ctrl Left",
+            KeyCode::MouseLeft => "Mouse Left",
+            KeyCode::MouseRight => "Mouse Right",
+            KeyCode::LeftBracket => "[",
+            KeyCode::RightBracket => "]",
+            KeyCode::Q => "Q",
+            KeyCode::E => "E",
+            KeyCode::Scroll => "Scroll",
+            KeyCode::R => "R",
+            KeyCode::MouseMiddle => "Mouse Middle",
+            KeyCode::P => "P",
+            KeyCode::B => "B",
+            KeyCode::F => "F",
+            KeyCode::Z => "Z",
+            KeyCode::X => "X",
+            KeyCode::T => "T",
+            KeyCode::G => "G",
+            KeyCode::H => "H",
+            KeyCode::Unset => "Unset",
+            KeyCode::AltLeft => "Alt Left",
+            KeyCode::Comma => "Comma",
+            KeyCode::Period => "Period",
+            KeyCode::Left => "Left",
+            KeyCode::Right => "Right",
+            KeyCode::Up => "Up",
+            KeyCode::Down => "Down",
+            KeyCode::Num1 => "1",
+            KeyCode::Num2 => "2",
+            KeyCode::Num3 => "3",
+            KeyCode::Num4 => "4",
+            KeyCode::Num5 => "5",
+            KeyCode::Num6 => "6",
+            KeyCode::Num7 => "7",
+            KeyCode::Num8 => "8",
+            KeyCode::Num9 => "9",
+            KeyCode::Num0 => "0",
+            KeyCode::Back => "Back",
+            KeyCode::Escape => "Escape",
+            KeyCode::F11 => "F11",
+            KeyCode::Space => "Space",
+            KeyCode::M => "M",
+            KeyCode::J => "J",
+            KeyCode::N => "N",
+            KeyCode::F1 => "F1",
+            KeyCode::C => "C",
+            KeyCode::F12 => "F12",
+            KeyCode::F5 => "F5",
+            KeyCode::F6 => "F6",
+            KeyCode::Tab => "Tab",
+            KeyCode::Enter => "Enter",
+            KeyCode::F8 => "F8",
+        }
     }
 
     fn settings_keybind_storage_base(name: &str) -> String {
@@ -78675,7 +78761,31 @@ repo: "Beta/Override"
                 desktop.axis, upstream_axis,
                 "Settings Controls axis flag should be derived from Binding::defaults(false)"
             );
+            assert_eq!(
+                desktop.default_value,
+                DesktopLauncher::settings_keybind_input_display(upstream.input),
+                "Settings Controls default display should be derivable from core Binding input"
+            );
         }
+        let launcher = DesktopLauncher::new(Vec::new());
+        assert_eq!(
+            launcher.settings_keybind_effective_value(
+                super::SETTINGS_KEYBIND_SPECS
+                    .iter()
+                    .find(|spec| spec.name == "move_x")
+                    .expect("move_x keybind")
+            ),
+            "A / D"
+        );
+        assert_eq!(
+            launcher.settings_keybind_effective_value(
+                super::SETTINGS_KEYBIND_SPECS
+                    .iter()
+                    .find(|spec| spec.name == "menu")
+                    .expect("menu keybind")
+            ),
+            "Escape"
+        );
 
         for name in ["move_x", "move_y", "rotate", "zoom", "chat_scroll"] {
             let spec = super::SETTINGS_KEYBIND_SPECS
