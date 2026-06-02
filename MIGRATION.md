@@ -17,6 +17,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 785. LoadDialog 模式筛选 tooltip 与 Editor 按钮对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **91.9%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `LoadDialog` 遍历 `Gamemode.all` 创建模式筛选按钮，即使 `editor` 是 hidden mode 也会出现；
+  - Java 给每个筛选按钮加 `tooltip("@mode." + mode.name() + ".name")`；
+  - Rust 此前过滤 `mode.hidden()`，少了 Editor 按钮，也没有 hover tooltip。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `load_game_mode_filter_modes()`，Load/Save 筛选按钮统一使用 `Gamemode::ALL`；
+    - mode filter rect 按按钮数量从右对齐，避免 5 个按钮越界；
+    - 计数 summary 移到按钮组左侧；
+    - 新增模式按钮 hover tooltip，复用 `@mode.<wire>.name` 本地化文案；
+    - Load/Save hit-test 同步包含 Editor 模式；
+    - 扩展 LoadDialog mode filter 测试，锁定 Editor 按钮可命中、Attack hover 显示本地化 tooltip。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - ModsDialog 卡片缩略图/短描述仍需继续；
+  - Load/Save 其他子弹窗视觉细节仍需继续；
+  - 完整客户端可玩性和联机 smoke test 仍未达成。
+
 ## 784. JoinDialog Add Server 输入框尺寸对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

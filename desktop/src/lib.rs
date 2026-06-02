@@ -28430,12 +28430,28 @@ impl DesktopLauncher {
         )
     }
 
+    fn load_game_mode_filter_modes() -> &'static [Gamemode] {
+        &Gamemode::ALL
+    }
+
     fn load_game_mode_filter_button_rect(search: RenderRect, index: usize) -> RenderRect {
+        let count = Self::load_game_mode_filter_modes().len().max(1);
+        let step = 48.0;
+        let width = 60.0;
+        let right_pad = 12.0;
+        let start = search.right() - right_pad - width - (count.saturating_sub(1)) as f32 * step;
         RenderRect::new(
-            search.right() - 216.0 + index as f32 * 48.0,
+            start + index as f32 * step,
             search.center().y - 30.0,
+            width,
             60.0,
-            60.0,
+        )
+    }
+
+    fn load_game_mode_filter_summary_point(search: RenderRect) -> RenderPoint {
+        RenderPoint::new(
+            Self::load_game_mode_filter_button_rect(search, 0).x - 8.0,
+            search.center().y,
         )
     }
 
@@ -28568,6 +28584,68 @@ impl DesktopLauncher {
             Gamemode::Pvp => "modePvp",
             Gamemode::Editor => "terrain",
         }
+    }
+
+    fn load_game_mode_filter_hover_tooltip_text(&self, search: RenderRect) -> Option<String> {
+        let cursor = self.last_menu_cursor?;
+        Self::load_game_mode_filter_modes()
+            .iter()
+            .copied()
+            .enumerate()
+            .find_map(|(index, mode)| {
+                Self::load_game_mode_filter_button_rect(search, index)
+                    .contains_point(cursor)
+                    .then(|| {
+                        self.localize_bundle_markup_text(format!("@mode.{}.name", mode.wire_name()))
+                    })
+            })
+    }
+
+    fn push_load_game_mode_filter_hover_tooltip(
+        &self,
+        pass: &mut RenderPass,
+        panel: RenderRect,
+        search: RenderRect,
+    ) {
+        let Some(label) = self.load_game_mode_filter_hover_tooltip_text(search) else {
+            return;
+        };
+        let Some(cursor) = self.last_menu_cursor else {
+            return;
+        };
+        let tooltip_width = (label.chars().count() as f32 * 7.0 + 28.0).clamp(92.0, 260.0);
+        let tooltip_height = 32.0;
+        let tooltip_x = (cursor.x + 14.0)
+            .min(panel.right() - tooltip_width - 4.0)
+            .max(panel.x + 4.0);
+        let tooltip_y = (cursor.y + 14.0)
+            .min(panel.y + panel.height - tooltip_height - 4.0)
+            .max(panel.y + 4.0);
+        let tooltip = RenderRect::new(tooltip_x, tooltip_y, tooltip_width, tooltip_height);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            tooltip,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.064,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            tooltip,
+            [0.62, 0.82, 1.0, 0.90],
+            1.0,
+            Layer::END_PIXELED + 0.065,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            label,
+            RenderPoint::new(tooltip.x + 12.0, tooltip.center().y),
+            [0.90, 0.96, 1.0, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.066,
+        ));
     }
 
     fn load_game_visible_slot_capacity_for_list(list: RenderRect) -> usize {
@@ -28757,9 +28835,9 @@ impl DesktopLauncher {
             return Some(DesktopMenuRouteShellAction::LoadGameImport);
         }
         let search = Self::load_game_search_rect_for_panel(panel);
-        for (mode_index, mode) in Gamemode::ALL
-            .into_iter()
-            .filter(|mode| !mode.hidden())
+        for (mode_index, mode) in Self::load_game_mode_filter_modes()
+            .iter()
+            .copied()
             .enumerate()
         {
             if Self::load_game_mode_filter_button_rect(search, mode_index).contains_point(point) {
@@ -28847,9 +28925,9 @@ impl DesktopLauncher {
             return Some(DesktopMenuRouteShellAction::SaveGameNew);
         }
         let search = Self::load_game_search_rect_for_panel(panel);
-        for (mode_index, mode) in Gamemode::ALL
-            .into_iter()
-            .filter(|mode| !mode.hidden())
+        for (mode_index, mode) in Self::load_game_mode_filter_modes()
+            .iter()
+            .copied()
             .enumerate()
         {
             if Self::load_game_mode_filter_button_rect(search, mode_index).contains_point(point) {
@@ -45529,9 +45607,9 @@ impl DesktopLauncher {
 
         let filtered_indices = self.filtered_load_game_slot_indices();
         let filtered_count = filtered_indices.len();
-        for (index, mode) in Gamemode::ALL
-            .into_iter()
-            .filter(|mode| !mode.hidden())
+        for (index, mode) in Self::load_game_mode_filter_modes()
+            .iter()
+            .copied()
             .enumerate()
         {
             let rect = Self::load_game_mode_filter_button_rect(search, index);
@@ -45568,7 +45646,7 @@ impl DesktopLauncher {
                 filtered_indices.len(),
                 self.load_game_slots.len()
             ),
-            RenderPoint::new(search.right() - 8.0, search.center().y),
+            Self::load_game_mode_filter_summary_point(search),
             [0.56, 0.68, 0.78, 1.0],
             9.0,
             0.0,
@@ -45577,6 +45655,7 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.031,
         ));
+        self.push_load_game_mode_filter_hover_tooltip(pass, panel, search);
 
         if self.load_game_slots.is_empty() {
             pass.push(RenderCommand::draw_text_styled(
@@ -80156,6 +80235,7 @@ repo: "Beta/Override"
         );
         let search = DesktopLauncher::load_game_search_rect_for_panel(panel);
         let attack_filter = DesktopLauncher::load_game_mode_filter_button_rect(search, 2).center();
+        let editor_filter = DesktopLauncher::load_game_mode_filter_button_rect(search, 4).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
@@ -80165,6 +80245,17 @@ repo: "Beta/Override"
             Some(super::DesktopMenuRouteShellAction::ToggleLoadGameMode(
                 Gamemode::Attack
             ))
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                editor_filter.x,
+                editor_filter.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ToggleLoadGameMode(
+                Gamemode::Editor
+            )),
+            "Java LoadDialog iterates Gamemode.all, including the hidden editor mode filter"
         );
 
         launcher.apply_menu_input_events(
@@ -80208,6 +80299,14 @@ repo: "Beta/Override"
         assert!(texts.contains(&"[accent]untitled"));
         assert!(!texts.contains(&"[accent]New Map"));
         assert!(texts.contains(&"1 / 2"));
+        assert!(
+            texts.contains(
+                &launcher
+                    .localize_bundle_markup_text("@mode.attack.name")
+                    .as_str()
+            ),
+            "Java LoadDialog mode filter buttons expose @mode.<name>.name as hover tooltip"
+        );
 
         let survival_filter =
             DesktopLauncher::load_game_mode_filter_button_rect(search, 0).center();
