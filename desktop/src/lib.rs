@@ -78640,99 +78640,7 @@ repo: "Beta/Override"
 
     #[test]
     fn desktop_launcher_settings_keybind_specs_cover_upstream_binding_java_names() {
-        let expected = [
-            "move_x",
-            "move_y",
-            "mouse_move",
-            "pan",
-            "boost",
-            "respawn",
-            "control",
-            "select",
-            "deselect",
-            "break_block",
-            "pickupCargo",
-            "dropCargo",
-            "clear_building",
-            "pause_building",
-            "rotate",
-            "rotateplaced",
-            "diagonal_placement",
-            "pick",
-            "ping",
-            "rebuild_select",
-            "schematic_select",
-            "schematic_flip_x",
-            "schematic_flip_y",
-            "schematic_menu",
-            "command_mode",
-            "command_queue",
-            "create_control_group",
-            "select_all_units",
-            "select_all_unit_factories",
-            "select_all_unit_transport",
-            "select_across_screen",
-            "cancel_orders",
-            "unit_stance_shoot",
-            "unit_stance_hold_fire",
-            "unit_stance_pursue_target",
-            "unit_stance_patrol",
-            "unit_stance_ram",
-            "unit_stance_boost",
-            "unit_stance_hold_position",
-            "unit_command_move",
-            "unit_command_repair",
-            "unit_command_rebuild",
-            "unit_command_assist",
-            "unit_command_mine",
-            "unit_command_boost",
-            "unit_command_enter_payload",
-            "unit_command_load_units",
-            "unit_command_load_blocks",
-            "unit_command_unload_payload",
-            "unit_command_loop_payload",
-            "category_prev",
-            "category_next",
-            "block_select_left",
-            "block_select_right",
-            "block_select_up",
-            "block_select_down",
-            "block_select_01",
-            "block_select_02",
-            "block_select_03",
-            "block_select_04",
-            "block_select_05",
-            "block_select_06",
-            "block_select_07",
-            "block_select_08",
-            "block_select_09",
-            "block_select_10",
-            "zoom",
-            "detach_camera",
-            "menu",
-            "fullscreen",
-            "pause",
-            "skip_wave",
-            "minimap",
-            "research",
-            "planet_map",
-            "block_info",
-            "toggle_menus",
-            "screenshot",
-            "toggle_power_lines",
-            "toggle_block_status",
-            "player_list",
-            "chat",
-            "chat_history_prev",
-            "chat_history_next",
-            "chat_scroll",
-            "chat_mode",
-            "console",
-            "debug_hitboxes",
-        ];
-        assert_eq!(expected.len(), 88);
-        assert_eq!(super::SETTINGS_KEYBIND_SPECS.len(), expected.len());
-
+        let upstream = mindustry_core::mindustry::input::Binding::defaults(false);
         let actual = super::SETTINGS_KEYBIND_SPECS
             .iter()
             .map(|spec| spec.name)
@@ -78742,11 +78650,30 @@ repo: "Beta/Override"
             .copied()
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(unique.len(), actual.len(), "keybind names must stay unique");
+        assert_eq!(upstream.len(), 88);
+        assert_eq!(actual.len(), upstream.len());
 
-        for name in expected {
-            assert!(
-                actual.contains(&name),
-                "Settings Controls should include upstream Binding.java keybind {name}"
+        let mut desktop_category = "general";
+        for (desktop, upstream) in super::SETTINGS_KEYBIND_SPECS.iter().zip(upstream.iter()) {
+            if let Some(category) = desktop.category {
+                desktop_category = category;
+            }
+            assert_eq!(
+                desktop.name, upstream.name,
+                "Settings Controls order should follow core Binding::defaults(false)"
+            );
+            assert_eq!(
+                desktop_category, upstream.category,
+                "Settings Controls category inheritance should follow upstream KeyBind registry"
+            );
+            let upstream_axis = matches!(
+                upstream.input,
+                mindustry_core::mindustry::input::KeyBindingInput::AxisPair { .. }
+                    | mindustry_core::mindustry::input::KeyBindingInput::AxisSingle(_)
+            );
+            assert_eq!(
+                desktop.axis, upstream_axis,
+                "Settings Controls axis flag should be derived from Binding::defaults(false)"
             );
         }
 
