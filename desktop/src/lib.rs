@@ -188,7 +188,7 @@ const JOIN_COMMUNITY_GROUP_VISIBLE_CARDS: usize = 3;
 const JOIN_COMMUNITY_GROUP_CARD_HEIGHT: f32 = 88.0;
 const JOIN_COMMUNITY_GROUP_CARD_GAP: f32 = 8.0;
 const JOIN_ACTION_BUTTON_WIDTH: f32 = 170.0;
-const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
+const JOIN_ACTION_BUTTON_HEIGHT: f32 = 64.0;
 const JOIN_SEARCH_TEXT_MAX_LENGTH: usize = 64;
 const JOIN_ADD_SERVER_TEXT_MAX_LENGTH: usize = 96;
 const JOIN_SERVER_CARD_ACTION_BUTTONS: usize = 5;
@@ -30062,7 +30062,7 @@ impl DesktopLauncher {
     fn join_route_add_button_rect_for_panel(panel: RenderRect) -> RenderRect {
         RenderRect::new(
             panel.x + 36.0,
-            panel.y + panel.height - 132.0,
+            panel.y + panel.height - 152.0,
             JOIN_ACTION_BUTTON_WIDTH,
             JOIN_ACTION_BUTTON_HEIGHT,
         )
@@ -30071,7 +30071,7 @@ impl DesktopLauncher {
     fn join_route_refresh_button_rect_for_panel(panel: RenderRect) -> RenderRect {
         RenderRect::new(
             panel.x + panel.width - 36.0 - JOIN_ACTION_BUTTON_WIDTH,
-            panel.y + panel.height - 132.0,
+            panel.y + panel.height - 152.0,
             JOIN_ACTION_BUTTON_WIDTH,
             JOIN_ACTION_BUTTON_HEIGHT,
         )
@@ -30079,7 +30079,7 @@ impl DesktopLauncher {
 
     fn join_route_info_button_rect_for_panel(panel: RenderRect) -> RenderRect {
         let add = Self::join_route_add_button_rect_for_panel(panel);
-        RenderRect::new(add.right() + 12.0, add.y, 58.0, add.height)
+        RenderRect::new(add.right() + 12.0, add.y, 60.0, 64.0)
     }
 
     fn join_route_local_section_label(&self) -> &'static str {
@@ -84631,6 +84631,19 @@ repo: "Beta/Override"
         let search = DesktopLauncher::join_route_search_rect_for_panel(panel);
         let show_hidden = DesktopLauncher::join_route_show_hidden_button_rect_for_panel(panel);
         let card = DesktopLauncher::join_route_server_card_rect_for_panel(panel, 0);
+        assert_eq!(add.width, 170.0);
+        assert_eq!(add.height, 64.0);
+        assert_eq!(refresh.width, 170.0);
+        assert_eq!(refresh.height, 64.0);
+        assert_eq!(info.width, 60.0);
+        assert_eq!(info.height, 64.0);
+        assert_eq!(info.y, add.y);
+        assert_eq!(refresh.y, add.y);
+        assert_eq!(
+            add.y + add.height,
+            panel.y + panel.height - 88.0,
+            "Java JoinDialog top action buttons use a thick 64px button row without colliding with the name row"
+        );
         let card_up = DesktopLauncher::join_route_server_card_action_button_rect(card, 0).center();
         let card_down =
             DesktopLauncher::join_route_server_card_action_button_rect(card, 1).center();

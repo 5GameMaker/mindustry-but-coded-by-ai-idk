@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 782. JoinDialog 顶部动作按钮高度对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **91.6%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `JoinDialog` 顶部 `?` info 按钮是 `60f x 64f`，Add/Refresh 所在动作区也比 Rust 此前 44px 高度更厚；
+  - Rust 此前 Join 顶栏动作按钮偏瘦，视觉层级不接近原版。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `JOIN_ACTION_BUTTON_HEIGHT` 从 `44` 调整到 `64`；
+    - Add/Refresh y 坐标同步上移，保持按钮顶部不压住 name row；
+    - Info 按钮明确为 `60 x 64`；
+    - 保留 Add/Refresh 宽度 `170`，避免小 panel 下隐藏 info 区域与 Refresh 命中重叠；
+    - 扩展 Join skeleton 几何测试，锁定 Add/Refresh/Info 高度和 y 对齐。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_hides_info_button_on_steam_or_mobile_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - JoinDialog 保存/远程服务器卡右上动作按钮仍偏小；
+  - Add Server 子弹窗 IP 输入框仍需继续对齐 Java `320f x 54f`；
+  - 完整客户端可玩性和联机 smoke test 仍未达成。
+
 ## 781. CustomRulesDialog Weather ScrollPane 滚动语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
