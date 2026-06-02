@@ -49126,17 +49126,20 @@ impl DesktopLauncher {
                 "link",
             ));
         }
+        let has_steam_id = self.mods_route_mod_has_steam_id_at_index(index);
         if self.mods_route_mod_repo_at_index(index).is_some() {
             specs.push((
                 DesktopMenuRouteShellAction::ModsDetailOpenGithub(index),
                 "@mods.github.open",
                 "link",
             ));
-            specs.push((
-                DesktopMenuRouteShellAction::ModsDetailReinstall(index),
-                "@mods.browser.reinstall",
-                "download",
-            ));
+            if !has_steam_id {
+                specs.push((
+                    DesktopMenuRouteShellAction::ModsDetailReinstall(index),
+                    "@mods.browser.reinstall",
+                    "download",
+                ));
+            }
         }
         specs
     }
@@ -67355,6 +67358,7 @@ name: workshop-mod
 displayName: "Workshop Mod"
 author: "Steam Author"
 version: "1.0.0"
+repo: "Steam/Workshop"
 steamID: "987654321"
 "#,
         )];
@@ -67406,6 +67410,47 @@ steamID: "987654321"
         assert_eq!(platform.viewed_listing_ids, vec!["987654321".to_string()]);
         assert!(platform.opened_uris.is_empty());
         assert_eq!(launcher.mods_delete_dialog_index, None);
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsDetail(0),
+        );
+        let detail_specs = launcher.mods_route_detail_button_specs(0);
+        assert!(detail_specs.iter().any(|(action, label, _)| {
+            matches!(
+                action,
+                super::DesktopMenuRouteShellAction::ModsDetailOpenGithub(0)
+            ) && *label == "@mods.github.open"
+        }));
+        assert!(
+            !detail_specs.iter().any(|(action, _, _)| matches!(
+                action,
+                super::DesktopMenuRouteShellAction::ModsDetailReinstall(0)
+            )),
+            "Java ModsDialog hides reinstall/import actions for Steam workshop mods"
+        );
+        let detail_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let detail_texts = detail_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("workshop mod detail should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(detail_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@mods.github.open")
+                .as_str()
+        ));
+        assert!(
+            !detail_texts.contains(&"Reinstall"),
+            "Steam workshop detail should not expose Java-incompatible reinstall"
+        );
 
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::OpenModsListing(0),
