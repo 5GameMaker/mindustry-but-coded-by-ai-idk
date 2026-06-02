@@ -3059,6 +3059,41 @@ pub fn settings_pref_spec(table: &str, key: &str) -> Option<&'static DesktopSett
         .find(|spec| spec.table == table && spec.key == key)
 }
 
+fn settings_pref_condition_visible_with_context(
+    condition: Option<&str>,
+    mobile: bool,
+    ios: bool,
+    steam: bool,
+    beta: bool,
+    mac: bool,
+    shield_shader: bool,
+) -> bool {
+    match condition {
+        None => true,
+        Some("mobile") => mobile,
+        Some("!mobile") => !mobile,
+        Some("!ios") => !ios,
+        Some("steam") => steam,
+        Some("steam&&!beta") => steam && !beta,
+        Some("mobile&&!ios") => mobile && !ios,
+        Some("OS.isMac") => mac,
+        Some("Shaders.shield != null") => shield_shader,
+        Some(_) => false,
+    }
+}
+
+fn settings_pref_visible_by_default(spec: &DesktopSettingsPrefSpec) -> bool {
+    settings_pref_condition_visible_with_context(
+        spec.condition,
+        false,
+        false,
+        false,
+        false,
+        cfg!(target_os = "macos"),
+        true,
+    )
+}
+
 const SETTINGS_PREF_HIGHLIGHT_KEYS_GAME: &[&str] =
     &["saveinterval", "communityservers", "savecreate", "console"];
 const SETTINGS_PREF_HIGHLIGHT_KEYS_GRAPHICS: &[&str] =
@@ -3069,7 +3104,7 @@ const SETTINGS_PREF_HIGHLIGHT_KEYS_SOUND: &[&str] =
 pub fn settings_pref_count(table: &str) -> usize {
     SETTINGS_PREF_SPECS
         .iter()
-        .filter(|spec| spec.table == table)
+        .filter(|spec| spec.table == table && settings_pref_visible_by_default(spec))
         .count()
 }
 
@@ -3089,7 +3124,11 @@ pub fn settings_pref_summary_line(table: &str, key: &str) -> Option<String> {
 pub fn settings_pref_highlight_summary_line(table: &str) -> Option<String> {
     let summaries = settings_pref_highlight_keys(table)
         .iter()
-        .filter_map(|key| settings_pref_summary_line(table, key))
+        .filter_map(|key| {
+            settings_pref_spec(table, key)
+                .filter(|spec| settings_pref_visible_by_default(spec))
+                .map(DesktopSettingsPrefSpec::summary)
+        })
         .collect::<Vec<_>>();
     if summaries.is_empty() {
         None
@@ -25274,9 +25313,62 @@ impl DesktopLauncher {
                     .entries
                     .iter()
                     .filter_map(|key| settings_pref_spec(table, key))
+                    .filter(|spec| settings_pref_visible_by_default(spec))
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    fn settings_pref_visible_for_current_runtime(&self, spec: &DesktopSettingsPrefSpec) -> bool {
+        settings_pref_condition_visible_with_context(
+            spec.condition,
+            self.menu_renderer_state.config.mobile,
+            false,
+            self.host_steam_enabled(),
+            false,
+            cfg!(target_os = "macos"),
+            true,
+        )
+    }
+
+    fn settings_pref_widget_specs_for_current_runtime(
+        &self,
+        table: &str,
+    ) -> Vec<&'static DesktopSettingsPrefSpec> {
+        Self::settings_pref_group(table)
+            .map(|group| {
+                group
+                    .entries
+                    .iter()
+                    .filter_map(|key| settings_pref_spec(table, key))
+                    .filter(|spec| self.settings_pref_visible_for_current_runtime(spec))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn settings_pref_count_for_current_runtime(&self, table: &str) -> usize {
+        self.settings_pref_widget_specs_for_current_runtime(table)
+            .len()
+    }
+
+    fn settings_pref_highlight_summary_line_for_current_runtime(
+        &self,
+        table: &str,
+    ) -> Option<String> {
+        let summaries = settings_pref_highlight_keys(table)
+            .iter()
+            .filter_map(|key| {
+                settings_pref_spec(table, key)
+                    .filter(|spec| self.settings_pref_visible_for_current_runtime(spec))
+                    .map(DesktopSettingsPrefSpec::summary)
+            })
+            .collect::<Vec<_>>();
+        if summaries.is_empty() {
+            None
+        } else {
+            Some(summaries.join(" | "))
+        }
     }
 
     fn setting_bool_effective_value(&self, spec: &DesktopSettingsPrefSpec) -> bool {
@@ -25477,7 +25569,9 @@ impl DesktopLauncher {
     }
 
     fn settings_scroll_offset_pixels(&self, table: &'static str, clip: RenderRect) -> f32 {
-        let row_count = Self::settings_pref_widget_specs(table).len();
+        let row_count = self
+            .settings_pref_widget_specs_for_current_runtime(table)
+            .len();
         let max = Self::settings_max_scroll_offset_for_clip(clip, row_count);
         self.settings_scroll_offsets
             .get(table)
@@ -26503,7 +26597,7 @@ impl DesktopLauncher {
         let track_symbol = Self::settings_slider_track_symbol();
         let scroll_track_symbol = Self::settings_scroll_track_symbol();
         let scroll_knob_symbol = Self::settings_scroll_knob_symbol();
-        let specs = Self::settings_pref_widget_specs(table);
+        let specs = self.settings_pref_widget_specs_for_current_runtime(table);
         let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
         let table_container = Self::settings_pref_table_container_rect_for_panel(panel);
         let scroll_offset = self.settings_scroll_offset_pixels(table, clip);
@@ -26657,7 +26751,8 @@ impl DesktopLauncher {
         if !clip.contains_point(point) {
             return None;
         }
-        for (index, spec) in Self::settings_pref_widget_specs(table)
+        for (index, spec) in self
+            .settings_pref_widget_specs_for_current_runtime(table)
             .iter()
             .copied()
             .enumerate()
@@ -26754,7 +26849,8 @@ impl DesktopLauncher {
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
         let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
         let scroll_offset = self.settings_scroll_offset_pixels(table, clip);
-        let index = Self::settings_pref_widget_specs(table)
+        let index = self
+            .settings_pref_widget_specs_for_current_runtime(table)
             .iter()
             .position(|candidate| candidate.table == spec.table && candidate.key == spec.key)?;
         let row =
@@ -26786,7 +26882,9 @@ impl DesktopLauncher {
         let panel =
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
         let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
-        let row_count = Self::settings_pref_widget_specs(table).len();
+        let row_count = self
+            .settings_pref_widget_specs_for_current_runtime(table)
+            .len();
         let scroll_offset = self.settings_scroll_offset_pixels(table, clip);
         let knob = Self::settings_scrollbar_knob_rect_for_clip(clip, row_count, scroll_offset)?;
         let point = RenderPoint::new(x, y);
@@ -26818,7 +26916,9 @@ impl DesktopLauncher {
         let panel =
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
         let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
-        let row_count = Self::settings_pref_widget_specs(table).len();
+        let row_count = self
+            .settings_pref_widget_specs_for_current_runtime(table)
+            .len();
         let max = Self::settings_max_scroll_offset_for_clip(clip, row_count);
         if max <= 0 {
             return false;
@@ -26895,7 +26995,9 @@ impl DesktopLauncher {
             return false;
         }
         let table = self.settings_dialog_state.page.key();
-        let row_count = Self::settings_pref_widget_specs(table).len();
+        let row_count = self
+            .settings_pref_widget_specs_for_current_runtime(table)
+            .len();
         let max = Self::settings_max_scroll_offset_for_clip(clip, row_count);
         if max <= 0 {
             return false;
@@ -27057,10 +27159,12 @@ impl DesktopLauncher {
                     ));
                 }
                 for table in ["game", "graphics", "sound"] {
-                    if let Some(highlights) = settings_pref_highlight_summary_line(table) {
+                    if let Some(highlights) =
+                        self.settings_pref_highlight_summary_line_for_current_runtime(table)
+                    {
                         lines.push(format!(
                             "pref table: {table} settings: {} critical: {highlights}",
-                            settings_pref_count(table)
+                            self.settings_pref_count_for_current_runtime(table)
                         ));
                     }
                 }
@@ -27075,9 +27179,11 @@ impl DesktopLauncher {
                 let table = state.page.key();
                 lines.push(format!(
                     "table: {table} settings: {}",
-                    settings_pref_count(table)
+                    self.settings_pref_count_for_current_runtime(table)
                 ));
-                if let Some(highlights) = settings_pref_highlight_summary_line(table) {
+                if let Some(highlights) =
+                    self.settings_pref_highlight_summary_line_for_current_runtime(table)
+                {
                     for highlight in highlights.split(" | ") {
                         lines.push(format!("critical: {highlight}"));
                     }
@@ -82456,7 +82562,10 @@ repo: "Beta/Override"
             .collect::<Vec<_>>();
         assert!(texts.contains(&"@setting.saveinterval.name"));
         assert!(texts.contains(&"@setting.communityservers.name"));
-        assert!(texts.contains(&"@setting.playerlimit.name"));
+        assert!(!texts.contains(&"@setting.autotarget.name"));
+        assert!(!texts.contains(&"@setting.keyboard.name"));
+        assert!(!texts.contains(&"@setting.playerlimit.name"));
+        assert!(!texts.contains(&"@setting.steampublichost.name"));
         assert!(texts.contains(&"60 seconds"));
         assert!(!texts.iter().any(|text| text.starts_with("value: ")));
         assert!(!texts.contains(&"off"));
@@ -82487,7 +82596,12 @@ repo: "Beta/Override"
             })
             .collect::<Vec<_>>();
         assert!(graphics_texts.contains(&"@setting.fullscreen.name"));
-        assert!(graphics_texts.contains(&"@setting.macnotch.name"));
+        assert!(!graphics_texts.contains(&"@setting.landscape.name"));
+        if cfg!(target_os = "macos") {
+            assert!(graphics_texts.contains(&"@setting.macnotch.name"));
+        } else {
+            assert!(!graphics_texts.contains(&"@setting.macnotch.name"));
+        }
         assert!(graphics_texts.contains(&"0px"));
         assert!(graphics_texts.contains(&"100%"));
         assert!(graphics_texts.contains(&"1.0x"));
@@ -82920,6 +83034,7 @@ repo: "Beta/Override"
     #[test]
     fn desktop_launcher_settings_scroll_wheel_offsets_table_hit_tests() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.set_setting_override("platform", "steam", "true");
         launcher.dispatch_menu_action(MenuButtonRole::Settings);
         launcher.settings_dialog_state.page = super::DesktopSettingsPage::Game;
 
@@ -82953,7 +83068,7 @@ repo: "Beta/Override"
             .expect("scroll wheel over settings table should store a game page offset");
         assert!(offset > 0);
 
-        let specs = DesktopLauncher::settings_pref_widget_specs("game");
+        let specs = launcher.settings_pref_widget_specs_for_current_runtime("game");
         let playerlimit_index = specs
             .iter()
             .position(|spec| spec.key == "playerlimit")
@@ -83064,12 +83179,6 @@ repo: "Beta/Override"
         assert_eq!(super::SETTINGS_PREF_SPECS.len(), expected_count);
 
         for group in super::SETTINGS_PREF_GROUPS {
-            assert_eq!(
-                super::settings_pref_count(group.table),
-                group.entries.len(),
-                "table {} should expose all keys in route metadata",
-                group.table
-            );
             for key in group.entries {
                 let spec = super::settings_pref_spec(group.table, key)
                     .unwrap_or_else(|| panic!("missing settings spec for {}/{}", group.table, key));
@@ -83077,6 +83186,12 @@ repo: "Beta/Override"
                 assert_eq!(spec.key, *key);
             }
         }
+        assert_eq!(super::settings_pref_count("game"), 13);
+        assert_eq!(
+            super::settings_pref_count("graphics"),
+            if cfg!(target_os = "macos") { 40 } else { 39 }
+        );
+        assert_eq!(super::settings_pref_count("sound"), 4);
 
         let saveinterval = super::settings_pref_spec("game", "saveinterval").unwrap();
         assert_eq!(saveinterval.kind, super::DesktopSettingsPrefKind::Slider);
@@ -83149,6 +83264,57 @@ repo: "Beta/Override"
             Some(super::DesktopSettingsPrefRange::new(0, 100, 1))
         );
         assert_eq!(musicvol.condition, None);
+    }
+
+    #[test]
+    fn desktop_launcher_settings_pref_conditions_filter_like_java() {
+        fn keys(
+            specs: Vec<&'static super::DesktopSettingsPrefSpec>,
+        ) -> std::collections::BTreeSet<&'static str> {
+            specs.into_iter().map(|spec| spec.key).collect()
+        }
+
+        let default_game = keys(DesktopLauncher::settings_pref_widget_specs("game"));
+        assert!(default_game.contains("saveinterval"));
+        assert!(default_game.contains("backgroundpause"));
+        assert!(default_game.contains("modcrashdisable"));
+        assert!(!default_game.contains("autotarget"));
+        assert!(!default_game.contains("keyboard"));
+        assert!(!default_game.contains("playerlimit"));
+        assert!(!default_game.contains("steampublichost"));
+
+        let default_graphics = keys(DesktopLauncher::settings_pref_widget_specs("graphics"));
+        assert!(default_graphics.contains("fullscreen"));
+        assert!(default_graphics.contains("animatedshields"));
+        assert!(!default_graphics.contains("landscape"));
+        if cfg!(target_os = "macos") {
+            assert!(default_graphics.contains("macnotch"));
+        } else {
+            assert!(!default_graphics.contains("macnotch"));
+        }
+
+        let mut mobile = DesktopLauncher::new(Vec::new());
+        mobile.menu_renderer_state.config.mobile = true;
+        let mobile_game = keys(mobile.settings_pref_widget_specs_for_current_runtime("game"));
+        assert!(mobile_game.contains("autotarget"));
+        assert!(mobile_game.contains("keyboard"));
+        assert!(mobile_game.contains("modcrashdisable"));
+        assert!(!mobile_game.contains("backgroundpause"));
+        assert!(!mobile_game.contains("buildautopause"));
+        assert!(!mobile_game.contains("distinctcontrolgroups"));
+
+        let mobile_graphics =
+            keys(mobile.settings_pref_widget_specs_for_current_runtime("graphics"));
+        assert!(mobile_graphics.contains("landscape"));
+        assert!(!mobile_graphics.contains("fullscreen"));
+        assert!(!mobile_graphics.contains("vsync"));
+        assert!(!mobile_graphics.contains("coreitems"));
+
+        let mut steam = DesktopLauncher::new(Vec::new());
+        steam.set_setting_override("platform", "steam", "true");
+        let steam_game = keys(steam.settings_pref_widget_specs_for_current_runtime("game"));
+        assert!(steam_game.contains("playerlimit"));
+        assert!(steam_game.contains("steampublichost"));
     }
 
     #[test]
