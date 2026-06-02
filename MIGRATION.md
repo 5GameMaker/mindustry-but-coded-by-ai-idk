@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 765. Settings DataDialog 与 PlanetDataDialog 双层标题对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **89.9%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `SettingsMenuDialog` 中 `dataDialog = new BaseDialog("@settings.data")`；
+  - Java `planetDataDialog = new BaseDialog("@settings.data")`，由 `@settings.clearplanetdata` 从 dataDialog 内部打开；
+  - 因此原版层级是 Settings 主窗口 → DataDialog → PlanetDataDialog → PlanetSelectDialog，Data 与 PlanetData 是两个同名 `BaseDialog` 层。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_data_page(...)` 不再在 `DesktopSettingsChildDialog::PlanetData` 打开时隐藏父 DataDialog 的 `@settings.data` 标题；
+    - 更新回归断言，PlanetData 打开时允许并要求出现父/子两个 `@settings.data` 标题，贴近 Java 双 `BaseDialog("@settings.data")` 层级。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop settings_data --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Settings Data 仍是 Rust route/page 模型承载 Java `dataDialog`，后续可继续将 DataDialog 独立弹窗层级、关闭/隐藏时序与确认框表现进一步贴近 Java；
+  - ModsDialog 仍需补 unsupported toggle 禁用与关闭后 reload hook；
+  - 前端所有子菜单仍需继续逐项审查并贴近原版。
+
 ## 764. SettingsMenuDialog 动态分类入口接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

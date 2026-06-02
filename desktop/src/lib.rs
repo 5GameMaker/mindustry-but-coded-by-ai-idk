@@ -25819,19 +25819,17 @@ impl DesktopLauncher {
             1.0,
             Layer::END_PIXELED + 0.022,
         ));
-        if self.settings_child_dialog != Some(DesktopSettingsChildDialog::PlanetData) {
-            pass.push(RenderCommand::draw_text_styled(
-                self.localize_bundle_markup_text("@settings.data"),
-                RenderPoint::new(container.center().x, container.y + container.height - 24.0),
-                [0.94, 0.98, 1.0, 1.0],
-                14.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Center)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
-                Layer::END_PIXELED + 0.024,
-            ));
-        }
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@settings.data"),
+            RenderPoint::new(container.center().x, container.y + container.height - 24.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.024,
+        ));
         for (index, action) in actions.iter().enumerate() {
             self.push_settings_text_button_with_style(
                 pass,
@@ -80853,8 +80851,8 @@ repo: "Beta/Override"
                 .iter()
                 .filter(|text| **text == planet_data_title)
                 .count(),
-            1,
-            "PlanetData dialog should not duplicate the data title behind the modal"
+            2,
+            "Java keeps both SettingsMenuDialog dataDialog and PlanetDataDialog as BaseDialog(\"@settings.data\") layers"
         );
         assert!(planet_texts.contains(
             &launcher
