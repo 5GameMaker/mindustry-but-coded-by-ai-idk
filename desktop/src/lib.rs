@@ -3616,6 +3616,7 @@ pub enum DesktopMenuRouteShellAction {
     OpenModsDetail(usize),
     ToggleModsEnabled(usize),
     OpenModsDeleteConfirm(usize),
+    OpenModsListing(usize),
     ConfirmModsDelete,
     CancelModsDelete,
     OpenModsFolder(usize),
@@ -3739,6 +3740,13 @@ pub struct DesktopModsBrowserAction {
     pub repo: Option<String>,
     pub uri: Option<String>,
     pub opened: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopModsListingAction {
+    pub index: usize,
+    pub name: String,
+    pub steam_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17982,6 +17990,7 @@ pub struct DesktopLauncher {
     pub mods_browser_release_entries: Vec<DesktopModsBrowserReleaseEntry>,
     pub last_mods_import_action: Option<DesktopModsImportAction>,
     pub last_mods_browser_action: Option<DesktopModsBrowserAction>,
+    pub last_mods_listing_action: Option<DesktopModsListingAction>,
     pub last_mods_import_file_request: Option<MultiFileChooserRequest>,
     pub args: Vec<String>,
     pub texture_atlas: TextureAtlasPlan<bool>,
@@ -19170,6 +19179,7 @@ impl DesktopLauncher {
             mods_browser_release_entries: Vec::new(),
             last_mods_import_action: None,
             last_mods_browser_action: None,
+            last_mods_listing_action: None,
             last_mods_import_file_request: None,
             args,
             texture_atlas,
@@ -36260,6 +36270,34 @@ impl DesktopLauncher {
         Some(action)
     }
 
+    fn dispatch_mods_listing_action_with_platform<P: Platform>(
+        &mut self,
+        index: usize,
+        platform: &mut P,
+    ) -> Option<DesktopModsListingAction> {
+        let meta = self.mods_route_mod_meta_at_index(index)?;
+        let steam_id = meta.steam_id.as_deref()?.trim();
+        if steam_id.is_empty() {
+            return None;
+        }
+        let name = self
+            .mods_route_mod_display_name_at_index(index)
+            .unwrap_or_else(|| {
+                self.last_mods_directory_mod_names
+                    .get(index)
+                    .map_or("", String::as_str)
+            })
+            .to_string();
+        platform.view_listing_id(steam_id);
+        let action = DesktopModsListingAction {
+            index,
+            name,
+            steam_id: steam_id.to_string(),
+        };
+        self.last_mods_listing_action = Some(action.clone());
+        Some(action)
+    }
+
     fn sync_mods_route_state_len(&mut self) {
         let len = self.last_mods_directory_mod_names.len();
         if self.last_mods_directory_mod_states.len() < len {
@@ -37715,6 +37753,10 @@ impl DesktopLauncher {
                     self.mods_browser_dialog_open = false;
                     self.mods_search_focused = false;
                 }
+            }
+            DesktopMenuRouteShellAction::OpenModsListing(index) => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_mods_listing_action_with_platform(index, &mut platform);
             }
             DesktopMenuRouteShellAction::ConfirmModsDelete => {
                 self.dispatch_mods_delete_confirmed();
@@ -47823,9 +47865,11 @@ impl DesktopLauncher {
                     return Some(DesktopMenuRouteShellAction::ToggleModsEnabled(mod_index));
                 }
                 if Self::mods_route_mod_card_action_button_rect(card, 1).contains_point(point) {
-                    return Some(DesktopMenuRouteShellAction::OpenModsDeleteConfirm(
-                        mod_index,
-                    ));
+                    return Some(if self.mods_route_mod_has_steam_id_at_index(mod_index) {
+                        DesktopMenuRouteShellAction::OpenModsListing(mod_index)
+                    } else {
+                        DesktopMenuRouteShellAction::OpenModsDeleteConfirm(mod_index)
+                    });
                 }
                 None
             })
@@ -48044,6 +48088,11 @@ impl DesktopLauncher {
             DesktopModsRouteModStateKind::IncompatibleGame
                 | DesktopModsRouteModStateKind::Blacklisted
         )
+    }
+
+    fn mods_route_mod_has_steam_id_at_index(&self, index: usize) -> bool {
+        self.mods_route_mod_meta_at_index(index)
+            .is_some_and(ModMetadata::has_steam_id)
     }
 
     fn mods_route_mod_repo_at_index(&self, index: usize) -> Option<&str> {
@@ -49603,6 +49652,7 @@ impl DesktopLauncher {
                 ));
                 let enabled = self.mods_route_mod_enabled_at_index(index);
                 let supported = self.mods_route_mod_is_supported_at_index(index);
+                let has_steam_id = self.mods_route_mod_has_steam_id_at_index(index);
                 for (button_index, (label, icon, actionable)) in [
                     (
                         if enabled {
@@ -49613,7 +49663,18 @@ impl DesktopLauncher {
                         if enabled { "down" } else { "up" },
                         supported,
                     ),
-                    (self.localize_bundle_markup_text("@delete"), "trash", true),
+                    (
+                        if has_steam_id {
+                            self.localize_bundle_markup_text_or(
+                                "@view.workshop",
+                                "View In Workshop",
+                            )
+                        } else {
+                            self.localize_bundle_markup_text("@delete")
+                        },
+                        if has_steam_id { "link" } else { "trash" },
+                        true,
+                    ),
                 ]
                 .into_iter()
                 .enumerate()
@@ -53016,6 +53077,8 @@ mod tests {
     struct RecordingPlatform {
         open_result: bool,
         opened_uris: Vec<String>,
+        viewed_listing_ids: Vec<String>,
+        viewed_listings: Vec<String>,
         clipboard_texts: Vec<String>,
         clipboard_read: Option<String>,
     }
@@ -53024,6 +53087,14 @@ mod tests {
         fn open_uri(&mut self, uri: &str) -> bool {
             self.opened_uris.push(uri.to_string());
             self.open_result
+        }
+
+        fn view_listing(&mut self, publishable_name: &str) {
+            self.viewed_listings.push(publishable_name.to_string());
+        }
+
+        fn view_listing_id(&mut self, map_id: &str) {
+            self.viewed_listing_ids.push(map_id.to_string());
         }
 
         fn set_clipboard_text(&mut self, text: &str) {
@@ -66475,6 +66546,82 @@ version: "2.0.0"
         assert!(!alpha.exists());
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn desktop_launcher_mods_route_workshop_card_opens_listing_instead_of_delete_confirm() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
+        launcher.last_mods_directory_mod_names = vec!["workshop-mod".into()];
+        launcher.last_mods_directory_mod_metas = vec![ModMetadata::from_source_text(
+            "workshop-mod",
+            Some("mod.hjson"),
+            r#"
+name: workshop-mod
+displayName: "Workshop Mod"
+author: "Steam Author"
+version: "1.0.0"
+steamID: "987654321"
+"#,
+        )];
+        assert!(launcher.last_mods_directory_mod_metas[0].has_steam_id());
+        launcher.last_mods_directory_mod_states = vec![Default::default()];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let card = DesktopLauncher::mods_route_mod_card_rect_for_panel(panel, 0);
+        let listing = DesktopLauncher::mods_route_mod_card_action_button_rect(card, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, listing.x, listing.y),
+            Some(super::DesktopMenuRouteShellAction::OpenModsListing(0)),
+            "Java ModsDialog uses Icon.link + platform.viewListing(item) for Steam workshop mods"
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("workshop mod card should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"View In Workshop"));
+        assert!(!texts.contains(&"Delete"));
+
+        let mut platform = RecordingPlatform::default();
+        let action = launcher
+            .dispatch_mods_listing_action_with_platform(0, &mut platform)
+            .expect("workshop mod should dispatch listing action");
+        assert_eq!(action.index, 0);
+        assert_eq!(action.name, "Workshop Mod");
+        assert_eq!(action.steam_id, "987654321");
+        assert_eq!(platform.viewed_listing_ids, vec!["987654321".to_string()]);
+        assert!(platform.opened_uris.is_empty());
+        assert_eq!(launcher.mods_delete_dialog_index, None);
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsListing(0),
+        );
+        assert_eq!(
+            launcher
+                .last_mods_listing_action
+                .as_ref()
+                .map(|action| { (action.index, action.name.as_str(), action.steam_id.as_str()) }),
+            Some((0, "Workshop Mod", "987654321"))
+        );
+        assert_eq!(launcher.mods_delete_dialog_index, None);
     }
 
     #[test]

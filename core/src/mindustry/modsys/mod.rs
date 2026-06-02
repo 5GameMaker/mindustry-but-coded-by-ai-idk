@@ -22,6 +22,7 @@ pub struct ModMetadata {
     pub version: Option<String>,
     pub description: Option<String>,
     pub repo: Option<String>,
+    pub steam_id: Option<String>,
     pub source_path: Option<String>,
 }
 
@@ -70,6 +71,10 @@ impl ModMetadata {
             version: extract_mod_metadata_value(source, "version"),
             description: extract_mod_metadata_value(source, "description"),
             repo: extract_mod_metadata_value(source, "repo"),
+            steam_id: extract_mod_metadata_value(source, "steamID")
+                .or_else(|| extract_mod_metadata_value(source, "steamId"))
+                .or_else(|| extract_mod_metadata_value(source, "steamid"))
+                .or_else(|| extract_mod_metadata_value(source, "steam-id")),
             source_path: source_path.map(str::to_string),
         }
     }
@@ -87,6 +92,12 @@ impl ModMetadata {
 
     pub fn version_or_unknown(&self) -> &str {
         self.version.as_deref().unwrap_or("@unknown")
+    }
+
+    pub fn has_steam_id(&self) -> bool {
+        self.steam_id
+            .as_deref()
+            .is_some_and(|steam_id| !steam_id.trim().is_empty())
     }
 }
 
@@ -1448,6 +1459,7 @@ author: "Rust Tester"
 version: "1.2.3"
 description: "Adds routers."
 repo: "Anon/example"
+steamID: "1234567890"
 "#,
         )
         .unwrap();
@@ -1527,6 +1539,8 @@ repo: "Anon/example"
             Some("Adds routers.")
         );
         assert_eq!(directory_plan.meta.repo.as_deref(), Some("Anon/example"));
+        assert_eq!(directory_plan.meta.steam_id.as_deref(), Some("1234567890"));
+        assert!(directory_plan.meta.has_steam_id());
         assert_eq!(
             directory_plan.meta.source_path.as_deref(),
             Some("mod.hjson")

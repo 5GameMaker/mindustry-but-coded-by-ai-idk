@@ -17,6 +17,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 768. ModsDialog workshop listing 分支对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **90.2%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `ModsDialog` 的 mod 卡片第二按钮会按 `item.hasSteamID()` 在 `Icon.link + platform.viewListing(item)` 与 `Icon.trash + @mod.remove.confirm` 之间切换；
+  - Rust 此前所有本地 mod 卡片第二按钮都固定走 delete confirm，Steam/workshop mod 会误弹删除确认。
+- 本轮主改动：
+  - `core/src/mindustry/modsys/mod.rs`
+    - `ModMetadata` 新增 `steam_id` 字段；
+    - `from_source_text(...)` 支持解析 `steamID / steamId / steamid / steam-id`；
+    - 新增 `has_steam_id()`，并把 metadata 测试扩展到 steam id。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopModsListingAction`、`OpenModsListing(index)` 与 `last_mods_listing_action`；
+    - 新增 `dispatch_mods_listing_action_with_platform(...)`，有 steam id 时调用 `Platform::view_listing_id(...)`；
+    - Mods 卡片第二按钮对 workshop mod 显示 `@view.workshop` + `link`，点击返回 listing action；普通本地 mod 仍显示 `@delete` + `trash` 并弹删除确认；
+    - 新增回归测试确认 workshop mod 不打开 delete confirm、不走 `open_uri`，而是进入 listing id 分支。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core mod_resource_plan_from_directory_unwraps_single_child_root_and_scans_sprites --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_workshop_card_opens_listing_instead_of_delete_confirm --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop mods_route --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Mods Browser 的真实 GitHub listing/stars/date feed、repo icon cache、安装下载链路仍需继续接入；
+  - Steam/workshop 平台的真实外部 listing 展示由 `Platform::view_listing_id` 承接，后续打包/平台层仍需继续验证；
+  - ModsDialog 仍需继续收紧 browser/detail/import/release 的 Java 单 dialog 层级和关闭时序。
+
 ## 767. ModsDialog hidden reload hook 对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
