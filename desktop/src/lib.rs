@@ -23142,6 +23142,15 @@ impl DesktopLauncher {
                 Some(DesktopMenuRouteShellAction::CancelEditorImportOverwrite);
             return true;
         }
+        if matches!(
+            self.active_menu_route,
+            Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
+        ) && (self.map_play_dialog_index.is_some()
+            || self.editor_map_info_dialog_index.is_some())
+        {
+            self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CloseMapCardDialog);
+            return true;
+        }
         if let Some(route) = self.active_menu_route.take() {
             if route == DesktopMenuRoute::Campaign {
                 self.campaign_planet_dialog = None;
@@ -69905,6 +69914,50 @@ repo: "Beta/Override"
             Some(super::DesktopMenuPlatformAction::OpenWorkshop)
         );
         assert_eq!(launcher.map_list_cards.len(), 1);
+    }
+
+    #[test]
+    fn desktop_launcher_editor_map_info_back_key_closes_child_before_route_like_java_dialog() {
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), "Back Key Arena".to_string());
+        tags.insert("author".to_string(), "Mapper".to_string());
+        let mut map = MapDescriptor::new(
+            "maps/custom/back-key-arena.msav",
+            180,
+            180,
+            tags,
+            true,
+            1,
+            158,
+        );
+        map.spawns = 1;
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.map_list_cards = vec![map];
+        launcher.dispatch_menu_action(MenuButtonRole::Editor);
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenEditorInfo),
+        ));
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Editor)
+        );
+        assert_eq!(launcher.editor_map_info_dialog_index, Some(0));
+
+        assert!(launcher.apply_menu_back_key());
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Editor),
+            "Java EditorMapsDialog back first closes the map info child dialog, not the whole route"
+        );
+        assert_eq!(launcher.editor_map_info_dialog_index, None);
+        assert_eq!(
+            launcher.last_menu_route_shell_action,
+            Some(super::DesktopMenuRouteShellAction::CloseMapCardDialog)
+        );
+
+        assert!(launcher.apply_menu_back_key());
+        assert_eq!(launcher.active_menu_route, None);
     }
 
     #[test]

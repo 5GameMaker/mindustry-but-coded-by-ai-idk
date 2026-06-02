@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 751. EditorMapsDialog 地图信息返回层级对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **88.5%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `EditorMapsDialog` 打开地图信息时是 MapList/Dialog 的子对话框；
+  - Back/Escape 应先关闭当前 map info child dialog，再第二次关闭 EditorMapsDialog route；
+  - Rust 此前在 `apply_menu_back_key()` 中会直接关闭整个 `Editor` route，同时清掉 `editor_map_info_dialog_index`，层级感偏离原版。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `apply_menu_back_key()` 在 `CustomGame | Editor` route 中发现 `map_play_dialog_index` 或 `editor_map_info_dialog_index` 时，先分发 `CloseMapCardDialog`；
+    - 新增 `desktop_launcher_editor_map_info_back_key_closes_child_before_route_like_java_dialog`，锁定第一次 back 只关 map info、第二次 back 才关 route；
+    - 保持既有 `OpenInEditor`、delete/workshop、map list filters 等路径不变。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_info_back_key_closes_child_before_route_like_java_dialog --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop map_list --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop editor --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - MapPlay 的 help/customize/rules 子弹窗 back-key 栈仍需继续逐项对齐 Java；
+  - Editor 新建/导入 overwrite 子弹窗已覆盖一部分，但后续仍要和真实 map editor runtime 保存/预览刷新链路继续合流。
+
 ## 750. ModsDialog 启用/禁用与删除确认动作闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
