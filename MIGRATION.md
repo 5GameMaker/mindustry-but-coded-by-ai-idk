@@ -17,6 +17,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 761. LoadDialog 缺失 mod 确认 Enter 行为对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **89.5%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `UI.showConfirm(...)` 的缺失 mod 确认框中，Enter 等同 `@ok`，Escape/Back 只关闭确认框；
+  - Rust 上一轮已补鼠标 OK/Cancel 与 Back/Escape，本轮补齐 Enter 键确认路径。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `apply_menu_input_events(...)` 在 LoadGame 缺失 mod 确认弹窗打开时，将 `Enter`/`enter`/`NumpadEnter` 分发为 `LoadGameMissingModsOk`；
+    - 回归测试改为用键盘 Enter 确认，并断言最后 route shell action 与 pending load 状态。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_cautious_load_confirms_missing_mods_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Load/Save 失败后的 route 收口语义仍需继续对齐 Java 的 `hide()`/`ui.loadfrag` 节奏；
+  - Mods 浏览器、Settings 动态分类与更多子菜单视觉/交互仍需继续推进。
+
 ## 760. LoadDialog cautiousLoad 缺失 mod 确认对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

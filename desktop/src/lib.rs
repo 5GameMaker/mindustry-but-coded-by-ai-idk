@@ -45902,6 +45902,16 @@ impl DesktopLauncher {
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::LoadGame)
+                        && self.load_game_missing_mods_confirm_slot.is_some()
+                        && matches!(key_code.as_str(), "Enter" | "enter" | "NumpadEnter") =>
+                {
+                    self.dispatch_menu_route_shell_action(
+                        DesktopMenuRouteShellAction::LoadGameMissingModsOk,
+                    );
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
                         && self.active_menu_route == Some(DesktopMenuRoute::Mods)
                         && self.mods_search_focused
                         && !self.mods_browser_dialog_open
@@ -78009,11 +78019,19 @@ repo: "Beta/Override"
             launcher.active_menu_route_shell_action_at_surface_point(surface, ok.x, ok.y),
             Some(super::DesktopMenuRouteShellAction::LoadGameMissingModsOk)
         );
-        launcher.dispatch_menu_route_shell_action(
-            super::DesktopMenuRouteShellAction::LoadGameMissingModsOk,
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "Enter".into(),
+                pressed: true,
+            }],
         );
         assert!(launcher.load_game_pending_load.is_some());
         assert_eq!(launcher.load_game_missing_mods_confirm_slot, None);
+        assert_eq!(
+            launcher.last_menu_route_shell_action,
+            Some(super::DesktopMenuRouteShellAction::LoadGameMissingModsOk)
+        );
         assert_eq!(
             launcher
                 .last_load_game_action
