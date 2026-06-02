@@ -3587,6 +3587,8 @@ pub enum DesktopMenuRouteShellAction {
     ModsBrowserViewReleases(usize),
     OpenModsDetail(usize),
     OpenModsFolder(usize),
+    ModsDetailOpenGithub(usize),
+    ModsDetailReinstall(usize),
     OpenModsContent(usize),
     OpenModsContentEntry(usize),
     CloseModsContent,
@@ -36793,6 +36795,22 @@ impl DesktopLauncher {
                 let mut platform = DefaultPlatform;
                 let _ = self.dispatch_mods_folder_action_with_platform(index, &mut platform);
             }
+            DesktopMenuRouteShellAction::ModsDetailOpenGithub(index) => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_mods_browser_action_with_platform(
+                    index,
+                    DesktopModsBrowserActionKind::OpenGithub,
+                    &mut platform,
+                );
+            }
+            DesktopMenuRouteShellAction::ModsDetailReinstall(index) => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_mods_browser_action_with_platform(
+                    index,
+                    DesktopModsBrowserActionKind::Reinstall,
+                    &mut platform,
+                );
+            }
             DesktopMenuRouteShellAction::OpenModsContent(index) => {
                 if self.last_mods_directory_mod_names.get(index).is_some() {
                     self.last_mods_content_index = Some(index);
@@ -46937,6 +46955,63 @@ impl DesktopLauncher {
         None
     }
 
+    fn mods_route_detail_button_specs(
+        &self,
+        index: usize,
+    ) -> Vec<(DesktopMenuRouteShellAction, &'static str, &'static str)> {
+        let mut specs = vec![(
+            DesktopMenuRouteShellAction::CloseModsDetail,
+            "@back",
+            "left",
+        )];
+        if self.mods_route_mod_root_at_index(index).is_some() {
+            specs.push((
+                DesktopMenuRouteShellAction::OpenModsFolder(index),
+                "@mods.openfolder",
+                "link",
+            ));
+        }
+        if self.mods_route_mod_repo_at_index(index).is_some() {
+            specs.push((
+                DesktopMenuRouteShellAction::ModsDetailOpenGithub(index),
+                "@mods.github.open",
+                "link",
+            ));
+            specs.push((
+                DesktopMenuRouteShellAction::ModsDetailReinstall(index),
+                "@mods.browser.reinstall",
+                "download",
+            ));
+        }
+        specs.push((
+            DesktopMenuRouteShellAction::OpenModsContent(index),
+            "@mods.viewcontent",
+            "book",
+        ));
+        specs
+    }
+
+    fn mods_route_detail_button_rect(
+        dialog: RenderRect,
+        index: usize,
+        button_count: usize,
+    ) -> RenderRect {
+        if button_count <= 3 {
+            return Self::schematic_info_button_rect(dialog, index);
+        }
+        let gap = 8.0;
+        let width = ((dialog.width - 36.0 - gap * (button_count.saturating_sub(1) as f32))
+            / button_count as f32)
+            .clamp(70.0, 150.0);
+        let total = width * button_count as f32 + gap * (button_count.saturating_sub(1) as f32);
+        RenderRect::new(
+            dialog.center().x - total * 0.5 + index as f32 * (width + gap),
+            dialog.y + 18.0,
+            width,
+            46.0,
+        )
+    }
+
     fn mods_route_detail_action_at_point(
         &self,
         panel: RenderRect,
@@ -46944,16 +47019,13 @@ impl DesktopLauncher {
     ) -> Option<DesktopMenuRouteShellAction> {
         let index = self.mods_selected_mod_index?;
         let dialog = Self::mods_route_detail_dialog_rect_for_panel(panel);
-        if self.mods_route_mod_root_at_index(index).is_some()
-            && Self::schematic_info_button_rect(dialog, 1).contains_point(point)
-        {
-            return Some(DesktopMenuRouteShellAction::OpenModsFolder(index));
-        }
-        if Self::schematic_info_button_rect(dialog, 2).contains_point(point) {
-            return Some(DesktopMenuRouteShellAction::OpenModsContent(index));
-        }
-        if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
-            return Some(DesktopMenuRouteShellAction::CloseModsDetail);
+        let specs = self.mods_route_detail_button_specs(index);
+        for (button_index, (action, _, _)) in specs.iter().enumerate() {
+            if Self::mods_route_detail_button_rect(dialog, button_index, specs.len())
+                .contains_point(point)
+            {
+                return Some(*action);
+            }
         }
         None
     }
@@ -47192,29 +47264,16 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.077 + row as f32 * 0.0001,
             ));
         }
-        self.push_settings_text_button(
-            pass,
-            Self::schematic_info_button_rect(dialog, 0),
-            self.localize_bundle_markup_text("@back"),
-            Some("left"),
-            Layer::END_PIXELED + 0.083,
-        );
-        if self.mods_route_mod_root_at_index(index).is_some() {
+        let button_specs = self.mods_route_detail_button_specs(index);
+        for (button_index, (_, label, icon)) in button_specs.iter().enumerate() {
             self.push_settings_text_button(
                 pass,
-                Self::schematic_info_button_rect(dialog, 1),
-                self.localize_bundle_markup_text("@mods.openfolder"),
-                Some("link"),
-                Layer::END_PIXELED + 0.083,
+                Self::mods_route_detail_button_rect(dialog, button_index, button_specs.len()),
+                self.localize_bundle_markup_text(*label),
+                Some(*icon),
+                Layer::END_PIXELED + 0.083 + button_index as f32 * 0.0005,
             );
         }
-        self.push_settings_text_button(
-            pass,
-            Self::schematic_info_button_rect(dialog, 2),
-            self.localize_bundle_markup_text("@mods.viewcontent"),
-            Some("book"),
-            Layer::END_PIXELED + 0.083,
-        );
     }
 
     fn push_mods_content_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -64684,6 +64743,7 @@ name: beta
 displayName: "Beta Override"
 author: "Beta Author"
 version: "2.0.0"
+repo: "Beta/Override"
 "#,
             ),
         ];
@@ -64847,6 +64907,91 @@ version: "2.0.0"
         launcher
             .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseModsDetail);
         assert_eq!(launcher.mods_selected_mod_index, None);
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsDetail(1),
+        );
+        assert_eq!(launcher.mods_selected_mod_index, Some(1));
+        let beta_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let beta_texts = beta_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods detail with repo should render a frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(beta_texts.contains(&"Mod: Beta Override"));
+        assert!(beta_texts.contains(&"Repo Beta/Override"));
+        assert!(beta_texts.contains(&"Reinstall"));
+        let beta_button_count = launcher.mods_route_detail_button_specs(1).len();
+        assert_eq!(
+            beta_button_count, 5,
+            "Java showMod with folder + repo exposes back, folder, repo, reinstall and view content"
+        );
+        let repo_button =
+            DesktopLauncher::mods_route_detail_button_rect(dialog, 2, beta_button_count).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                repo_button.x,
+                repo_button.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ModsDetailOpenGithub(1))
+        );
+        let reinstall_button =
+            DesktopLauncher::mods_route_detail_button_rect(dialog, 3, beta_button_count).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                reinstall_button.x,
+                reinstall_button.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ModsDetailReinstall(1))
+        );
+        let view_content_button =
+            DesktopLauncher::mods_route_detail_button_rect(dialog, 4, beta_button_count).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                view_content_button.x,
+                view_content_button.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::OpenModsContent(1))
+        );
+        let mut platform = RecordingPlatform {
+            open_result: true,
+            ..Default::default()
+        };
+        let repo_action = launcher
+            .dispatch_mods_browser_action_with_platform(
+                1,
+                super::DesktopModsBrowserActionKind::OpenGithub,
+                &mut platform,
+            )
+            .expect("repo mod should open GitHub from local detail");
+        assert_eq!(
+            repo_action.uri.as_deref(),
+            Some("https://github.com/Beta/Override")
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ModsDetailReinstall(1),
+        );
+        assert_eq!(
+            launcher
+                .last_mods_browser_action
+                .as_ref()
+                .map(|action| (action.kind, action.repo.as_deref())),
+            Some((
+                super::DesktopModsBrowserActionKind::Reinstall,
+                Some("Beta/Override")
+            ))
+        );
 
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseRoute);
         assert_eq!(launcher.active_menu_route, None);

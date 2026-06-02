@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 744. Mods 本地详情补齐 Repo 与 Reinstall 动作
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **88.0%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/ModsDialog.java::showMod(...)` 在本地模组详情里提供 `@mods.openfolder`；
+  - 当 `mod.getRepo() != null` 时显示 `@mods.github.open`；
+  - 当 repo 可导入时显示 `@mods.browser.reinstall`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Mods 本地详情新增 `ModsDetailOpenGithub` 与 `ModsDetailReinstall` 路由动作；
+    - 本地详情按钮由规格表统一驱动：无 repo 时保持原三按钮布局，有 repo 时切换为 Back / Open Folder / Repo / Reinstall / View Content 五按钮紧凑布局；
+    - Repo 动作复用现有 GitHub URI 规范化与平台打开逻辑，Reinstall 复用现有 browser reinstall action 记录模型；
+    - 回归覆盖带 repo 模组详情的按钮数量、Repo/Reinstall/View Content 命中、GitHub URI 与 reinstall action。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_opens_and_closes_detail_dialog --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop mods --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - ModsDialog 仍需继续补 Java 的 enable/disable、delete、错误/依赖状态详情、真实 View Content 的内容索引与 release 子菜单；
+  - GitHub import/reinstall 目前仍是动作记录/URI 打开层，后续需接真实下载、进度、取消与依赖导入链；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 743. BannedContentDialog 补齐 Blocks 分类筛选
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
