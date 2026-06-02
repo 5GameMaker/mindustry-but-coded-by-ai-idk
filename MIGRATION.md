@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 789. ModsDialog View Content 条件显示对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **92.3%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容、性能收口与所有子菜单接近原版。
+- 背景：
+  - Java `ModsDialog.showMod()` 只有在 `mod.getContent().any()` 时才显示 `@mods.viewcontent`；
+  - Rust 此前把 name/version/author/description/repo/open-folder 这类 metadata 当成 content entries，导致没有实际内容的 mod 也会显示 `View Content`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 mod content 目录扫描：只把 `modRoot/content/**` 下的实际文件作为 content entries；
+    - 详情页仅在存在实际 content 文件时渲染 `@mods.viewcontent`；
+    - hit-test 与 action dispatch 同步加内容存在性检查，防止无按钮时仍可派发；
+    - 内容弹窗展示真实 content 文件相对路径，不再把 metadata 伪装成内容；
+    - 扩展 Mods detail 测试，覆盖有 content 的 alpha、无 content 的 beta、状态详情无 content 时不显示按钮。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_opens_and_closes_detail_dialog --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop mods_route --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Mods Browser 仍需继续对齐 Java 的远端 listing、选择弹窗与真实 release 列表；
+  - 完整客户端可玩性、前端性能缓存/批处理和联机 smoke test 仍未达成。
+
 ## 788. ModsDialog Workshop 详情页 reinstall 行为对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
@@ -37,7 +61,6 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo check -p mindustry-desktop --features opengl-native-runtime`
   - `git diff --check`
 - 仍未完成：
-  - Mods detail 仍需按 Java 隐藏空内容的 `View Content`；
   - Mods Browser 仍需继续对齐 Java 的远端 listing、选择弹窗与真实 release 列表；
   - 完整客户端可玩性、前端性能缓存/批处理和联机 smoke test 仍未达成。
 
@@ -61,7 +84,6 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo check -p mindustry-desktop --features opengl-native-runtime`
   - `git diff --check`
 - 仍未完成：
-  - Mods detail 仍需按 Java 隐藏空内容的 `View Content`；
   - Mods Browser 仍需继续对齐 Java 的远端 listing、选择弹窗与真实 release 列表；
   - 完整客户端可玩性、前端性能缓存/批处理和联机 smoke test 仍未达成。
 

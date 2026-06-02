@@ -38340,7 +38340,9 @@ impl DesktopLauncher {
                 );
             }
             DesktopMenuRouteShellAction::OpenModsContent(index) => {
-                if self.last_mods_directory_mod_names.get(index).is_some() {
+                if self.last_mods_directory_mod_names.get(index).is_some()
+                    && self.mods_route_mod_has_content_at_index(index)
+                {
                     self.last_mods_content_index = Some(index);
                     self.last_mods_content_entry_index = None;
                     self.mods_content_dialog_index = Some(index);
@@ -49190,7 +49192,9 @@ impl DesktopLauncher {
                 return Some(*action);
             }
         }
-        if Self::mods_route_detail_content_button_rect(dialog).contains_point(point) {
+        if self.mods_route_mod_has_content_at_index(index)
+            && Self::mods_route_detail_content_button_rect(dialog).contains_point(point)
+        {
             return Some(DesktopMenuRouteShellAction::OpenModsContent(index));
         }
         None
@@ -49260,60 +49264,69 @@ impl DesktopLauncher {
         )
     }
 
+    fn mods_route_mod_content_dir_at_index(&self, index: usize) -> Option<PathBuf> {
+        let root = self.mods_route_mod_root_at_index(index)?;
+        let content = Path::new(root).join("content");
+        content.is_dir().then_some(content)
+    }
+
+    fn mods_collect_content_file_paths(content_dir: &Path, limit: usize) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        let mut stack = vec![content_dir.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.is_file() {
+                    files.push(path);
+                    if files.len() >= limit {
+                        files.sort();
+                        return files;
+                    }
+                }
+            }
+        }
+        files.sort();
+        files
+    }
+
+    fn mods_route_mod_has_content_at_index(&self, index: usize) -> bool {
+        self.mods_route_mod_content_dir_at_index(index)
+            .is_some_and(|content_dir| {
+                !Self::mods_collect_content_file_paths(&content_dir, 1).is_empty()
+            })
+    }
+
     fn mods_content_entries_for_mod(&self, index: usize) -> Vec<DesktopModsContentEntry> {
-        let Some(mod_name) = self.mods_route_mod_display_name_at_index(index) else {
+        let Some(content_dir) = self.mods_route_mod_content_dir_at_index(index) else {
             return Vec::new();
         };
-        let meta = self.mods_route_mod_meta_at_index(index);
-        let mut entries = vec![
-            DesktopModsContentEntry {
-                title: self.localize_bundle_markup_text("@editor.name"),
-                detail: mod_name.to_string(),
-                icon: "book",
-            },
-            DesktopModsContentEntry {
-                title: self.localize_bundle_markup_text("@editor.author"),
-                detail: self.localize_bundle_markup_text(
-                    meta.map(ModMetadata::author_or_unknown)
-                        .unwrap_or("@unknown"),
-                ),
-                icon: "players",
-            },
-            DesktopModsContentEntry {
-                title: self.localize_bundle_markup_text("@mod.version"),
-                detail: self.localize_bundle_markup_text(
-                    meta.map(ModMetadata::version_or_unknown)
-                        .unwrap_or("@unknown"),
-                ),
-                icon: "info",
-            },
-        ];
-        if let Some(description) = meta
-            .and_then(|meta| meta.description.as_deref())
-            .map(str::trim)
-            .filter(|description| !description.is_empty())
-        {
-            entries.push(DesktopModsContentEntry {
-                title: self.localize_bundle_markup_text("@editor.description"),
-                detail: description.to_string(),
-                icon: "fileText",
-            });
-        }
-        if let Some(repo) = self.mods_route_mod_repo_at_index(index) {
-            entries.push(DesktopModsContentEntry {
-                title: self.localize_bundle_markup_text("@mods.github.open"),
-                detail: repo.to_string(),
-                icon: "github",
-            });
-        }
-        if let Some(root) = self.mods_route_mod_root_label_at_index(index) {
-            entries.push(DesktopModsContentEntry {
-                title: self.localize_bundle_markup_text("@mods.openfolder"),
-                detail: root,
-                icon: "folder",
-            });
-        }
-        entries
+        Self::mods_collect_content_file_paths(&content_dir, 64)
+            .into_iter()
+            .filter_map(|path| {
+                let title = path
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())?
+                    .to_string();
+                let detail = path
+                    .strip_prefix(&content_dir)
+                    .ok()
+                    .and_then(|relative| relative.to_str())
+                    .unwrap_or_else(|| path.to_str().unwrap_or(""))
+                    .replace('\\', "/");
+                Some(DesktopModsContentEntry {
+                    title,
+                    detail,
+                    icon: "fileText",
+                })
+            })
+            .collect()
     }
 
     fn push_mods_detail_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -49444,13 +49457,15 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.083 + button_index as f32 * 0.0005,
             );
         }
-        self.push_settings_text_button(
-            pass,
-            Self::mods_route_detail_content_button_rect(dialog),
-            self.localize_bundle_markup_text("@mods.viewcontent"),
-            Some("book"),
-            Layer::END_PIXELED + 0.086,
-        );
+        if self.mods_route_mod_has_content_at_index(index) {
+            self.push_settings_text_button(
+                pass,
+                Self::mods_route_detail_content_button_rect(dialog),
+                self.localize_bundle_markup_text("@mods.viewcontent"),
+                Some("book"),
+                Layer::END_PIXELED + 0.086,
+            );
+        }
     }
 
     fn push_mods_content_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -67104,7 +67119,24 @@ version: "2.0.0"
         assert!(detail_texts
             .iter()
             .any(|text| text.contains("missing dependencies") && text.contains("alpha-lib")));
-        assert!(detail_texts.contains(&"View Content"));
+        assert!(
+            !detail_texts.contains(&"View Content"),
+            "Java ModsDialog hides @mods.viewcontent when no actual mod content exists"
+        );
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let dialog = DesktopLauncher::mods_route_detail_dialog_rect_for_panel(panel);
+        let view_content = DesktopLauncher::mods_route_detail_content_button_rect(dialog).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                view_content.x,
+                view_content.y
+            ),
+            None
+        );
     }
 
     #[test]
@@ -67926,12 +67958,27 @@ version: "1.0.0"
 
     #[test]
     fn desktop_launcher_mods_route_opens_and_closes_detail_dialog() {
+        let root = temp_desktop_path("mods-detail-content");
+        let alpha_root = root.join("alpha pack");
+        let beta_root = root.join("beta");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(alpha_root.join("content/blocks"))
+            .expect("alpha content dir should be creatable");
+        std::fs::create_dir_all(&beta_root).expect("beta dir should be creatable");
+        std::fs::write(
+            alpha_root.join("content/blocks/router.hjson"),
+            "name: router\n",
+        )
+        .expect("alpha content file should be writable");
+
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.settings_locale = "en".into();
         launcher.last_mods_directory_mod_names =
             vec!["alpha".into(), "beta".into(), "gamma".into()];
-        launcher.last_mods_directory_mod_roots =
-            vec!["C:/mods/alpha pack".into(), "C:/mods/beta".into()];
+        launcher.last_mods_directory_mod_roots = vec![
+            alpha_root.to_string_lossy().into_owned(),
+            beta_root.to_string_lossy().into_owned(),
+        ];
         launcher.last_mods_directory_mod_metas = vec![
             ModMetadata::from_source_text(
                 "alpha",
@@ -67991,7 +68038,9 @@ repo: "Beta/Override"
             })
             .collect::<Vec<_>>();
         assert!(texts.contains(&"Mod: Alpha Pack"));
-        assert!(texts.contains(&"Open Folder: C:/mods/alpha pack"));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("Open Folder:") && text.contains("alpha pack")));
         assert!(texts.contains(&"Open Folder"));
         assert!(texts.contains(&"Name: Alpha Pack"));
         assert!(texts.contains(&"Version: 1.0.0"));
@@ -68022,13 +68071,12 @@ repo: "Beta/Override"
         let folder_action = launcher
             .dispatch_mods_folder_action_with_platform(0, &mut platform)
             .expect("mod root should open as file URI");
-        assert_eq!(folder_action.path, "C:/mods/alpha pack");
-        assert_eq!(folder_action.uri, "file:///C:/mods/alpha%20pack");
-        assert!(folder_action.opened);
         assert_eq!(
-            platform.opened_uris,
-            vec!["file:///C:/mods/alpha%20pack".to_string()]
+            folder_action.path,
+            alpha_root.to_string_lossy().into_owned()
         );
+        assert!(folder_action.opened);
+        assert_eq!(platform.opened_uris, vec![folder_action.uri.clone()]);
 
         let view_content = DesktopLauncher::mods_route_detail_content_button_rect(dialog).center();
         assert_eq!(
@@ -68059,10 +68107,9 @@ repo: "Beta/Override"
             })
             .collect::<Vec<_>>();
         assert!(content_texts.contains(&"View Content: Alpha Pack"));
-        assert!(content_texts.contains(&"Description: Alpha fixture mod."));
-        assert!(content_texts.contains(&"Name: Alpha Pack"));
-        assert!(content_texts.contains(&"Author: Alpha Author"));
-        assert!(content_texts.contains(&"Version: 1.0.0"));
+        assert!(content_texts
+            .iter()
+            .any(|text| text.contains("router") && text.contains("blocks/router.hjson")));
         assert!(!content_texts.contains(&"@none"));
         assert!(!content_texts.contains(&"@mods.contents.none"));
         assert!(!content_texts.contains(&"content entries: 0"));
@@ -68138,6 +68185,10 @@ repo: "Beta/Override"
         assert!(beta_texts.contains(&"Mod: Beta Override"));
         assert!(beta_texts.contains(&"Repo Beta/Override"));
         assert!(beta_texts.contains(&"Reinstall"));
+        assert!(
+            !beta_texts.contains(&"View Content"),
+            "Java ModsDialog only shows @mods.viewcontent when actual mod content exists"
+        );
         let beta_button_count = launcher.mods_route_detail_button_specs(1).len();
         assert_eq!(
             beta_button_count, 4,
@@ -68171,8 +68222,12 @@ repo: "Beta/Override"
                 view_content_button.x,
                 view_content_button.y
             ),
-            Some(super::DesktopMenuRouteShellAction::OpenModsContent(1))
+            None
         );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsContent(1),
+        );
+        assert_eq!(launcher.mods_content_dialog_index, None);
         let mut platform = RecordingPlatform {
             open_result: true,
             ..Default::default()
@@ -68205,6 +68260,8 @@ repo: "Beta/Override"
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseRoute);
         assert_eq!(launcher.active_menu_route, None);
         assert_eq!(launcher.mods_selected_mod_index, None);
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
