@@ -35161,17 +35161,19 @@ impl DesktopLauncher {
                                 })
                             })
                             .unwrap_or_default();
-                        for (number_index, number) in
-                            DesktopCustomRulesNumber::ALL.into_iter().enumerate()
-                        {
+                        let mut visible_number_index = 0usize;
+                        for number in DesktopCustomRulesNumber::ALL {
                             if !self.map_play_custom_rule_label_matches(number.label_key()) {
                                 continue;
                             }
                             if !number.enabled(&rules) {
+                                visible_number_index += 1;
                                 continue;
                             }
-                            let row =
-                                Self::map_play_customize_number_row_rect(content, number_index);
+                            let row = Self::map_play_customize_number_row_rect(
+                                content,
+                                visible_number_index,
+                            );
                             let decrease = Self::map_play_customize_number_button_rect(row, false);
                             if decrease.contains_point(point) {
                                 return Some(DesktopMenuRouteShellAction::MapCard(
@@ -35192,6 +35194,7 @@ impl DesktopLauncher {
                                     ),
                                 ));
                             }
+                            visible_number_index += 1;
                         }
                         for (policy_index, toggle) in MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES
                             .iter()
@@ -42904,11 +42907,12 @@ impl DesktopLauncher {
         rules: &Rules,
         layer: f32,
     ) {
-        for (index, number) in DesktopCustomRulesNumber::ALL.into_iter().enumerate() {
+        let mut visible_index = 0usize;
+        for number in DesktopCustomRulesNumber::ALL {
             if !self.map_play_custom_rule_label_matches(number.label_key()) {
                 continue;
             }
-            let row = Self::map_play_customize_number_row_rect(content, index);
+            let row = Self::map_play_customize_number_row_rect(content, visible_index);
             let enabled = number.enabled(rules);
             pass.push(RenderCommand::draw_sprite(
                 Self::settings_drawable_symbol("button"),
@@ -42919,7 +42923,7 @@ impl DesktopLauncher {
                     [1.0, 1.0, 1.0, 0.14]
                 },
                 0.0,
-                layer + index as f32 * 0.001,
+                layer + visible_index as f32 * 0.001,
             ));
             pass.push(RenderCommand::draw_text_styled(
                 self.localize_bundle_markup_text(number.label_key()),
@@ -42936,7 +42940,7 @@ impl DesktopLauncher {
                     .with_markup(true)
                     .with_wrap_width((row.width - 104.0).max(80.0))
                     .with_integer_position(true),
-                layer + 0.002 + index as f32 * 0.001,
+                layer + 0.002 + visible_index as f32 * 0.001,
             ));
             pass.push(RenderCommand::draw_text_styled(
                 number.value_text(rules),
@@ -42952,14 +42956,14 @@ impl DesktopLauncher {
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true)
                     .with_outline(true),
-                layer + 0.003 + index as f32 * 0.001,
+                layer + 0.003 + visible_index as f32 * 0.001,
             ));
             self.push_settings_text_button_enabled(
                 pass,
                 Self::map_play_customize_number_button_rect(row, false),
                 "-",
                 None,
-                layer + 0.004 + index as f32 * 0.001,
+                layer + 0.004 + visible_index as f32 * 0.001,
                 enabled,
             );
             self.push_settings_text_button_enabled(
@@ -42967,9 +42971,10 @@ impl DesktopLauncher {
                 Self::map_play_customize_number_button_rect(row, true),
                 "+",
                 None,
-                layer + 0.005 + index as f32 * 0.001,
+                layer + 0.005 + visible_index as f32 * 0.001,
                 enabled,
             );
+            visible_index += 1;
         }
     }
 
@@ -71983,6 +71988,61 @@ repo: "Beta/Override"
             ],
         );
         assert!(launcher.map_play_custom_rules_search.is_empty());
+        launcher.map_play_custom_rules_search = "drop zone".into();
+        let filtered_number_frame = launcher.menu_graphics_frame_for_surface(4, render_viewport);
+        let filtered_number_texts = filtered_number_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("filtered custom rule number rows should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(filtered_number_texts.contains(&"drop zone"));
+        assert!(filtered_number_texts.contains(&"Drop Zone Radius:[lightgray] (tiles)"));
+        assert!(!filtered_number_texts.contains(&"Map Ends After Wave"));
+        let compact_wave_spacing_row =
+            DesktopLauncher::map_play_customize_number_row_rect(content, 0);
+        let compact_wave_spacing_plus =
+            DesktopLauncher::map_play_customize_number_button_rect(compact_wave_spacing_row, true)
+                .center();
+        let compact_increase_wave_spacing =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::AdjustCustomRuleNumber(
+                    super::DesktopCustomRulesNumber::DropZoneRadius,
+                    1,
+                ),
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                compact_wave_spacing_plus.x,
+                compact_wave_spacing_plus.y
+            ),
+            Some(compact_increase_wave_spacing),
+            "Java CustomRulesDialog rebuilds filtered rows without leaving blank slots above the matching number rule"
+        );
+        let stale_wave_spacing_row =
+            DesktopLauncher::map_play_customize_number_row_rect(content, 1);
+        let stale_wave_spacing_plus =
+            DesktopLauncher::map_play_customize_number_button_rect(stale_wave_spacing_row, true)
+                .center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                stale_wave_spacing_plus.x,
+                stale_wave_spacing_plus.y
+            ),
+            None,
+            "filtered number rows should not keep their pre-search hit-test slot"
+        );
+        launcher.map_play_custom_rules_search.clear();
         let open_banned_blocks_center =
             DesktopLauncher::map_play_customize_edit_button_rect(child, 2).center();
         let open_banned_blocks =

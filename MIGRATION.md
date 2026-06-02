@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 769. CustomRulesDialog 数值搜索紧凑布局对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **90.3%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `CustomRulesDialog.setupMain()` 在搜索变化后重建 rule table；
+  - 不匹配的 `number/numberi/check` 行不会留下旧 table 空位，匹配项会紧凑排列并同步更新命中区域；
+  - Rust 此前数值规则按原始 enum index 布局，搜索只隐藏文本/命中但仍可能保留空槽观感。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_map_play_customize_number_rows(...)` 改为按过滤后的 visible index 布局数值规则行；
+    - CustomRules 数值行 hit-test 同步使用 visible index，搜索后按钮命中不再停留在旧 slot；
+    - 扩展 `desktop_launcher_map_play_dialog_opens_help_customize_and_highscore`，锁定 `drop zone` 搜索时 `Drop Zone Radius` 紧凑到第一个数值行位置，旧位置不再命中。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop map_play_dialog --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `CustomRulesDialog` 仍需继续补齐 Java 的全部规则项、rule info tooltip、完整文本输入、更多环境/planet/team 细项与 Scene2D 滚动手感；
+  - 数值行已按搜索紧凑，banned policy / weather / team 子弹窗仍需继续审查过滤、布局和命中是否完全等价；
+  - 最终仍需把 CustomRules 与真实游戏模式启动、存档和联机规则传播完整闭环。
+
 ## 768. ModsDialog workshop listing 分支对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
