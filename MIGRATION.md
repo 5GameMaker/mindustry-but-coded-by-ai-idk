@@ -17,6 +17,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 760. LoadDialog cautiousLoad 缺失 mod 确认对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **89.4%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `LoadDialog.runLoadSave(...)` 调用 `SaveSlot.cautiousLoad(...)`；
+  - `SaveSlot.cautiousLoad(...)` 会用 `Vars.mods.getModStrings()` 对比存档 meta 中的 `mods`，缺失时先弹 `@warning` + `mod.missing` 确认框，确认后才进入 `ui.loadAnd(...)` 加载流程。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 load-game 缺失 mod 确认状态、OK/Cancel shell action、Back/Escape 收口；
+    - 加入当前启用 mod string 生成逻辑，按 Java `name:version` 语义与存档 `SaveMeta.mods` 对比；
+    - 点击 Load 时若存在缺失 mod，不再立即进入 loading overlay，而是显示 `@warning` 确认弹窗；确认后进入既有 `LoadDialog.runLoadSave` pending load，取消/返回只关闭确认框；
+    - 渲染端新增 `mod.missing` 文案弹窗，保留原版 `@ok`/`@cancel` 双按钮节奏。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop load_game --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Load/Save 失败后的 route 收口语义仍需继续对齐 Java 的 `hide()`/`ui.loadfrag` 节奏；
+  - Mods runtime 仍需继续接入真实 `Vars.mods` 等价生命周期，当前确认逻辑先复用已迁移的 mods route snapshot。
+
 ## 759. LoadDialog 存档标题默认值对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

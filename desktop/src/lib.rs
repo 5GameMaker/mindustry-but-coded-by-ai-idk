@@ -3548,6 +3548,8 @@ pub enum DesktopMenuRouteShellAction {
     ToggleLoadGameMode(Gamemode),
     LoadGameImport,
     LoadGameSlot(usize, DesktopLoadGameActionKind),
+    LoadGameMissingModsOk,
+    LoadGameMissingModsCancel,
     LoadGameRenameOk,
     LoadGameRenameCancel,
     LoadGameDeleteOk,
@@ -17840,6 +17842,8 @@ pub struct DesktopLauncher {
     pub last_load_game_action: Option<DesktopLoadGameAction>,
     pub last_load_game_result: Option<DesktopLoadGameAction>,
     pub load_game_pending_load: Option<DesktopLoadGamePendingLoad>,
+    pub load_game_missing_mods_confirm_slot: Option<usize>,
+    pub load_game_missing_mods: Vec<String>,
     pub load_game_error: Option<String>,
     pub last_load_game_import_request: Option<FileChooserRequest>,
     pub last_load_game_import_result: Option<DesktopLoadGameImportResult>,
@@ -19022,6 +19026,8 @@ impl DesktopLauncher {
             last_load_game_action: None,
             last_load_game_result: None,
             load_game_pending_load: None,
+            load_game_missing_mods_confirm_slot: None,
+            load_game_missing_mods: Vec::new(),
             load_game_error: None,
             last_load_game_import_request: None,
             last_load_game_import_result: None,
@@ -23105,6 +23111,14 @@ impl DesktopLauncher {
             return true;
         }
         if self.active_menu_route == Some(DesktopMenuRoute::LoadGame)
+            && self.load_game_missing_mods_confirm_slot.is_some()
+        {
+            self.cancel_load_game_missing_mods();
+            self.last_menu_route_shell_action =
+                Some(DesktopMenuRouteShellAction::LoadGameMissingModsCancel);
+            return true;
+        }
+        if self.active_menu_route == Some(DesktopMenuRoute::LoadGame)
             && self.load_game_rename_dialog_slot.is_some()
         {
             self.load_game_rename_dialog_slot = None;
@@ -23738,6 +23752,56 @@ impl DesktopLauncher {
             .unwrap_or(true)
     }
 
+    fn normalize_mod_string_name(name: &str) -> String {
+        name.trim().to_lowercase().replace(' ', "-")
+    }
+
+    fn current_enabled_mod_strings(&self) -> BTreeSet<String> {
+        self.last_mods_directory_mod_names
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| {
+                let state = self.mods_route_mod_state_snapshot_at_index(*index);
+                state.enabled && state.state != DesktopModsRouteModStateKind::Hidden
+            })
+            .filter_map(|(index, fallback_name)| {
+                let raw_name = self
+                    .last_mods_directory_mod_metas
+                    .get(index)
+                    .and_then(|meta| meta.name.as_deref())
+                    .unwrap_or(fallback_name);
+                let name = Self::normalize_mod_string_name(raw_name);
+                (!name.is_empty()).then(|| {
+                    let version = self
+                        .last_mods_directory_mod_metas
+                        .get(index)
+                        .and_then(|meta| meta.version.as_deref())
+                        .map(str::trim)
+                        .filter(|version| !version.is_empty())
+                        .unwrap_or("0");
+                    format!("{name}:{version}")
+                })
+            })
+            .collect()
+    }
+
+    fn missing_mods_for_save_slot(&self, slot: &SaveSlotRecord) -> Vec<String> {
+        let current_mods = self.current_enabled_mod_strings();
+        slot.meta
+            .as_ref()
+            .map(|meta| {
+                meta.mods
+                    .iter()
+                    .filter_map(|mod_string| {
+                        let trimmed = mod_string.trim();
+                        (!trimmed.is_empty() && !current_mods.contains(trimmed))
+                            .then(|| trimmed.to_string())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     fn load_game_slot_autosave_line(&self, slot: &SaveSlotRecord) -> String {
         format!(
             "@save.autosave: {}",
@@ -23811,6 +23875,13 @@ impl DesktopLauncher {
                     .map(|mode| mode.wire_name())
                     .collect::<Vec<_>>()
                     .join(",")
+            ));
+        }
+        if self.load_game_missing_mods_confirm_slot.is_some() {
+            lines.push("dialog: @warning".into());
+            lines.push(self.format_bundle_text(
+                "mod.missing",
+                &[self.load_game_missing_mods.join("\n").as_str()],
             ));
         }
         if self.load_game_slots.is_empty() {
@@ -28189,6 +28260,16 @@ impl DesktopLauncher {
         if self.load_game_pending_load.is_some() {
             return None;
         }
+        if self.load_game_missing_mods_confirm_slot.is_some() {
+            let dialog = Self::load_game_missing_mods_dialog_rect_for_panel(panel);
+            if Self::load_game_rename_button_rect(dialog, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::LoadGameMissingModsCancel);
+            }
+            if Self::load_game_rename_button_rect(dialog, 1).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::LoadGameMissingModsOk);
+            }
+            return None;
+        }
         if self.load_game_rename_dialog_slot.is_some() {
             let dialog = Self::load_game_rename_dialog_rect_for_panel(panel);
             if Self::load_game_rename_button_rect(dialog, 0).contains_point(point) {
@@ -28377,7 +28458,7 @@ impl DesktopLauncher {
             DesktopLoadGameActionKind::Rename => "rename",
             DesktopLoadGameActionKind::Export => "export",
         };
-        let action = DesktopLoadGameAction {
+        let mut action = DesktopLoadGameAction {
             slot: slot.index(),
             file: slot.file.display().to_string(),
             map_name: slot.meta.as_ref().and_then(|meta| meta.map_name.clone()),
@@ -28386,7 +28467,13 @@ impl DesktopLauncher {
             status: status.into(),
         };
         if kind == DesktopLoadGameActionKind::Load {
-            self.start_load_game_pending_load(action.clone());
+            let missing_mods = self.missing_mods_for_save_slot(&slot);
+            if missing_mods.is_empty() {
+                self.start_load_game_pending_load(action.clone());
+            } else {
+                action.status = "missing-mods-confirm".into();
+                self.open_load_game_missing_mods_confirm(slot_index, missing_mods);
+            }
         } else if kind == DesktopLoadGameActionKind::ToggleAutosave {
             let enabled = !self.load_game_slot_is_autosave(&slot);
             self.settings_overrides
@@ -28428,6 +28515,44 @@ impl DesktopLauncher {
         Some(action)
     }
 
+    fn open_load_game_missing_mods_confirm(
+        &mut self,
+        slot_index: usize,
+        missing_mods: Vec<String>,
+    ) {
+        self.load_game_error = None;
+        self.last_load_game_result = None;
+        self.load_game_pending_load = None;
+        self.load_game_search_focused = false;
+        self.load_game_rename_dialog_slot = None;
+        self.load_game_delete_dialog_slot = None;
+        self.load_game_rename_text.clear();
+        self.load_game_missing_mods_confirm_slot = Some(slot_index);
+        self.load_game_missing_mods = missing_mods;
+    }
+
+    fn confirm_load_game_missing_mods(&mut self) -> Option<DesktopLoadGameAction> {
+        let slot_index = self.load_game_missing_mods_confirm_slot.take()?;
+        self.load_game_missing_mods.clear();
+        let slot = self.load_game_slots.get(slot_index)?.clone();
+        let action = DesktopLoadGameAction {
+            slot: slot.index(),
+            file: slot.file.display().to_string(),
+            map_name: slot.meta.as_ref().and_then(|meta| meta.map_name.clone()),
+            timestamp: slot.timestamp(),
+            kind: DesktopLoadGameActionKind::Load,
+            status: "selected-for-load".into(),
+        };
+        self.start_load_game_pending_load(action.clone());
+        self.last_load_game_action = Some(action.clone());
+        Some(action)
+    }
+
+    fn cancel_load_game_missing_mods(&mut self) {
+        self.load_game_missing_mods_confirm_slot = None;
+        self.load_game_missing_mods.clear();
+    }
+
     fn start_load_game_pending_load(&mut self, action: DesktopLoadGameAction) {
         self.load_game_error = None;
         self.last_load_game_result = None;
@@ -28435,6 +28560,7 @@ impl DesktopLauncher {
         self.load_game_rename_dialog_slot = None;
         self.load_game_delete_dialog_slot = None;
         self.load_game_rename_text.clear();
+        self.cancel_load_game_missing_mods();
         self.load_game_pending_load = Some(DesktopLoadGamePendingLoad::new(action));
     }
 
@@ -36026,6 +36152,7 @@ impl DesktopLauncher {
                 self.load_game_search_focused = false;
                 self.load_game_rename_dialog_slot = None;
                 self.load_game_pending_load = None;
+                self.cancel_load_game_missing_mods();
                 self.load_game_delete_dialog_slot = None;
                 self.load_game_rename_text.clear();
                 self.save_game_new_dialog_open = false;
@@ -36510,6 +36637,7 @@ impl DesktopLauncher {
                     if self.load_game_slots.get(index).is_some() {
                         self.load_game_delete_dialog_slot = Some(index);
                         self.load_game_rename_dialog_slot = None;
+                        self.cancel_load_game_missing_mods();
                         self.load_game_rename_text.clear();
                         self.save_game_new_dialog_open = false;
                         self.save_game_new_text.clear();
@@ -36519,6 +36647,12 @@ impl DesktopLauncher {
                 } else {
                     self.dispatch_load_game_slot_action_kind(index, kind);
                 }
+            }
+            DesktopMenuRouteShellAction::LoadGameMissingModsOk => {
+                let _ = self.confirm_load_game_missing_mods();
+            }
+            DesktopMenuRouteShellAction::LoadGameMissingModsCancel => {
+                self.cancel_load_game_missing_mods();
             }
             DesktopMenuRouteShellAction::LoadGameRenameOk => {
                 if let Some(slot_index) = self.load_game_rename_dialog_slot {
@@ -44722,6 +44856,7 @@ impl DesktopLauncher {
         } else {
             self.push_load_game_rename_dialog(pass, panel);
             self.push_load_game_delete_dialog(pass, panel);
+            self.push_load_game_missing_mods_dialog(pass, panel);
             self.push_load_game_loading_overlay(pass, viewport, panel);
         }
     }
@@ -45015,6 +45150,17 @@ impl DesktopLauncher {
         Self::save_game_overwrite_dialog_rect_for_panel(panel)
     }
 
+    fn load_game_missing_mods_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width - 96.0).clamp(430.0, 620.0);
+        let height = 264.0;
+        RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
     fn push_save_game_new_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
         if !self.save_game_new_dialog_open {
             return;
@@ -45228,6 +45374,71 @@ impl DesktopLauncher {
             "@ok",
             None,
             Layer::END_PIXELED + 0.090,
+        );
+    }
+
+    fn push_load_game_missing_mods_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        if self.load_game_missing_mods_confirm_slot.is_none() {
+            return;
+        }
+        let dialog = Self::load_game_missing_mods_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.48],
+            Layer::END_PIXELED + 0.092,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.093,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [1.0, 0.66, 0.30, 0.96],
+            2.0,
+            Layer::END_PIXELED + 0.094,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@warning"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
+            [1.0, 0.92, 0.76, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.095,
+        ));
+        let missing = self.load_game_missing_mods.join("\n");
+        let message = self.format_bundle_text("mod.missing", &[missing.as_str()]);
+        pass.push(RenderCommand::draw_text_styled(
+            message,
+            RenderPoint::new(dialog.x + 28.0, dialog.y + dialog.height - 72.0),
+            [0.88, 0.90, 0.84, 1.0],
+            10.5,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Top)
+                .with_wrap_width(dialog.width - 56.0)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.0955,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::load_game_rename_button_rect(dialog, 0),
+            "@cancel",
+            None,
+            Layer::END_PIXELED + 0.096,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::load_game_rename_button_rect(dialog, 1),
+            "@ok",
+            None,
+            Layer::END_PIXELED + 0.096,
         );
     }
 
@@ -77722,6 +77933,108 @@ repo: "Beta/Override"
                 .map(|action| action.status.as_str()),
             Some("loaded"),
             "Java SaveIO.load falls back to the backup before reporting a corrupted save"
+        );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_load_game_cautious_load_confirms_missing_mods_like_java() {
+        let root = temp_desktop_path("load-game-missing-mod-confirm");
+        let save_dir = root.join("saves");
+        std::fs::create_dir_all(&save_dir).expect("save fixture dir should be writable");
+
+        let mut tags = BTreeMap::new();
+        tags.insert("mapname".into(), "Modded Map".into());
+        tags.insert("saved".into(), "400".into());
+        tags.insert("wave".into(), "8".into());
+        tags.insert(
+            "mods".into(),
+            r#"["example-mod:1.0","missing-mod:2.0"]"#.into(),
+        );
+        let mut bytes = Vec::new();
+        write_deflated_save_meta_prefix(&mut bytes, LATEST_SAVE_VERSION, &tags)
+            .expect("modded save meta should encode");
+        std::fs::write(save_dir.join("5.msav"), bytes).expect("modded save should write");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.save_dir = save_dir.display().to_string();
+        launcher.dispatch_menu_action(MenuButtonRole::LoadGame);
+        launcher.last_mods_directory_mod_names = vec!["example-mod".into()];
+        launcher.last_mods_directory_mod_metas =
+            vec![mindustry_core::mindustry::modsys::ModMetadata {
+                name: Some("example mod".into()),
+                version: Some("1.0".into()),
+                ..Default::default()
+            }];
+        launcher.last_mods_directory_mod_states =
+            vec![super::DesktopModsRouteModStateSnapshot::default()];
+
+        let action = launcher
+            .dispatch_load_game_slot_action_kind(0, super::DesktopLoadGameActionKind::Load)
+            .expect("modded slot should still record the load click");
+        assert_eq!(action.status, "missing-mods-confirm");
+        assert_eq!(launcher.load_game_pending_load, None);
+        assert_eq!(launcher.load_game_missing_mods_confirm_slot, Some(0));
+        assert_eq!(launcher.load_game_missing_mods, vec!["missing-mod:2.0"]);
+
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::LoadGame);
+        assert!(lines.contains(&"dialog: @warning".to_string()));
+        assert!(lines.iter().any(|line| line.contains("missing-mod:2.0")));
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::LoadGame,
+        );
+        let dialog = DesktopLauncher::load_game_missing_mods_dialog_rect_for_panel(panel);
+        let cancel = DesktopLauncher::load_game_rename_button_rect(dialog, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, cancel.x, cancel.y),
+            Some(super::DesktopMenuRouteShellAction::LoadGameMissingModsCancel)
+        );
+        assert!(launcher.apply_menu_back_key());
+        assert_eq!(launcher.load_game_missing_mods_confirm_slot, None);
+        assert_eq!(
+            launcher.last_menu_route_shell_action,
+            Some(super::DesktopMenuRouteShellAction::LoadGameMissingModsCancel)
+        );
+
+        launcher
+            .dispatch_load_game_slot_action_kind(0, super::DesktopLoadGameActionKind::Load)
+            .expect("second modded load should reopen confirmation");
+        let ok = DesktopLauncher::load_game_rename_button_rect(dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, ok.x, ok.y),
+            Some(super::DesktopMenuRouteShellAction::LoadGameMissingModsOk)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::LoadGameMissingModsOk,
+        );
+        assert!(launcher.load_game_pending_load.is_some());
+        assert_eq!(launcher.load_game_missing_mods_confirm_slot, None);
+        assert_eq!(
+            launcher
+                .last_load_game_action
+                .as_ref()
+                .map(|load| load.status.as_str()),
+            Some("selected-for-load")
+        );
+
+        for frame_index in 1..=u64::from(super::LOAD_GAME_LOADING_DELAY_FRAMES) {
+            launcher.menu_graphics_frame_for_surface(frame_index, viewport);
+        }
+
+        assert_eq!(launcher.active_menu_route, None);
+        assert!(launcher.game_state.is_playing());
+        assert_eq!(launcher.game_state.map.name(), "Modded Map");
+        assert_eq!(
+            launcher
+                .last_load_game_result
+                .as_ref()
+                .map(|load| load.status.as_str()),
+            Some("loaded")
         );
 
         std::fs::remove_dir_all(root).ok();
