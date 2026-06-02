@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 781. CustomRulesDialog Weather ScrollPane 滚动语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **91.5%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `CustomRulesDialog.weatherDialog()` 外层使用 `dialog.cont.pane(...)`，大量 weather 条目不会挤到底部按钮，而是通过 ScrollPane 可滚动；
+  - Rust 已有双列卡片，但尚未限制可见区域，也没有滚轮命中语义。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_play_weather_scroll_offset`，按 weather 网格“行”滚动；
+    - 新增 Weather entries clip rect、可见行数、总行数、最大 scroll offset 与 scrolled entry rect helper；
+    - Weather 渲染使用 `RenderCommand::set_clip(...) / ClearClip`，只绘制当前可见行窗口；
+    - Weather hit-test 使用同一套 scrolled rect，避免不可见条目仍可点击；
+    - 鼠标滚轮在 Weather 列表区域内滚动，打开/关闭/切换相关子弹窗时清理 offset；
+    - 回归测试扩展到 10 条 weather：初始隐藏后排，滚动后 `weather-8/9` 可见并命中正确 index。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_weather_dialog_renders_and_hits_all_entries_like_java_rebuild --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Weather 还可继续补可视滚动条/拖拽条；
+  - Weather 卡片内部 text field 形态仍可继续向 Java `field(...)` 靠拢；
+  - 完整客户端可玩性和联机 smoke test 仍未达成。
+
 ## 780. CustomRulesDialog Weather 自适应双列卡片布局
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
