@@ -17,6 +17,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 754. MapPlay/MapList/Editor 地图子菜单视觉细节对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **88.8%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `MapPlayDialog` 预览区只显示地图预览与 survival 高分，不额外绘制 Rust-only 的类型/尺寸标题；
+  - Java `MapListDialog` 空搜索和空列表都走 `@maps.none`，不会把查询词拼到空态；
+  - Java `EditorMapsDialog.showMap(...)` 对 built-in 且无 author tag 的地图作者回退为 `Anuke`，并且只有存在 description tag 时才显示描述字段。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `map_list_empty_state_texts()` 统一返回 `@maps.none`，移除 `@none.found: query` 空态；
+    - `push_map_play_dialog(...)` 移除预览下方非原版 `type + WxH` 文案，仅保留 highscore；
+    - 新增 `map_editor_info_author_label(...)`，只在 Editor 信息页对 built-in 无作者地图回退 `Anuke`；
+    - Editor 地图信息描述字段改为只有 `description` tag 存在时显示，避免缺失 tag 被 `plain_description()` 回退成 `unknown` 后画到 UI；
+    - 测试覆盖空态、MapPlay 预览文案、Editor 作者/unknown 回退。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_list_search_and_scroll_filter_visible_cards --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_info_disables_builtin_delete_action --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop map_play --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop map_list --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop editor --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `CustomRulesDialog` 的真实规则搜索/过滤仍需继续按 Java `ruleSearch` 机制补齐；
+  - `@waves.edit` 等子弹窗仍有 Rust-only 摘要/错误行，需要后续继续瘦身并接入真实 runtime。
+
 ## 753. KeybindDialog 标题与滚动条还原
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -31198,11 +31198,16 @@ impl DesktopLauncher {
     }
 
     fn map_list_empty_state_texts(&self) -> (String, Option<String>) {
-        let search = self.map_list_search.trim();
-        if !search.is_empty() {
-            (format!("@none.found: {search}"), None)
+        ("@maps.none".to_string(), None)
+    }
+
+    fn map_editor_info_author_label(map: &MapDescriptor) -> String {
+        if map.has_tag("author") {
+            map.plain_author()
+        } else if !map.custom && !map.workshop {
+            "Anuke".to_string()
         } else {
-            ("@maps.none".to_string(), None)
+            map.plain_author()
         }
     }
 
@@ -42147,27 +42152,11 @@ impl DesktopLauncher {
             3.0,
             Layer::END_PIXELED + 0.069,
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            format!(
-                "{}  {}x{}",
-                self.localize_bundle_markup_text(Self::map_list_card_type_label(map)),
-                map.width,
-                map.height
-            ),
-            RenderPoint::new(dialog.center().x, preview.y - 16.0),
-            [0.68, 0.80, 0.88, 1.0],
-            10.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.070,
-        ));
         if Gamemode::Survival.valid(map) {
             let high_score = self.map_play_high_score(map).to_string();
             pass.push(RenderCommand::draw_text_styled(
                 self.format_bundle_text("level.highscore", &[high_score.as_str()]),
-                RenderPoint::new(dialog.center().x, preview.y - 22.0),
+                RenderPoint::new(dialog.center().x, preview.y - 18.0),
                 [0.78, 0.88, 0.96, 1.0],
                 10.0,
                 0.0,
@@ -43467,10 +43456,10 @@ impl DesktopLauncher {
             ),
             (
                 self.localize_bundle_markup_text_or("@editor.author", "Author:"),
-                map.plain_author(),
+                Self::map_editor_info_author_label(map),
             ),
         ];
-        if !map.plain_description().trim().is_empty() {
+        if map.has_tag("description") {
             fields.push((
                 self.localize_bundle_markup_text_or("@editor.description", "Description:"),
                 map.plain_description(),
@@ -70248,6 +70237,11 @@ repo: "Beta/Override"
         assert!(dialog_texts.contains(&"Map Info"));
         assert!(dialog_texts.contains(&"Map Name:"));
         assert!(dialog_texts.contains(&"Author:"));
+        assert!(
+            dialog_texts.contains(&"Anuke"),
+            "Java EditorMapsDialog falls back to Anuke for builtin maps without an author tag"
+        );
+        assert!(!dialog_texts.contains(&"unknown"));
         assert!(dialog_texts.contains(&"Open In Editor"));
         assert!(!dialog_texts.contains(&"size"));
         assert!(!dialog_texts.contains(&"160x160"));
@@ -70298,6 +70292,10 @@ repo: "Beta/Override"
             .collect::<Vec<_>>();
         assert!(texts.contains(&"?"));
         assert!(texts.contains(&"High Score: [accent]42"));
+        assert!(
+            !texts.contains(&"Custom  180x180"),
+            "Java MapPlayDialog preview area does not add a Rust-only type/size caption"
+        );
         assert!(
             !texts.iter().any(|text| text.contains("hiscore")),
             "Java MapPlayDialog displays the numeric Core.settings score, not the settings key"
@@ -71810,12 +71808,13 @@ repo: "Beta/Override"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(empty_texts.contains(&"[lightgray]<none found>: missing"));
+        assert!(empty_texts.contains(&"[lightgray]No maps found!"));
+        assert!(!empty_texts.contains(&"[lightgray]<none found>: missing"));
         launcher.map_list_filter_modes.push(Gamemode::Survival);
         assert_eq!(
             launcher.map_list_empty_state_texts(),
-            ("@none.found: missing".to_string(), None),
-            "Java MapListDialog empty search state should not render Rust-only filter debug hints"
+            ("@maps.none".to_string(), None),
+            "Java MapListDialog empty search state renders the same @maps.none label as an empty map list"
         );
         launcher.map_list_search.clear();
         assert_eq!(
