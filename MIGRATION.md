@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 779. CustomRulesDialog Weather 条目与 Always 文案对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **91.3%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `CustomRulesDialog.weatherDialog()` 会在 rebuild 时遍历全部 `rules.weather`，按屏宽分列，不会只显示前几条；
+  - Java `f.check("@rules.weather.always", ...)` 使用 bundle 本地化文案；
+  - Rust 此前渲染和命中测试都 `.take(4)`，第 5 条及之后不可见也不可点；`Always` 行硬编码为 `always ✓/□`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Weather 弹窗渲染从前 4 条改为遍历全部 `rules.weather`；
+    - Weather remove / always / duration / frequency 命中测试同步覆盖全部条目；
+    - Always 按钮改成 `✓/□ + @rules.weather.always` 本地化显示；
+    - 新增回归测试锁定第 5 条 weather 可见、可 remove、可 toggle always，且不再出现 lowercase `always` 硬编码。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_weather_dialog_renders_and_hits_all_entries_like_java_rebuild --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Weather 仍应继续精修为 Java 的按屏宽多列/ScrollPane 布局，避免更多条目时向底部按钮区挤压；
+  - CustomRulesDialog 其他子弹窗仍需持续对照 Scene2D 布局和交互；
+  - 完整客户端可玩性和联机 smoke test 仍未达成。
+
 ## 778. SettingsMenuDialog 设置项 label 本地化对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

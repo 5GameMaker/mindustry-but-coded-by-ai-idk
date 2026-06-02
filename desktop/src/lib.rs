@@ -35108,7 +35108,7 @@ impl DesktopLauncher {
                                     })
                                 })
                                 .unwrap_or_default();
-                            for (weather_index, _) in rules.weather.iter().take(4).enumerate() {
+                            for (weather_index, _) in rules.weather.iter().enumerate() {
                                 let row = Self::map_play_weather_entry_rect(
                                     weather_dialog,
                                     weather_index,
@@ -43846,7 +43846,7 @@ impl DesktopLauncher {
                 layer + 0.006,
             ));
         }
-        for (weather_index, entry) in rules.weather.iter().take(4).enumerate() {
+        for (weather_index, entry) in rules.weather.iter().enumerate() {
             let row = Self::map_play_weather_entry_rect(dialog, weather_index);
             pass.push(RenderCommand::draw_sprite(
                 Self::settings_drawable_symbol("button"),
@@ -43911,11 +43911,11 @@ impl DesktopLauncher {
             self.push_settings_text_button(
                 pass,
                 Self::map_play_weather_entry_always_rect(row),
-                if entry.always {
-                    "always ✓"
-                } else {
-                    "always □"
-                },
+                format!(
+                    "{} {}",
+                    if entry.always { "✓" } else { "□" },
+                    self.localize_bundle_markup_text("@rules.weather.always")
+                ),
                 None,
                 layer + 0.013 + weather_index as f32 * 0.001,
             );
@@ -73249,6 +73249,104 @@ repo: "Beta/Override"
         );
         launcher.dispatch_menu_route_shell_action(close_edit);
         assert!(!launcher.map_play_rules_edit_dialog_open);
+    }
+
+    #[test]
+    fn desktop_launcher_weather_dialog_renders_and_hits_all_entries_like_java_rebuild() {
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), "Storm Stack".to_string());
+        let mut map =
+            MapDescriptor::new("maps/custom/storm-stack.msav", 180, 180, tags, true, 1, 158);
+        map.spawns = 1;
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.map_list_cards = vec![map];
+        launcher.dispatch_menu_action(MenuButtonRole::CustomGame);
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenPlay),
+        ));
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::Customize),
+        ));
+
+        let mut rules = mindustry_core::mindustry::game::Rules::default();
+        rules.weather = (0..5)
+            .map(|index| {
+                let mut entry = super::WeatherEntry::default();
+                entry.weather = format!("weather-{index}");
+                entry
+            })
+            .collect();
+        launcher.map_play_rules = Some(rules);
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenWeather),
+        ));
+
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::CustomGame,
+        );
+        let dialog = DesktopLauncher::map_card_dialog_rect_for_panel(panel);
+        let child = DesktopLauncher::map_play_child_dialog_rect(dialog);
+        let weather_dialog = DesktopLauncher::map_play_weather_dialog_rect(child);
+        let weather_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let weather_texts = weather_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("weather dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            weather_texts.contains(&"weather-4"),
+            "Java CustomRulesDialog rebuilds every weather entry instead of truncating after four"
+        );
+        assert!(weather_texts.contains(&"□ Always"));
+        assert!(
+            !weather_texts.iter().any(|text| text.starts_with("always ")),
+            "Weather Always checkbox should use @rules.weather.always instead of hardcoded lowercase English"
+        );
+
+        let fifth_entry_row = DesktopLauncher::map_play_weather_entry_rect(weather_dialog, 4);
+        let remove_fifth = DesktopLauncher::map_play_weather_entry_remove_rect(fifth_entry_row);
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                remove_fifth.center().x,
+                remove_fifth.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(
+                    0,
+                    super::DesktopMapCardActionKind::RemoveWeather(4)
+                )
+            )),
+            "hit testing should cover weather entries beyond the first four"
+        );
+        let toggle_fifth = DesktopLauncher::map_play_weather_entry_always_rect(fifth_entry_row);
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                toggle_fifth.center().x,
+                toggle_fifth.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(
+                    0,
+                    super::DesktopMapCardActionKind::ToggleWeatherAlways(4)
+                )
+            ))
+        );
     }
 
     #[test]
