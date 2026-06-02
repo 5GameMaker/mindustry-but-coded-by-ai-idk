@@ -17,6 +17,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 791. Native OpenGL 菜单帧上传与状态缓存
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **92.5%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容、性能收口与所有子菜单接近原版。
+- 背景：
+  - 用户反馈 release 客户端主菜单帧率仍偏低；
+  - trace 确认 native OpenGL 已跑在 NVIDIA GPU 上，但菜单帧仍反复执行大量 sprite mesh upload 与 VAO attribute 配置；
+  - 该闭环先只改 native runtime driver，不改变 UI 布局、不改变 batching 语义，避免把性能修复和界面还原混在一起。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - 新增 native OpenGL buffer upload cache，按 `(target, buffer_handle)` 复用同 usage/同 bytes 的 VBO/IBO 内容，跳过重复 `glBufferData`；
+    - 新增 VAO attribute enable/layout cache，已配置过的同 VAO/同 attribute layout 不再每帧重复 `enableVertexAttribArray` 与 `vertexAttribPointer`；
+    - 新增 draw 状态 cache，跳过重复 `UseProgram`、`ActiveTexture`、`BindTexture`、`BindVertexArray`；
+    - 每帧 `clear_backbuffer()` 后同步清空当前 program/VAO 缓存，避免 GL 实际状态已置空而 runtime 状态误判可跳过；
+    - trace summary 增加 `buffer_upload_cache_*`、`vertex_attribute_cache_*`、`draw_state_cache_*` 命中/未命中计数。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime native_opengl -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --release --features opengl-native-runtime`
+  - `MINDUSTRY_DESKTOP_TRACE_SUMMARY=1 ./target/release/mindustry-desktop.exe` 短跑核对：
+    - 首帧：`buffer_upload_cache_misses=54`、`vertex_attribute_cache_misses=216`；
+    - 后续帧：约 `buffer_upload_cache_hits=52 / misses=2`，`vertex_attribute_cache_hits=216 / misses=0`；
+    - draw 状态后续帧约 `draw_state_cache_hits=32 / misses=76`。
+- 仍未完成：
+  - `sprite_mesh_upload_commands=351` 和 `draw_commands=248` 的逻辑命令数量仍由 `desktop/src/lib.rs` 的 frame plan/batching 生成，后续还要继续在 batching、layer、clip、文本布局、静态 UI mesh cache 上收口；
+  - 当前优化降低 native GL 重复调用成本，不代表主菜单/所有子菜单已经达到原版性能；
+  - Mods Browser 选择弹窗与真实 GitHub releases/listing 仍需继续对齐 Java。
+
 ## 790. 菜单 synthetic 背景静态 base cache
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

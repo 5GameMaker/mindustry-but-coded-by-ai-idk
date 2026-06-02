@@ -615,6 +615,23 @@ struct DesktopNativeOpenGlApp<'a> {
 }
 
 #[cfg(feature = "opengl-native-runtime")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DesktopNativeOpenGlBufferUploadCacheEntry {
+    usage: u32,
+    bytes: Vec<u8>,
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DesktopNativeOpenGlVertexAttributeLayoutCacheEntry {
+    components: i32,
+    gl_type: u32,
+    normalized: bool,
+    stride_bytes: i32,
+    offset_bytes: i32,
+}
+
+#[cfg(feature = "opengl-native-runtime")]
 struct DesktopNativeOpenGlRuntime {
     window: winit::window::Window,
     surface: Surface<WindowSurface>,
@@ -626,6 +643,11 @@ struct DesktopNativeOpenGlRuntime {
     framebuffers: std::collections::BTreeMap<u32, glow::NativeFramebuffer>,
     buffers: std::collections::BTreeMap<u32, glow::NativeBuffer>,
     vertex_arrays: std::collections::BTreeMap<u32, glow::NativeVertexArray>,
+    buffer_upload_cache:
+        std::collections::BTreeMap<(u32, u32), DesktopNativeOpenGlBufferUploadCacheEntry>,
+    vertex_attribute_enabled_cache: std::collections::BTreeSet<(u32, u32)>,
+    vertex_attribute_layout_cache:
+        std::collections::BTreeMap<(u32, u32), DesktopNativeOpenGlVertexAttributeLayoutCacheEntry>,
     shaders: std::collections::BTreeMap<u32, glow::NativeShader>,
     programs: std::collections::BTreeMap<u32, glow::NativeProgram>,
     program_shaders: std::collections::BTreeMap<u32, mindustry_core::mindustry::graphics::ShaderId>,
@@ -641,6 +663,14 @@ struct DesktopNativeOpenGlRuntime {
     current_window_title_diagnostic: Option<String>,
     current_program: Option<u32>,
     current_vertex_array: Option<u32>,
+    active_texture_unit: u32,
+    bound_textures: std::collections::BTreeMap<(u32, u32), u32>,
+    buffer_upload_cache_hits: usize,
+    buffer_upload_cache_misses: usize,
+    vertex_attribute_cache_hits: usize,
+    vertex_attribute_cache_misses: usize,
+    draw_state_cache_hits: usize,
+    draw_state_cache_misses: usize,
     native_errors: Vec<String>,
 }
 
@@ -1330,6 +1360,9 @@ impl DesktopNativeOpenGlRuntime {
             framebuffers: std::collections::BTreeMap::new(),
             buffers: std::collections::BTreeMap::new(),
             vertex_arrays: std::collections::BTreeMap::new(),
+            buffer_upload_cache: std::collections::BTreeMap::new(),
+            vertex_attribute_enabled_cache: std::collections::BTreeSet::new(),
+            vertex_attribute_layout_cache: std::collections::BTreeMap::new(),
             shaders: std::collections::BTreeMap::new(),
             programs: std::collections::BTreeMap::new(),
             program_shaders: std::collections::BTreeMap::new(),
@@ -1347,6 +1380,14 @@ impl DesktopNativeOpenGlRuntime {
             current_window_title_diagnostic: None,
             current_program: None,
             current_vertex_array: None,
+            active_texture_unit: glow::TEXTURE0,
+            bound_textures: std::collections::BTreeMap::new(),
+            buffer_upload_cache_hits: 0,
+            buffer_upload_cache_misses: 0,
+            vertex_attribute_cache_hits: 0,
+            vertex_attribute_cache_misses: 0,
+            draw_state_cache_hits: 0,
+            draw_state_cache_misses: 0,
             native_errors: Vec::new(),
         };
         runtime.update_window_title_diagnostic(None);
@@ -1468,6 +1509,13 @@ struct DesktopNativeOpenGlDriver<'a> {
     framebuffers: &'a mut std::collections::BTreeMap<u32, glow::NativeFramebuffer>,
     buffers: &'a mut std::collections::BTreeMap<u32, glow::NativeBuffer>,
     vertex_arrays: &'a mut std::collections::BTreeMap<u32, glow::NativeVertexArray>,
+    buffer_upload_cache:
+        &'a mut std::collections::BTreeMap<(u32, u32), DesktopNativeOpenGlBufferUploadCacheEntry>,
+    vertex_attribute_enabled_cache: &'a mut std::collections::BTreeSet<(u32, u32)>,
+    vertex_attribute_layout_cache: &'a mut std::collections::BTreeMap<
+        (u32, u32),
+        DesktopNativeOpenGlVertexAttributeLayoutCacheEntry,
+    >,
     shaders: &'a mut std::collections::BTreeMap<u32, glow::NativeShader>,
     programs: &'a mut std::collections::BTreeMap<u32, glow::NativeProgram>,
     program_shaders:
@@ -1484,9 +1532,18 @@ struct DesktopNativeOpenGlDriver<'a> {
     shader_asset_root_shaders_dir_exists: bool,
     current_program: &'a mut Option<u32>,
     current_vertex_array: &'a mut Option<u32>,
+    active_texture_unit: &'a mut u32,
+    bound_textures: &'a mut std::collections::BTreeMap<(u32, u32), u32>,
     bound_render_target: Option<mindustry_core::mindustry::graphics::RenderTarget>,
+    bound_buffer_handles: std::collections::BTreeMap<u32, u32>,
     draw_target_available: bool,
     invalid_draw_commands: usize,
+    buffer_upload_cache_hits: &'a mut usize,
+    buffer_upload_cache_misses: &'a mut usize,
+    vertex_attribute_cache_hits: &'a mut usize,
+    vertex_attribute_cache_misses: &'a mut usize,
+    draw_state_cache_hits: &'a mut usize,
+    draw_state_cache_misses: &'a mut usize,
     native_errors: &'a mut Vec<String>,
 }
 
@@ -1562,6 +1619,8 @@ impl DesktopNativeOpenGlDriver<'_> {
                 self.gl.delete_texture(texture);
             }
         }
+        self.bound_textures
+            .retain(|_, bound_texture_handle| *bound_texture_handle != texture_handle);
     }
 
     fn framebuffer_for_handle(
@@ -1822,6 +1881,174 @@ impl DesktopNativeOpenGlDriver<'_> {
                 None
             }
         }
+    }
+
+    fn consume_native_bound_buffer_data(&mut self, target: u32, usage: u32, bytes: &[u8]) {
+        let Some(buffer_handle) = self.bound_buffer_handles.get(&target).copied() else {
+            unsafe {
+                self.gl.buffer_data_u8_slice(target, bytes, usage);
+            }
+            return;
+        };
+        let cache_key = (target, buffer_handle);
+        if self
+            .buffer_upload_cache
+            .get(&cache_key)
+            .is_some_and(|entry| entry.usage == usage && entry.bytes.as_slice() == bytes)
+        {
+            *self.buffer_upload_cache_hits += 1;
+            return;
+        }
+
+        unsafe {
+            self.gl.buffer_data_u8_slice(target, bytes, usage);
+        }
+        self.buffer_upload_cache.insert(
+            cache_key,
+            DesktopNativeOpenGlBufferUploadCacheEntry {
+                usage,
+                bytes: bytes.to_vec(),
+            },
+        );
+        *self.buffer_upload_cache_misses += 1;
+    }
+
+    fn consume_native_enable_vertex_attribute_array(&mut self, attribute_location: i32) {
+        let (Some(vertex_array_handle), Ok(attribute_location)) = (
+            *self.current_vertex_array,
+            u32::try_from(attribute_location),
+        ) else {
+            return;
+        };
+        let cache_key = (vertex_array_handle, attribute_location);
+        if self.vertex_attribute_enabled_cache.contains(&cache_key) {
+            *self.vertex_attribute_cache_hits += 1;
+            return;
+        }
+        unsafe {
+            self.gl.enable_vertex_attrib_array(attribute_location);
+        }
+        self.vertex_attribute_enabled_cache.insert(cache_key);
+        *self.vertex_attribute_cache_misses += 1;
+    }
+
+    fn consume_native_vertex_attribute_pointer(
+        &mut self,
+        attribute_location: i32,
+        components: usize,
+        gl_type: u32,
+        normalized: bool,
+        stride_bytes: usize,
+        offset_bytes: usize,
+    ) {
+        let (
+            Some(vertex_array_handle),
+            Ok(attribute_location),
+            Ok(components),
+            Ok(stride_bytes),
+            Ok(offset_bytes),
+        ) = (
+            *self.current_vertex_array,
+            u32::try_from(attribute_location),
+            i32::try_from(components),
+            i32::try_from(stride_bytes),
+            i32::try_from(offset_bytes),
+        )
+        else {
+            return;
+        };
+        let cache_key = (vertex_array_handle, attribute_location);
+        let cache_entry = DesktopNativeOpenGlVertexAttributeLayoutCacheEntry {
+            components,
+            gl_type,
+            normalized,
+            stride_bytes,
+            offset_bytes,
+        };
+        if self
+            .vertex_attribute_layout_cache
+            .get(&cache_key)
+            .is_some_and(|entry| *entry == cache_entry)
+        {
+            *self.vertex_attribute_cache_hits += 1;
+            return;
+        }
+        unsafe {
+            self.gl.vertex_attrib_pointer_f32(
+                attribute_location,
+                components,
+                gl_type,
+                normalized,
+                stride_bytes,
+                offset_bytes,
+            );
+        }
+        self.vertex_attribute_layout_cache
+            .insert(cache_key, cache_entry);
+        *self.vertex_attribute_cache_misses += 1;
+    }
+
+    fn consume_native_use_program(&mut self, program_handle: u32) {
+        if *self.current_program == Some(program_handle) {
+            *self.draw_state_cache_hits += 1;
+            return;
+        }
+        let Some(program) = self.existing_program(program_handle) else {
+            return;
+        };
+        unsafe {
+            self.gl.use_program(Some(program));
+        }
+        *self.current_program = Some(program_handle);
+        self.upload_builtin_sprite_uniforms_for_program(program_handle, program);
+        *self.draw_state_cache_misses += 1;
+    }
+
+    fn consume_native_active_texture(&mut self, texture_unit: u32) {
+        if *self.active_texture_unit == texture_unit {
+            *self.draw_state_cache_hits += 1;
+            return;
+        }
+        unsafe {
+            self.gl.active_texture(texture_unit);
+        }
+        *self.active_texture_unit = texture_unit;
+        *self.draw_state_cache_misses += 1;
+    }
+
+    fn consume_native_bind_texture(&mut self, target: u32, texture_handle: u32) {
+        let cache_key = (*self.active_texture_unit, target);
+        if self
+            .bound_textures
+            .get(&cache_key)
+            .is_some_and(|bound_texture_handle| *bound_texture_handle == texture_handle)
+        {
+            *self.draw_state_cache_hits += 1;
+            return;
+        }
+        let Some(texture) = self.texture_for_handle(texture_handle) else {
+            return;
+        };
+        unsafe {
+            self.gl.bind_texture(target, Some(texture));
+        }
+        self.bound_textures.insert(cache_key, texture_handle);
+        *self.draw_state_cache_misses += 1;
+    }
+
+    fn consume_native_bind_vertex_array_for_draw(&mut self, vertex_array_handle: u32) {
+        if *self.current_vertex_array == Some(vertex_array_handle) {
+            *self.draw_state_cache_hits += 1;
+            return;
+        }
+        let Some(vertex_array) = self.vertex_array_for_handle(vertex_array_handle) else {
+            return;
+        };
+        unsafe {
+            self.gl.bind_vertex_array(Some(vertex_array));
+        }
+        *self.current_vertex_array = Some(vertex_array_handle);
+        *self.draw_state_cache_misses += 1;
     }
 
     fn existing_program(&mut self, program_handle: u32) -> Option<glow::NativeProgram> {
@@ -2487,6 +2714,8 @@ impl DesktopNativeOpenGlDriver<'_> {
                     unsafe {
                         self.gl.bind_texture(*target, Some(texture));
                     }
+                    self.bound_textures
+                        .insert((*self.active_texture_unit, *target), *texture_handle);
                 }
             }
         }
@@ -2658,24 +2887,17 @@ impl DesktopNativeOpenGlDriver<'_> {
                     unsafe {
                         self.gl.bind_buffer(*target, Some(buffer));
                     }
+                    self.bound_buffer_handles.insert(*target, *buffer_handle);
                 }
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BufferData {
                 target,
                 usage,
                 bytes,
-            } => unsafe {
-                self.gl.buffer_data_u8_slice(*target, bytes, *usage);
-            },
+            } => self.consume_native_bound_buffer_data(*target, *usage, bytes),
             mindustry_desktop::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::EnableVertexAttributeArray {
                 attribute_location,
-            } => {
-                if let Ok(attribute_location) = u32::try_from(*attribute_location) {
-                    unsafe {
-                        self.gl.enable_vertex_attrib_array(attribute_location);
-                    }
-                }
-            }
+            } => self.consume_native_enable_vertex_attribute_array(*attribute_location),
             mindustry_desktop::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::VertexAttributePointer {
                 attribute_location,
                 components,
@@ -2683,25 +2905,14 @@ impl DesktopNativeOpenGlDriver<'_> {
                 normalized,
                 stride_bytes,
                 offset_bytes,
-            } => {
-                if let (Ok(attribute_location), Ok(components), Ok(stride_bytes), Ok(offset_bytes)) = (
-                    u32::try_from(*attribute_location),
-                    i32::try_from(*components),
-                    i32::try_from(*stride_bytes),
-                    i32::try_from(*offset_bytes),
-                ) {
-                    unsafe {
-                        self.gl.vertex_attrib_pointer_f32(
-                            attribute_location,
-                            components,
-                            *gl_type,
-                            *normalized,
-                            stride_bytes,
-                            offset_bytes,
-                        );
-                    }
-                }
-            }
+            } => self.consume_native_vertex_attribute_pointer(
+                *attribute_location,
+                *components,
+                *gl_type,
+                *normalized,
+                *stride_bytes,
+                *offset_bytes,
+            ),
         }
     }
 
@@ -2728,24 +2939,17 @@ impl DesktopNativeOpenGlDriver<'_> {
                     unsafe {
                         self.gl.bind_buffer(*target, Some(buffer));
                     }
+                    self.bound_buffer_handles.insert(*target, *buffer_handle);
                 }
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::BufferData {
                 target,
                 usage,
                 bytes,
-            } => unsafe {
-                self.gl.buffer_data_u8_slice(*target, bytes, *usage);
-            },
+            } => self.consume_native_bound_buffer_data(*target, *usage, bytes),
             mindustry_desktop::DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::EnableVertexAttributeArray {
                 attribute_location,
-            } => {
-                if let Ok(attribute_location) = u32::try_from(*attribute_location) {
-                    unsafe {
-                        self.gl.enable_vertex_attrib_array(attribute_location);
-                    }
-                }
-            }
+            } => self.consume_native_enable_vertex_attribute_array(*attribute_location),
             mindustry_desktop::DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::VertexAttributePointer {
                 attribute_location,
                 components,
@@ -2753,25 +2957,14 @@ impl DesktopNativeOpenGlDriver<'_> {
                 normalized,
                 stride_bytes,
                 offset_bytes,
-            } => {
-                if let (Ok(attribute_location), Ok(components), Ok(stride_bytes), Ok(offset_bytes)) = (
-                    u32::try_from(*attribute_location),
-                    i32::try_from(*components),
-                    i32::try_from(*stride_bytes),
-                    i32::try_from(*offset_bytes),
-                ) {
-                    unsafe {
-                        self.gl.vertex_attrib_pointer_f32(
-                            attribute_location,
-                            components,
-                            *gl_type,
-                            *normalized,
-                            stride_bytes,
-                            offset_bytes,
-                        );
-                    }
-                }
-            }
+            } => self.consume_native_vertex_attribute_pointer(
+                *attribute_location,
+                *components,
+                *gl_type,
+                *normalized,
+                *stride_bytes,
+                *offset_bytes,
+            ),
         }
     }
 
@@ -2843,22 +3036,16 @@ impl DesktopNativeOpenGlDriver<'_> {
                 if !self.draw_target_available {
                     return;
                 }
-                if let Some(program) = self.existing_program(*program_handle) {
-                    unsafe {
-                        self.gl.use_program(Some(program));
-                    }
-                    *self.current_program = Some(*program_handle);
-                    self.upload_builtin_sprite_uniforms_for_program(*program_handle, program);
-                }
+                self.consume_native_use_program(*program_handle);
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture {
                 texture_unit,
-            } => unsafe {
+            } => {
                 if !self.draw_target_available {
                     return;
                 }
-                self.gl.active_texture(*texture_unit);
-            },
+                self.consume_native_active_texture(*texture_unit);
+            }
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
                 target,
                 texture_handle,
@@ -2866,11 +3053,7 @@ impl DesktopNativeOpenGlDriver<'_> {
                 if !self.draw_target_available {
                     return;
                 }
-                if let Some(texture) = self.texture_for_handle(*texture_handle) {
-                    unsafe {
-                        self.gl.bind_texture(*target, Some(texture));
-                    }
-                }
+                self.consume_native_bind_texture(*target, *texture_handle);
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
                 vertex_array_handle,
@@ -2878,12 +3061,7 @@ impl DesktopNativeOpenGlDriver<'_> {
                 if !self.draw_target_available {
                     return;
                 }
-                if let Some(vertex_array) = self.vertex_array_for_handle(*vertex_array_handle) {
-                    unsafe {
-                        self.gl.bind_vertex_array(Some(vertex_array));
-                    }
-                    *self.current_vertex_array = Some(*vertex_array_handle);
-                }
+                self.consume_native_bind_vertex_array_for_draw(*vertex_array_handle);
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements {
                 primitive_type,
@@ -3042,11 +3220,19 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
     ) -> mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState {
         desktop_native_trace("runtime.submit: clear backbuffer");
         self.clear_backbuffer();
+        self.current_program = None;
+        self.current_vertex_array = None;
         let surface_size = self
             .state
             .surface_size
             .unwrap_or_else(|| self.window_surface_size());
         let native_errors_start = self.native_errors.len();
+        let buffer_upload_cache_hits_start = self.buffer_upload_cache_hits;
+        let buffer_upload_cache_misses_start = self.buffer_upload_cache_misses;
+        let vertex_attribute_cache_hits_start = self.vertex_attribute_cache_hits;
+        let vertex_attribute_cache_misses_start = self.vertex_attribute_cache_misses;
+        let draw_state_cache_hits_start = self.draw_state_cache_hits;
+        let draw_state_cache_misses_start = self.draw_state_cache_misses;
         let (driver_state, invalid_draw_commands) = {
             let mut driver = DesktopNativeOpenGlDriver {
                 gl: &self.gl,
@@ -3055,6 +3241,9 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
                 framebuffers: &mut self.framebuffers,
                 buffers: &mut self.buffers,
                 vertex_arrays: &mut self.vertex_arrays,
+                buffer_upload_cache: &mut self.buffer_upload_cache,
+                vertex_attribute_enabled_cache: &mut self.vertex_attribute_enabled_cache,
+                vertex_attribute_layout_cache: &mut self.vertex_attribute_layout_cache,
                 shaders: &mut self.shaders,
                 programs: &mut self.programs,
                 program_shaders: &mut self.program_shaders,
@@ -3068,9 +3257,18 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
                 shader_asset_root_shaders_dir_exists: self.shader_asset_root_shaders_dir_exists,
                 current_program: &mut self.current_program,
                 current_vertex_array: &mut self.current_vertex_array,
+                active_texture_unit: &mut self.active_texture_unit,
+                bound_textures: &mut self.bound_textures,
                 bound_render_target: None,
+                bound_buffer_handles: std::collections::BTreeMap::new(),
                 draw_target_available: true,
                 invalid_draw_commands: 0,
+                buffer_upload_cache_hits: &mut self.buffer_upload_cache_hits,
+                buffer_upload_cache_misses: &mut self.buffer_upload_cache_misses,
+                vertex_attribute_cache_hits: &mut self.vertex_attribute_cache_hits,
+                vertex_attribute_cache_misses: &mut self.vertex_attribute_cache_misses,
+                draw_state_cache_hits: &mut self.draw_state_cache_hits,
+                draw_state_cache_misses: &mut self.draw_state_cache_misses,
                 native_errors: &mut self.native_errors,
             };
             desktop_native_trace("runtime.submit: drive native OpenGL driver");
@@ -3078,10 +3276,21 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
             (driver_state, driver.invalid_draw_commands)
         };
         let frame_native_errors = &self.native_errors[native_errors_start..];
+        let frame_buffer_upload_cache_hits =
+            self.buffer_upload_cache_hits - buffer_upload_cache_hits_start;
+        let frame_buffer_upload_cache_misses =
+            self.buffer_upload_cache_misses - buffer_upload_cache_misses_start;
+        let frame_vertex_attribute_cache_hits =
+            self.vertex_attribute_cache_hits - vertex_attribute_cache_hits_start;
+        let frame_vertex_attribute_cache_misses =
+            self.vertex_attribute_cache_misses - vertex_attribute_cache_misses_start;
+        let frame_draw_state_cache_hits = self.draw_state_cache_hits - draw_state_cache_hits_start;
+        let frame_draw_state_cache_misses =
+            self.draw_state_cache_misses - draw_state_cache_misses_start;
         if desktop_native_trace_summary_enabled() {
             let gl_error = unsafe { self.gl.get_error() };
             desktop_native_trace_summary(format!(
-                "runtime.submit: driver done framebuffer_attachments={} texture_upload_commands={} sprite_mesh_upload_commands={} resolve_mesh_upload_commands={} shader_commands={} draw_commands={} resolve_draw_commands={} resolve_commands={} invalid_draw_commands={} textures={} vaos={} buffers={} programs={} gl_error=0x{gl_error:04x}",
+                "runtime.submit: driver done framebuffer_attachments={} texture_upload_commands={} sprite_mesh_upload_commands={} resolve_mesh_upload_commands={} shader_commands={} draw_commands={} resolve_draw_commands={} resolve_commands={} invalid_draw_commands={} buffer_upload_cache_hits={} buffer_upload_cache_misses={} vertex_attribute_cache_hits={} vertex_attribute_cache_misses={} draw_state_cache_hits={} draw_state_cache_misses={} textures={} vaos={} buffers={} programs={} gl_error=0x{gl_error:04x}",
                 driver_state.framebuffer_attachment_plans,
                 driver_state.texture_upload_commands,
                 driver_state.sprite_mesh_upload_commands,
@@ -3091,6 +3300,12 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
                 driver_state.resolve_draw_commands,
                 driver_state.resolve_commands,
                 invalid_draw_commands,
+                frame_buffer_upload_cache_hits,
+                frame_buffer_upload_cache_misses,
+                frame_vertex_attribute_cache_hits,
+                frame_vertex_attribute_cache_misses,
+                frame_draw_state_cache_hits,
+                frame_draw_state_cache_misses,
                 self.textures.len(),
                 self.vertex_arrays.len(),
                 self.buffers.len(),
