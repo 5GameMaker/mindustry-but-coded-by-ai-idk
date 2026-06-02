@@ -486,6 +486,22 @@ pub struct DesktopSettingsMenuEntry {
     pub target: &'static str,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopSettingsDynamicCategory {
+    pub id: String,
+    pub label: String,
+    pub icon: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DesktopSettingsVisibleMenuEntry {
+    label: String,
+    icon: String,
+    target: String,
+    dynamic_index: Option<usize>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DesktopSettingsPrefGroup {
     pub table: &'static str,
@@ -645,6 +661,7 @@ pub enum DesktopSettingsPage {
     Graphics,
     Sound,
     Data,
+    DynamicCategory,
 }
 
 impl DesktopSettingsPage {
@@ -655,6 +672,7 @@ impl DesktopSettingsPage {
             Self::Graphics => "graphics",
             Self::Sound => "sound",
             Self::Data => "data",
+            Self::DynamicCategory => "dynamic-category",
         }
     }
 }
@@ -684,6 +702,7 @@ impl Default for DesktopSettingsDialogState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopSettingsAction {
     OpenPage(DesktopSettingsPage),
+    OpenDynamicCategory(usize),
     OpenLanguageDialog,
     OpenControlsDialog,
     CloseChildDialog,
@@ -17821,6 +17840,8 @@ pub struct DesktopLauncher {
     pub schematic_cards: Vec<DesktopSchematicCardEntry>,
     pub last_schematic_card_action: Option<DesktopSchematicCardAction>,
     pub settings_dialog_state: DesktopSettingsDialogState,
+    pub settings_dynamic_categories: Vec<DesktopSettingsDynamicCategory>,
+    pub settings_dynamic_category_page_index: Option<usize>,
     pub settings_child_dialog: Option<DesktopSettingsChildDialog>,
     pub settings_planet_chooser_open: bool,
     pub settings_locale: String,
@@ -19007,6 +19028,8 @@ impl DesktopLauncher {
             schematic_cards: Vec::new(),
             last_schematic_card_action: None,
             settings_dialog_state: DesktopSettingsDialogState::default(),
+            settings_dynamic_categories: Vec::new(),
+            settings_dynamic_category_page_index: None,
             settings_child_dialog: None,
             settings_planet_chooser_open: false,
             settings_locale: default_locale.clone(),
@@ -23460,6 +23483,7 @@ impl DesktopLauncher {
                 self.load_game_error = None;
             } else if route == DesktopMenuRoute::Settings {
                 self.settings_dialog_state = DesktopSettingsDialogState::default();
+                self.settings_dynamic_category_page_index = None;
                 self.settings_child_dialog = None;
                 self.settings_planet_chooser_open = false;
                 self.last_settings_action = None;
@@ -25088,7 +25112,9 @@ impl DesktopLauncher {
             | DesktopSettingsPage::Sound => {
                 self.reset_settings_table_overrides(self.settings_dialog_state.page.key())
             }
-            DesktopSettingsPage::Main | DesktopSettingsPage::Data => 0,
+            DesktopSettingsPage::Main
+            | DesktopSettingsPage::Data
+            | DesktopSettingsPage::DynamicCategory => 0,
         }
     }
 
@@ -25245,11 +25271,57 @@ impl DesktopLauncher {
         entry.target != "controls-dialog" || self.settings_controls_menu_entry_visible()
     }
 
-    fn settings_visible_main_menu_entries(&self) -> Vec<&'static DesktopSettingsMenuEntry> {
-        SETTINGS_MENU_ENTRIES
+    pub fn add_settings_dynamic_category(
+        &mut self,
+        id: impl Into<String>,
+        label: impl Into<String>,
+        icon: impl Into<String>,
+        description: impl Into<String>,
+    ) -> usize {
+        let id = id.into();
+        if let Some(index) = self
+            .settings_dynamic_categories
+            .iter()
+            .position(|category| category.id == id)
+        {
+            self.settings_dynamic_categories[index] = DesktopSettingsDynamicCategory {
+                id,
+                label: label.into(),
+                icon: icon.into(),
+                description: description.into(),
+            };
+            return index;
+        }
+        self.settings_dynamic_categories
+            .push(DesktopSettingsDynamicCategory {
+                id,
+                label: label.into(),
+                icon: icon.into(),
+                description: description.into(),
+            });
+        self.settings_dynamic_categories.len() - 1
+    }
+
+    fn settings_visible_main_menu_entries(&self) -> Vec<DesktopSettingsVisibleMenuEntry> {
+        let mut entries = SETTINGS_MENU_ENTRIES
             .iter()
             .filter(|entry| self.settings_main_menu_entry_visible(entry))
-            .collect()
+            .map(|entry| DesktopSettingsVisibleMenuEntry {
+                label: entry.label.to_string(),
+                icon: entry.icon.to_string(),
+                target: entry.target.to_string(),
+                dynamic_index: None,
+            })
+            .collect::<Vec<_>>();
+        entries.extend(self.settings_dynamic_categories.iter().enumerate().map(
+            |(index, category)| DesktopSettingsVisibleMenuEntry {
+                label: category.label.clone(),
+                icon: category.icon.clone(),
+                target: format!("dynamic:{}", category.id),
+                dynamic_index: Some(index),
+            },
+        ));
+        entries
     }
 
     fn settings_data_action_visible(&self, action: &DesktopSettingsDataAction) -> bool {
@@ -25534,7 +25606,7 @@ impl DesktopLauncher {
                 rect.center().y,
             );
             pass.push(RenderCommand::draw_text_styled(
-                desktop_ui_icon_glyph_or_label(entry.icon, entry.icon),
+                desktop_ui_icon_glyph_or_label(entry.icon.as_str(), entry.icon.as_str()),
                 icon_center,
                 [0.86, 0.92, 0.98, 1.0],
                 17.0,
@@ -25547,7 +25619,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.032 + index as f32 * 0.0001,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                self.localize_bundle_markup_text(entry.label),
+                self.localize_bundle_markup_text(entry.label.as_str()),
                 RenderPoint::new(
                     icon_center.x
                         + SETTINGS_MENU_BUTTON_ICON_SIZE * 0.5
@@ -25709,7 +25781,7 @@ impl DesktopLauncher {
                     Layer::END_PIXELED + 0.082,
                 );
             }
-            DesktopSettingsPage::Data => {
+            DesktopSettingsPage::Data | DesktopSettingsPage::DynamicCategory => {
                 self.push_settings_text_button(
                     pass,
                     Self::settings_back_button_rect_for_panel(panel),
@@ -25774,6 +25846,87 @@ impl DesktopLauncher {
                 "flatt",
             );
         }
+    }
+
+    fn push_settings_dynamic_category_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(category) = self
+            .settings_dynamic_category_page_index
+            .and_then(|index| self.settings_dynamic_categories.get(index))
+        else {
+            return;
+        };
+        let container = RenderRect::new(
+            panel.x + 44.0,
+            panel.y + 112.0,
+            panel.width - 88.0,
+            panel.height - 196.0,
+        );
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            container,
+            [1.0, 1.0, 1.0, 0.86],
+            0.0,
+            Layer::END_PIXELED + 0.021,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            container,
+            [0.32, 0.44, 0.54, 0.82],
+            1.0,
+            Layer::END_PIXELED + 0.022,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label(category.icon.as_str(), category.icon.as_str()),
+            RenderPoint::new(container.center().x, container.y + container.height - 58.0),
+            [0.86, 0.92, 0.98, 1.0],
+            24.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.026,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text(category.label.as_str()),
+            RenderPoint::new(container.center().x, container.y + container.height - 94.0),
+            [0.94, 0.98, 1.0, 1.0],
+            16.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.027,
+        ));
+        let description = if category.description.trim().is_empty() {
+            "SettingsMenuDialog.addCategory(...)".to_string()
+        } else {
+            category.description.clone()
+        };
+        pass.push(RenderCommand::draw_text_styled(
+            description,
+            RenderPoint::new(container.x + 28.0, container.center().y + 10.0),
+            [0.72, 0.80, 0.86, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_wrap_width(container.width - 56.0)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.028,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!("dynamic target: {}", category.id),
+            RenderPoint::new(container.x + 28.0, container.y + 42.0),
+            [0.54, 0.66, 0.76, 1.0],
+            9.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.029,
+        ));
     }
 
     fn push_settings_child_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -26856,7 +27009,7 @@ impl DesktopLauncher {
                     lines.push(format!(
                         "category: {} {} target:{}",
                         entry.label,
-                        Self::settings_icon_line(entry.icon),
+                        Self::settings_icon_line(entry.icon.as_str()),
                         entry.target
                     ));
                 }
@@ -26897,6 +27050,26 @@ impl DesktopLauncher {
                         action.label,
                         Self::settings_icon_line(action.icon)
                     ));
+                }
+                lines.push("button: back".into());
+            }
+            DesktopSettingsPage::DynamicCategory => {
+                if let Some(category) = self
+                    .settings_dynamic_category_page_index
+                    .and_then(|index| self.settings_dynamic_categories.get(index))
+                {
+                    lines.push(format!("dynamic category: {}", category.id));
+                    lines.push(format!(
+                        "category: {} {} target:dynamic:{}",
+                        category.label,
+                        Self::settings_icon_line(category.icon.as_str()),
+                        category.id
+                    ));
+                    if !category.description.trim().is_empty() {
+                        lines.push(format!("description: {}", category.description));
+                    }
+                } else {
+                    lines.push("dynamic category: missing".into());
                 }
                 lines.push("button: back".into());
             }
@@ -27063,10 +27236,13 @@ impl DesktopLauncher {
         )
     }
 
-    fn settings_action_for_main_menu_entry(
-        entry: &DesktopSettingsMenuEntry,
+    fn settings_action_for_visible_main_menu_entry(
+        entry: &DesktopSettingsVisibleMenuEntry,
     ) -> Option<DesktopSettingsAction> {
-        match entry.target {
+        if let Some(index) = entry.dynamic_index {
+            return Some(DesktopSettingsAction::OpenDynamicCategory(index));
+        }
+        match entry.target.as_str() {
             "game" => Some(DesktopSettingsAction::OpenPage(DesktopSettingsPage::Game)),
             "graphics" => Some(DesktopSettingsAction::OpenPage(
                 DesktopSettingsPage::Graphics,
@@ -27082,7 +27258,7 @@ impl DesktopLauncher {
     fn settings_action_for_main_entry(&self, index: usize) -> Option<DesktopSettingsAction> {
         self.settings_visible_main_menu_entries()
             .get(index)
-            .and_then(|entry| Self::settings_action_for_main_menu_entry(entry))
+            .and_then(Self::settings_action_for_visible_main_menu_entry)
     }
 
     fn settings_route_action_for_line(&self, line_index: usize) -> Option<DesktopSettingsAction> {
@@ -27115,6 +27291,14 @@ impl DesktopLauncher {
                 } else {
                     None
                 }
+            }
+            DesktopSettingsPage::DynamicCategory => {
+                let has_description = self
+                    .settings_dynamic_category_page_index
+                    .and_then(|index| self.settings_dynamic_categories.get(index))
+                    .is_some_and(|category| !category.description.trim().is_empty());
+                let back_line = if has_description { 6 } else { 5 };
+                (line_index == back_line).then_some(DesktopSettingsAction::BackToMain)
             }
         }
     }
@@ -29466,6 +29650,7 @@ impl DesktopLauncher {
             DesktopMenuRoute::Settings => {
                 self.settings_dialog_state = DesktopSettingsDialogState::default();
                 self.settings_child_dialog = None;
+                self.settings_dynamic_category_page_index = None;
                 self.settings_planet_chooser_open = false;
                 self.last_settings_action = None;
                 self.last_settings_hovered_control = None;
@@ -35835,10 +36020,25 @@ impl DesktopLauncher {
         match action {
             DesktopSettingsAction::OpenPage(page) => {
                 self.settings_dialog_state.page = page;
+                self.settings_dynamic_category_page_index = None;
                 self.settings_planet_chooser_open = false;
                 self.last_settings_hovered_control = None;
                 self.last_settings_pressed_control = None;
                 self.settings_scroll_drag_state = None;
+            }
+            DesktopSettingsAction::OpenDynamicCategory(index) => {
+                if self.settings_dynamic_categories.get(index).is_some() {
+                    self.settings_dialog_state.page = DesktopSettingsPage::DynamicCategory;
+                    self.settings_dynamic_category_page_index = Some(index);
+                    self.settings_child_dialog = None;
+                    self.settings_planet_chooser_open = false;
+                    self.settings_keybind_search_focused = false;
+                    self.last_settings_rebind_key = None;
+                    self.settings_keybind_pending_axis_min = None;
+                    self.last_settings_hovered_control = None;
+                    self.last_settings_pressed_control = None;
+                    self.settings_scroll_drag_state = None;
+                }
             }
             DesktopSettingsAction::BackToMain => {
                 self.settings_child_dialog = None;
@@ -35851,6 +36051,7 @@ impl DesktopLauncher {
                     self.active_menu_route = None;
                 } else {
                     self.settings_dialog_state.page = DesktopSettingsPage::Main;
+                    self.settings_dynamic_category_page_index = None;
                 }
                 self.last_settings_hovered_control = None;
                 self.last_settings_pressed_control = None;
@@ -49463,6 +49664,11 @@ impl DesktopLauncher {
             && self.settings_dialog_state.page == DesktopSettingsPage::Data
         {
             self.push_settings_data_page(pass, panel);
+            self.push_settings_route_buttons(pass, panel);
+        } else if route == DesktopMenuRoute::Settings
+            && self.settings_dialog_state.page == DesktopSettingsPage::DynamicCategory
+        {
+            self.push_settings_dynamic_category_page(pass, panel);
             self.push_settings_route_buttons(pass, panel);
         } else if route == DesktopMenuRoute::Settings
             && matches!(
@@ -76213,7 +76419,7 @@ repo: "Beta/Override"
         assert!(texts.contains(&"添加服务器"));
         assert!(texts.contains(&"刷新"));
         assert!(texts.contains(&"本地服务器"));
-        assert!(texts.contains(&"已保存的服务器"));
+        assert!(texts.contains(&"远程服务器"));
         assert!(
             !texts.contains(&"JOIN GAME"),
             "route shell title should not bypass Core.bundle with hard-coded all-caps text"
@@ -79387,6 +79593,95 @@ repo: "Beta/Override"
 
         assert!(launcher.apply_menu_back_key());
         assert_eq!(launcher.active_menu_route, None);
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::BackToMain)
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_settings_dynamic_categories_join_main_menu_model() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        let category_index = launcher.add_settings_dynamic_category(
+            "example-mod",
+            "Mod Settings",
+            "settings",
+            "Dynamic category from SettingsMenuDialog.addCategory",
+        );
+        assert_eq!(category_index, 0);
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+
+        let entries = launcher.settings_visible_main_menu_entries();
+        assert_eq!(entries.len(), 7);
+        assert_eq!(
+            entries.last().map(|entry| entry.label.as_str()),
+            Some("Mod Settings")
+        );
+        assert_eq!(
+            entries.last().and_then(|entry| entry.dynamic_index),
+            Some(category_index)
+        );
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Settings);
+        assert!(lines.contains(&"categories: 7".to_string()));
+        assert!(lines.iter().any(|line| {
+            line.contains("category: Mod Settings") && line.contains("target:dynamic:example-mod")
+        }));
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Settings,
+        );
+        let dynamic_button =
+            DesktopLauncher::settings_main_menu_button_rect_for_panel(panel, 6).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                dynamic_button.x,
+                dynamic_button.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::OpenDynamicCategory(category_index)
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::Settings(
+            super::DesktopSettingsAction::OpenDynamicCategory(category_index),
+        ));
+        assert_eq!(
+            launcher.settings_dialog_state.page,
+            super::DesktopSettingsPage::DynamicCategory
+        );
+        assert_eq!(
+            launcher.settings_dynamic_category_page_index,
+            Some(category_index)
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("dynamic settings category page should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"Mod Settings"));
+        assert!(texts.contains(&"Dynamic category from SettingsMenuDialog.addCategory"));
+        assert!(texts.contains(&"dynamic target: example-mod"));
+
+        assert!(launcher.apply_menu_back_key());
+        assert_eq!(
+            launcher.settings_dialog_state.page,
+            super::DesktopSettingsPage::Main
+        );
+        assert_eq!(launcher.settings_dynamic_category_page_index, None);
         assert_eq!(
             launcher.last_settings_action,
             Some(super::DesktopSettingsAction::BackToMain)

@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 764. SettingsMenuDialog 动态分类入口接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **89.8%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `SettingsMenuDialog.addCategory(...)` 允许 mod/扩展把自定义 category 追加到 Settings 主菜单；
+  - Java `rebuildMenu()` 先放固定 Game/Graphics/Sound/Language/Controls/Data，再追加动态 categories；
+  - Rust 此前 Settings 主菜单只有静态 `SETTINGS_MENU_ENTRIES`，渲染/点击/route lines 仍依赖字符串 target。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopSettingsDynamicCategory` 与统一的 visible menu entry 模型；
+    - 新增 `add_settings_dynamic_category(...)`，动态分类追加到 Settings 主菜单末尾；
+    - `settings_visible_main_menu_entries()` 统一供渲染、route lines、点击命中和 action 分发使用；
+    - 新增 `DesktopSettingsAction::OpenDynamicCategory` 与 `DesktopSettingsPage::DynamicCategory`，点击动态分类进入 Settings 内部动态页；
+    - Back/Escape 可从动态页返回 Settings main，关闭 Settings route 时清理动态页选中状态；
+    - 同步修正 Join 本地化旧测试中已移除的 `server.saved` 标题栏摘要断言。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_dynamic_categories_join_main_menu_model --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop settings --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 动态 category 页当前是前端入口/页面壳，后续需要接入真实 settings table builder 与 mod lifecycle；
+  - Java DataDialog 仍比当前 Rust Data page 更像独立 dialog，后续可继续对齐。
+
 ## 763. ModsDialog releases 子弹窗与按钮图标对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
