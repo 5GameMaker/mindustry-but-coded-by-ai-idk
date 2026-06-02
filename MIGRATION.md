@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 766. ModsDialog unsupported toggle 禁用对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **90.0%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `ModsDialog` 的本地 mod 卡片右侧 enable/disable 按钮会执行 `mods.setEnabled(item, !item.enabled())`，但按钮声明了 `.disabled(!item.isSupported())`；
+  - Java `LoadedMod.isSupported()` 在非 headless 下会把 outdated / blacklisted / 低于 `meta.minGameVersion` 的 mod 视为不支持；
+  - 依赖缺失与内容错误不等同于 `isSupported() == false`，不应把这些状态粗暴禁用。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `mods_route_mod_is_supported_at_index(...)`，把 `IncompatibleGame` 与 `Blacklisted` 映射为 unsupported；
+    - `dispatch_mods_toggle_enabled(...)` 对 unsupported mod 直接拒绝切换，避免绕过 UI；
+    - `mods_route_mod_card_action_at_point(...)` 对 unsupported toggle 不再返回 `ToggleModsEnabled`；
+    - `mods_route_mod_card_index_at_point(...)` 排除卡片 action 按钮区域，禁用按钮点击不会透传成打开详情；
+    - `push_mods_route_page(...)` 对 unsupported toggle 做灰化视觉，删除按钮仍保留可用。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_toggle_enabled_and_delete_confirm_follow_java_semantics --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop mods_route --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - ModsDialog 关闭/隐藏时的 `requiresReload() -> mods.reload()` 钩子仍需继续对齐 Java；
+  - Steam Workshop/外部 listing 的 delete/link 分支仍未完全还原；
+  - Mods route 仍是 Rust route/page 承载 Java dialog 语义，后续需继续收紧 detail/browser/release/import 的层级和关闭行为。
+
 ## 765. Settings DataDialog 与 PlanetDataDialog 双层标题对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

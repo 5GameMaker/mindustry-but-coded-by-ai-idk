@@ -36248,6 +36248,9 @@ impl DesktopLauncher {
             return false;
         }
         self.sync_mods_route_state_len();
+        if !self.mods_route_mod_is_supported_at_index(index) {
+            return false;
+        }
         let state = &mut self.last_mods_directory_mod_states[index];
         state.enabled = !state.enabled;
         state.requires_reload = true;
@@ -47784,7 +47787,9 @@ impl DesktopLauncher {
             .enumerate()
             .find_map(|(visible_index, mod_index)| {
                 let card = Self::mods_route_mod_card_rect_for_panel(panel, visible_index);
-                if Self::mods_route_mod_card_action_button_rect(card, 0).contains_point(point) {
+                if Self::mods_route_mod_card_action_button_rect(card, 0).contains_point(point)
+                    && self.mods_route_mod_is_supported_at_index(mod_index)
+                {
                     return Some(DesktopMenuRouteShellAction::ToggleModsEnabled(mod_index));
                 }
                 if Self::mods_route_mod_card_action_button_rect(card, 1).contains_point(point) {
@@ -47806,9 +47811,13 @@ impl DesktopLauncher {
             .take(6)
             .enumerate()
             .find_map(|(visible_index, mod_index)| {
-                Self::mods_route_mod_card_rect_for_panel(panel, visible_index)
-                    .contains_point(point)
-                    .then_some(mod_index)
+                let card = Self::mods_route_mod_card_rect_for_panel(panel, visible_index);
+                if Self::mods_route_mod_card_action_button_rect(card, 0).contains_point(point)
+                    || Self::mods_route_mod_card_action_button_rect(card, 1).contains_point(point)
+                {
+                    return None;
+                }
+                card.contains_point(point).then_some(mod_index)
             })
     }
 
@@ -47980,6 +47989,14 @@ impl DesktopLauncher {
 
     fn mods_route_mod_enabled_at_index(&self, index: usize) -> bool {
         self.mods_route_mod_state_snapshot_at_index(index).enabled
+    }
+
+    fn mods_route_mod_is_supported_at_index(&self, index: usize) -> bool {
+        !matches!(
+            self.mods_route_mod_state_snapshot_at_index(index).state,
+            DesktopModsRouteModStateKind::IncompatibleGame
+                | DesktopModsRouteModStateKind::Blacklisted
+        )
     }
 
     fn mods_route_mod_repo_at_index(&self, index: usize) -> Option<&str> {
@@ -49538,7 +49555,8 @@ impl DesktopLauncher {
                     Layer::END_PIXELED + 0.032 + visible_index as f32 * 0.001,
                 ));
                 let enabled = self.mods_route_mod_enabled_at_index(index);
-                for (button_index, (label, icon)) in [
+                let supported = self.mods_route_mod_is_supported_at_index(index);
+                for (button_index, (label, icon, actionable)) in [
                     (
                         if enabled {
                             self.mods_route_localize_status_bundle_text("@mod.disable")
@@ -49546,8 +49564,9 @@ impl DesktopLauncher {
                             self.mods_route_localize_status_bundle_text("@mod.enable")
                         },
                         if enabled { "down" } else { "up" },
+                        supported,
                     ),
-                    (self.localize_bundle_markup_text("@delete"), "trash"),
+                    (self.localize_bundle_markup_text("@delete"), "trash", true),
                 ]
                 .into_iter()
                 .enumerate()
@@ -49556,14 +49575,22 @@ impl DesktopLauncher {
                     pass.push(RenderCommand::draw_sprite(
                         Self::settings_text_button_symbol("grayt", false, false),
                         button,
-                        [1.0, 1.0, 1.0, 0.76],
+                        if actionable {
+                            [1.0, 1.0, 1.0, 0.76]
+                        } else {
+                            [0.58, 0.62, 0.66, 0.58]
+                        },
                         0.0,
                         Layer::END_PIXELED + 0.033 + visible_index as f32 * 0.001,
                     ));
                     pass.push(RenderCommand::draw_text_styled(
                         desktop_ui_icon_glyph_or_label(icon, icon),
                         RenderPoint::new(button.center().x, button.center().y + 4.0),
-                        [0.80, 0.90, 0.98, 1.0],
+                        if actionable {
+                            [0.80, 0.90, 0.98, 1.0]
+                        } else {
+                            [0.42, 0.48, 0.54, 0.86]
+                        },
                         10.0,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Center)
@@ -49575,7 +49602,11 @@ impl DesktopLauncher {
                     pass.push(RenderCommand::draw_text_styled(
                         label,
                         RenderPoint::new(button.center().x, button.y - 7.0),
-                        [0.70, 0.80, 0.88, 1.0],
+                        if actionable {
+                            [0.70, 0.80, 0.88, 1.0]
+                        } else {
+                            [0.40, 0.46, 0.52, 0.82]
+                        },
                         6.0,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Center)
@@ -66247,6 +66278,28 @@ version: "2.0.0"
         assert!(texts.contains(&"Enable"));
 
         let beta_card = DesktopLauncher::mods_route_mod_card_rect_for_panel(panel, 1);
+        launcher.last_mods_directory_mod_states[1].state =
+            super::DesktopModsRouteModStateKind::IncompatibleGame;
+        let beta_toggle =
+            DesktopLauncher::mods_route_mod_card_action_button_rect(beta_card, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                beta_toggle.x,
+                beta_toggle.y
+            ),
+            None,
+            "Java ModsDialog disables the enable/disable button when item.isSupported() is false"
+        );
+        assert!(
+            !launcher.dispatch_mods_toggle_enabled(1),
+            "unsupported mods must not be toggled through the direct dispatcher either"
+        );
+        assert!(
+            launcher.last_mods_directory_mod_states[1].enabled,
+            "unsupported toggle attempt should leave enabled state unchanged"
+        );
+
         let delete = DesktopLauncher::mods_route_mod_card_action_button_rect(beta_card, 1).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(surface, delete.x, delete.y),
