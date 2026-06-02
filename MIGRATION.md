@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 792. Mods Browser Java 风格选择弹窗
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **92.6%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容、性能收口与所有子菜单接近原版。
+- Java 对照：
+  - `ModsDialog.showModBrowser()` 中点击 browser listing 后先创建 `BaseDialog sel`，显示 mod 描述/作者，再提供 `Back`、`Add/Reinstall`、`Open GitHub`、`View Releases`；
+  - `View Releases` 打开第二层 releases 弹窗，关闭 releases 后回到 selection 弹窗。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `mods_browser_selected_mod_index` 状态和 `OpenModsBrowserSelection / CloseModsBrowserSelection` route action；
+    - browser card 正文点击从直接打开本地 installed detail 改为打开 browser selection modal；
+    - selection modal 渲染 mod 名、description、author、repo 摘要，以及 Back/Add 或 Reinstall/Open GitHub/View Releases 按钮；
+    - hit-test 优先级调整为 releases modal > selection modal > browser list，避免底层卡片吃到 overlay 点击；
+    - back key 顺序调整为先关闭 releases，再关闭 selection，再关闭 browser；
+    - 关闭/切换 Mods、Import、其他 route 时统一清理 browser selection/releases 状态。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop mods_browser --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - browser 数据源仍主要来自当前 mods snapshot，尚未接真实 GitHub listing/stars/date feed；
+  - releases 仍是内部合成/过渡 release entry，未完全实现 Java 的异步 fetching、empty/error、多 release 下载安装链路；
+  - 模组安装下载、依赖/冲突处理和真实联机可玩性仍需继续迁移。
+
 ## 791. Native OpenGL 菜单帧上传与状态缓存
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
