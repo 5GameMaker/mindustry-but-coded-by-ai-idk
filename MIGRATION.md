@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 759. LoadDialog 存档标题默认值对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **89.3%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `LoadDialog` 列表标题、搜索和重命名输入初值使用 `SaveSlot.getName()`；
+  - Java `SaveSlot.getName()` 未设置名称时默认返回 `untitled`，地图名只作为 `save.map` 元信息显示；
+  - Rust 此前默认标题回退到 `meta.map_name` 或 slot index，导致未命名存档第一眼标题、搜索命中和重命名语义偏离原版。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `load_game_slot_title(...)` 改为未命名默认 `untitled`；
+    - 保留 `load_game_slot_map_line(...)` 使用地图名，确保地图元信息仍在 `@save.map` 行显示；
+    - 测试更新为：未命名 slot 标题显示 `[accent]untitled`，搜索 `Map 2` 不命中未命名 slot；只有写入 Java settings 风格 slot name 后才按 `slot.getName()` 搜索命中。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop load_game --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop save_dialog --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `LoadDialog.slot.cautiousLoad(...)` 缺失 mod 确认仍需继续迁移；
+  - Load/Save 失败后的 route 收口语义仍需继续对齐 Java 的 `hide()`/`ui.loadfrag` 节奏。
+
 ## 758. JoinDialog section 标题栏摘要瘦身
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -23623,11 +23623,8 @@ impl DesktopLauncher {
         merged
     }
 
-    fn load_game_slot_title(slot: &SaveSlotRecord) -> String {
-        slot.meta
-            .as_ref()
-            .and_then(|meta| meta.map_name.clone())
-            .unwrap_or_else(|| slot.index())
+    fn load_game_slot_title(_slot: &SaveSlotRecord) -> String {
+        "untitled".to_string()
     }
 
     fn load_game_slot_display_title(&self, slot: &SaveSlotRecord) -> String {
@@ -77130,7 +77127,7 @@ repo: "Beta/Override"
 
         let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::LoadGame);
         assert!(lines.contains(&"save slots: 2".to_string()));
-        assert!(lines.iter().any(|line| line.contains("#0 New Map")));
+        assert!(lines.iter().any(|line| line.contains("#0 untitled")));
         assert!(lines.iter().any(|line| line.contains("@save.wave: 9")));
         assert!(lines
             .iter()
@@ -77234,7 +77231,7 @@ repo: "Beta/Override"
                 >= 4,
             "Java LoadingFragment should draw the two full-width WarningBar edge/stripe groups"
         );
-        assert!(texts.contains(&"[accent]New Map"));
+        assert!(texts.contains(&"[accent]untitled"));
         assert!(texts.contains(&"@save.map: New Map"));
         assert!(texts.contains(&"@mode.attack.name / @save.wave: 9"));
         assert!(texts.contains(&"@save.autosave: @on"));
@@ -77846,7 +77843,7 @@ repo: "Beta/Override"
         );
         let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::LoadGame);
         assert!(lines.contains(&"hidden modes: attack".to_string()));
-        assert!(lines.iter().any(|line| line.contains("#0 Old Map")));
+        assert!(lines.iter().any(|line| line.contains("#0 untitled")));
         assert!(!lines.iter().any(|line| line.contains("New Map")));
 
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
@@ -77863,7 +77860,7 @@ repo: "Beta/Override"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"[accent]Old Map"));
+        assert!(texts.contains(&"[accent]untitled"));
         assert!(!texts.contains(&"[accent]New Map"));
         assert!(texts.contains(&"1 / 2"));
 
@@ -78305,8 +78302,47 @@ repo: "Beta/Override"
         launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("Map 2".into())]);
         assert_eq!(launcher.load_game_search, "Map 2");
         assert_eq!(launcher.load_game_scroll_offset, 0);
+        assert!(
+            launcher.filtered_load_game_slot_indices().is_empty(),
+            "Java LoadDialog search matches slot.getName(), not the map-name metadata line"
+        );
+        let empty_search_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let empty_search_texts = empty_search_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("empty map-name search should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(empty_search_texts
+            .contains(&launcher.localize_bundle_markup_text("@save.none").as_str()));
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ClearLoadGameSearch,
+        );
+        let map2_slot_index = launcher
+            .load_game_slots
+            .iter()
+            .position(|slot| {
+                slot.meta.as_ref().and_then(|meta| meta.map_name.as_deref()) == Some("Map 2")
+            })
+            .expect("fixture should include Map 2 metadata");
+        let map2_name_key = launcher.load_game_slots[map2_slot_index].name_setting_key();
+        launcher
+            .load_game_slot_names
+            .insert(map2_name_key.clone(), "Map 2".to_string());
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::FocusLoadGameSearch,
+        );
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("Map 2".into())]);
         let filtered = launcher.filtered_load_game_slot_indices();
         assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0], map2_slot_index);
         assert_eq!(
             launcher.load_game_slots[filtered[0]]
                 .meta
