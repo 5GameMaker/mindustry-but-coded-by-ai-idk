@@ -26031,6 +26031,9 @@ impl DesktopLauncher {
         let offset = self
             .settings_keybind_scroll_offset
             .min(item_count.saturating_sub(SETTINGS_KEYBIND_VISIBLE_ROWS));
+        let list_clip = Self::settings_keybind_list_clip_rect(dialog);
+        let scrollpane = Self::settings_keybind_scrollpane_rect(dialog);
+        pass.push(RenderCommand::set_clip(list_clip));
         let mut last_category = filtered_specs[..offset.min(filtered_specs.len())]
             .iter()
             .rev()
@@ -26126,6 +26129,15 @@ impl DesktopLauncher {
                 self.settings_keybind_overrides.contains_key(spec.name),
             );
         }
+        pass.push(RenderCommand::clear_clip());
+        Self::push_settings_scrollbar(
+            pass,
+            scrollpane,
+            item_count,
+            offset as f32 * 50.0,
+            Self::settings_scroll_track_symbol(),
+            Self::settings_scroll_knob_symbol(),
+        );
     }
 
     fn push_settings_keybind_rebind_dialog(&self, pass: &mut RenderPass, parent: RenderRect) {
@@ -27002,7 +27014,7 @@ impl DesktopLauncher {
     fn settings_child_dialog_title(dialog: DesktopSettingsChildDialog) -> &'static str {
         match dialog {
             DesktopSettingsChildDialog::Language => "@settings.language",
-            DesktopSettingsChildDialog::Controls => "@settings.controls",
+            DesktopSettingsChildDialog::Controls => "@keybind.title",
             DesktopSettingsChildDialog::PlanetData => "@settings.data",
         }
     }
@@ -27286,6 +27298,21 @@ impl DesktopLauncher {
             dialog.width - 44.0,
             32.0,
         )
+    }
+
+    fn settings_keybind_scrollpane_rect(dialog: RenderRect) -> RenderRect {
+        let search = Self::settings_keybind_search_rect(dialog);
+        let height = (SETTINGS_KEYBIND_VISIBLE_ROWS as f32
+            * (SETTINGS_KEYBIND_ROW_HEIGHT + SETTINGS_KEYBIND_ROW_GAP)
+            - SETTINGS_KEYBIND_ROW_GAP
+            + (SETTINGS_KEYBIND_RESET_ALL_HEIGHT - SETTINGS_KEYBIND_ROW_HEIGHT))
+            .min((dialog.height - 166.0).max(SETTINGS_KEYBIND_ROW_HEIGHT));
+        let top = search.y - 22.0;
+        RenderRect::new(dialog.x + 22.0, top - height, dialog.width - 44.0, height)
+    }
+
+    fn settings_keybind_list_clip_rect(dialog: RenderRect) -> RenderRect {
+        Self::settings_keybind_scrollpane_rect(dialog)
     }
 
     fn settings_keybind_category_rect(dialog: RenderRect, index: usize) -> RenderRect {
@@ -78833,9 +78860,23 @@ repo: "Beta/Override"
             .any(|(symbol, _)| *symbol == text_field_cursor.as_str()));
         assert!(controls_texts.contains(
             &launcher
-                .localize_bundle_markup_text("@settings.controls")
+                .localize_bundle_markup_text("@keybind.title")
                 .as_str()
         ));
+        let controls_scroll_track = DesktopLauncher::settings_scroll_track_symbol();
+        let controls_scroll_knob = DesktopLauncher::settings_scroll_knob_symbol();
+        assert!(
+            controls_sprites
+                .iter()
+                .any(|(symbol, _)| *symbol == controls_scroll_track.as_str()),
+            "Java KeybindDialog uses a non-fading ScrollPane scrollbar for the keybind list"
+        );
+        assert!(
+            controls_sprites
+                .iter()
+                .any(|(symbol, _)| *symbol == controls_scroll_knob.as_str()),
+            "Java KeybindDialog should show the keybind ScrollPane knob when bindings overflow"
+        );
         assert!(controls_texts.contains(&"keybind search"));
         assert!(controls_texts.contains(&"@category.general.name"));
         assert!(controls_texts.contains(&"@keybind.move_x.name"));
