@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 767. ModsDialog hidden reload hook 对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **90.1%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `ModsDialog` 在 `hidden(() -> { if(mods.requiresReload()) mods.reload(); })` 中消费 reload 标记；
+  - Rust 此前可以显示 `@mod.reloadrequired`，但关闭 Mods route 后没有等价的隐藏钩子，reload flag 会持续残留。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopModsReloadAction`、`mods_route_reload_count` 与 `last_mods_reload_action`，记录 Mods route 隐藏时触发的 reload hook；
+    - 新增 `consume_mods_route_reload_if_required(...)`，在存在 pending reload 时清除 route flag 和各 mod snapshot 的 `requires_reload`，同时保留 enabled/disabled 状态；
+    - `CloseRoute`、Escape/Back 收起 active route，以及从 Mods 切换到其他菜单/路由时都会触发同一个 hidden reload hook；
+    - 新增回归测试覆盖关闭、重复关闭不重复触发、从 Mods 切换到 Settings 的隐藏路径。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_close_consumes_reload_like_java_hidden_hook --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop mods_route --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 当前 hook 是 Rust route/runtime 层的 reload 消费点，后续 Mod loader 完整接入后应在这里替换/扩展为真实 `mods.reload()`；
+  - Steam Workshop/外部 listing 的 delete/link 分支仍未完全还原；
+  - ModsDialog 的 browser/detail/import/release 仍需继续收紧为更接近 Java 单 dialog 体系的层级和关闭时序。
+
 ## 766. ModsDialog unsupported toggle 禁用对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

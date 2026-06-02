@@ -3758,6 +3758,12 @@ pub struct DesktopModsDeleteResult {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopModsReloadAction {
+    pub reload_count: u32,
+    pub mod_names: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DesktopModsRouteModStateKind {
     #[default]
@@ -17959,6 +17965,8 @@ pub struct DesktopLauncher {
     pub mods_selected_mod_index: Option<usize>,
     pub mods_delete_dialog_index: Option<usize>,
     pub mods_route_requires_reload_flag: bool,
+    pub mods_route_reload_count: u32,
+    pub last_mods_reload_action: Option<DesktopModsReloadAction>,
     pub last_mods_delete_result: Option<DesktopModsDeleteResult>,
     pub last_mods_folder_action: Option<DesktopModsFolderAction>,
     pub last_mods_content_index: Option<usize>,
@@ -19145,6 +19153,8 @@ impl DesktopLauncher {
             mods_selected_mod_index: None,
             mods_delete_dialog_index: None,
             mods_route_requires_reload_flag: false,
+            mods_route_reload_count: 0,
+            last_mods_reload_action: None,
             last_mods_delete_result: None,
             last_mods_folder_action: None,
             last_mods_content_index: None,
@@ -23225,6 +23235,9 @@ impl DesktopLauncher {
             return true;
         }
         if let Some(route) = self.active_menu_route.take() {
+            if route == DesktopMenuRoute::Mods {
+                self.consume_mods_route_reload_if_required();
+            }
             if route == DesktopMenuRoute::Campaign {
                 self.campaign_planet_dialog = None;
             }
@@ -23312,9 +23325,23 @@ impl DesktopLauncher {
     }
 
     fn dispatch_menu_action(&mut self, role: MenuButtonRole) -> DesktopMenuActionDispatch {
+        let previous_route = self.active_menu_route;
         let submenu_was_active = self.menu_renderer_state.has_active_desktop_submenu();
         let role_opens_desktop_submenu = self.menu_renderer_state.role_has_desktop_submenu(role);
         let submenu_changed = self.menu_renderer_state.select_desktop_root(role);
+        let requested_route = if submenu_changed {
+            None
+        } else {
+            DesktopMenuRoute::from_menu_button(role)
+        };
+        if previous_route == Some(DesktopMenuRoute::Mods)
+            && (submenu_changed
+                || role == MenuButtonRole::Workshop
+                || role == MenuButtonRole::Quit
+                || requested_route != Some(DesktopMenuRoute::Mods))
+        {
+            self.consume_mods_route_reload_if_required();
+        }
         if submenu_was_active && !submenu_changed && !role_opens_desktop_submenu {
             self.menu_renderer_state.reset_desktop_root();
         }
@@ -23426,7 +23453,7 @@ impl DesktopLauncher {
             self.editor_map_info_dialog_index = None;
             None
         } else {
-            DesktopMenuRoute::from_menu_button(role)
+            requested_route
         };
         if let Some(route) = route {
             self.active_menu_route = Some(route);
@@ -36449,6 +36476,9 @@ impl DesktopLauncher {
         self.last_menu_route_shell_action = Some(action);
         match action {
             DesktopMenuRouteShellAction::CloseRoute => {
+                if self.active_menu_route == Some(DesktopMenuRoute::Mods) {
+                    self.consume_mods_route_reload_if_required();
+                }
                 self.active_menu_route = None;
                 self.mods_selected_mod_index = None;
                 self.mods_content_dialog_index = None;
@@ -47985,6 +48015,23 @@ impl DesktopLauncher {
         self.last_mods_directory_mod_states
             .iter()
             .any(|state| state.requires_reload)
+    }
+
+    fn consume_mods_route_reload_if_required(&mut self) -> bool {
+        if !self.mods_route_requires_reload() {
+            return false;
+        }
+        self.sync_mods_route_state_len();
+        for state in &mut self.last_mods_directory_mod_states {
+            state.requires_reload = false;
+        }
+        self.mods_route_requires_reload_flag = false;
+        self.mods_route_reload_count = self.mods_route_reload_count.saturating_add(1);
+        self.last_mods_reload_action = Some(DesktopModsReloadAction {
+            reload_count: self.mods_route_reload_count,
+            mod_names: self.last_mods_directory_mod_names.clone(),
+        });
+        true
     }
 
     fn mods_route_mod_enabled_at_index(&self, index: usize) -> bool {
@@ -66194,6 +66241,69 @@ version: "2.0.0"
             .iter()
             .any(|text| text.contains("missing dependencies") && text.contains("alpha-lib")));
         assert!(detail_texts.contains(&"View Content"));
+    }
+
+    #[test]
+    fn desktop_launcher_mods_route_close_consumes_reload_like_java_hidden_hook() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
+        launcher.last_mods_directory_mod_names = vec!["alpha".into(), "beta".into()];
+        launcher.last_mods_directory_mod_states = vec![
+            super::DesktopModsRouteModStateSnapshot {
+                enabled: false,
+                state: super::DesktopModsRouteModStateKind::Loaded,
+                dependencies: Vec::new(),
+                requires_reload: true,
+            },
+            super::DesktopModsRouteModStateSnapshot {
+                enabled: true,
+                state: super::DesktopModsRouteModStateKind::ErroredContent,
+                dependencies: Vec::new(),
+                requires_reload: false,
+            },
+        ];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+        assert!(launcher.mods_route_requires_reload());
+
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseRoute);
+        assert_eq!(launcher.active_menu_route, None);
+        assert!(!launcher.mods_route_requires_reload());
+        assert_eq!(launcher.mods_route_reload_count, 1);
+        assert_eq!(
+            launcher.last_mods_reload_action,
+            Some(super::DesktopModsReloadAction {
+                reload_count: 1,
+                mod_names: vec!["alpha".into(), "beta".into()],
+            })
+        );
+        assert!(
+            !launcher.last_mods_directory_mod_states[0].enabled,
+            "Java mods.reload() preserves the persisted disabled state instead of blindly re-enabling the mod"
+        );
+        assert!(launcher
+            .last_mods_directory_mod_states
+            .iter()
+            .all(|state| !state.requires_reload));
+
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseRoute);
+        assert_eq!(
+            launcher.mods_route_reload_count, 1,
+            "closing without pending requiresReload should not call the hook again"
+        );
+
+        launcher.last_mods_directory_mod_states[0].requires_reload = true;
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Settings)
+        );
+        assert_eq!(
+            launcher.mods_route_reload_count, 2,
+            "switching away from Mods should run the same hidden() reload hook as pressing Back"
+        );
+        assert!(!launcher.mods_route_requires_reload());
     }
 
     #[test]
