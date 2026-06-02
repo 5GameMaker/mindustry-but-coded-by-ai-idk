@@ -17,6 +17,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 756. CustomRules waves edit 弹窗瘦身
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **89.0%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `CustomRulesDialog` 的 `@waves.edit` 子弹窗主要是轻量动作入口；
+  - Rust 此前在弹窗标题下额外绘制 `waves=... waveTimer=... attackMode=... pvp=...` 摘要行，属于非原版调试式文案。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_map_play_rules_edit_dialog(...)` 移除 Rust-only 规则摘要行；
+    - 参数改为 `_rules`，保留现有调用形状但不再渲染摘要；
+    - 测试断言 `@waves.edit` 弹窗不再出现 `waves=` 摘要。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop map_play --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `@waves.edit` 的错误提示路径仍需后续进一步对齐 Java 的 show error/show exception 方式；
+  - CustomRules 仍需继续扩展全部 Java 规则项与更完整的 ScrollPane/布局细节。
+
 ## 755. CustomRulesDialog 搜索输入与规则过滤对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

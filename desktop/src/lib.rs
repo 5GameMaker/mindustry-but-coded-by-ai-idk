@@ -43474,7 +43474,7 @@ impl DesktopLauncher {
         &self,
         pass: &mut RenderPass,
         child: RenderRect,
-        rules: &Rules,
+        _rules: &Rules,
     ) {
         let layer = Layer::END_PIXELED + 0.140;
         let dialog = Self::map_play_rules_edit_dialog_rect(child);
@@ -43507,21 +43507,6 @@ impl DesktopLauncher {
                 .with_integer_position(true)
                 .with_outline(true),
             layer + 0.004,
-        ));
-        let summary = format!(
-            "waves={} waveTimer={} attackMode={} pvp={}",
-            rules.waves, rules.wave_timer, rules.attack_mode, rules.pvp
-        );
-        pass.push(RenderCommand::draw_text_styled(
-            summary,
-            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 48.0),
-            [0.62, 0.74, 0.84, 1.0],
-            9.5,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            layer + 0.005,
         ));
         if let Some(error) = self.map_play_rules_error.as_ref() {
             pass.push(RenderCommand::draw_text_styled(
@@ -71424,6 +71409,10 @@ repo: "Beta/Override"
         assert!(edit_texts.contains(&"Copy to Clipboard"));
         assert!(edit_texts.contains(&"Load from Clipboard"));
         assert!(edit_texts.contains(&"Reset to Defaults"));
+        assert!(
+            !edit_texts.iter().any(|text| text.contains("waves=")),
+            "Java @waves.edit dialog should not render a Rust-only rules summary line"
+        );
 
         let edit_dialog = DesktopLauncher::map_play_rules_edit_dialog_rect(child);
         let copy_center = DesktopLauncher::map_play_rules_edit_button_rect(edit_dialog, 0).center();
