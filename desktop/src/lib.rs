@@ -3759,6 +3759,31 @@ struct DesktopMenuChromeButtonState {
     pressed: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DesktopMenuBackgroundStaticCacheKey {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+impl DesktopMenuBackgroundStaticCacheKey {
+    fn from_viewport(viewport: RenderViewport) -> Self {
+        Self {
+            x: viewport.x,
+            y: viewport.y,
+            width: viewport.width.max(1.0),
+            height: viewport.height.max(1.0),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DesktopMenuBackgroundStaticCache {
+    key: DesktopMenuBackgroundStaticCacheKey,
+    commands: Vec<RenderCommand>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopMenuPlatformAction {
     OpenWorkshop,
@@ -17846,6 +17871,8 @@ pub struct DesktopLauncher {
     pub menu_macnotch_enabled: bool,
     pub menu_ui_scale: f32,
     pub menu_frame_delta_seconds: f32,
+    menu_background_static_cache: Option<DesktopMenuBackgroundStaticCache>,
+    menu_background_static_cache_rebuilds: u64,
     pub about_route_page: DesktopAboutRoutePage,
     pub about_filter_banned_links: bool,
     pub about_links_scroll_offset: usize,
@@ -19039,6 +19066,8 @@ impl DesktopLauncher {
             menu_macnotch_enabled: false,
             menu_ui_scale: 1.0,
             menu_frame_delta_seconds: 1.0 / 60.0,
+            menu_background_static_cache: None,
+            menu_background_static_cache_rebuilds: 0,
             about_route_page: DesktopAboutRoutePage::Links,
             about_filter_banned_links: false,
             about_links_scroll_offset: 0,
@@ -23040,7 +23069,7 @@ impl DesktopLauncher {
     }
 
     fn fast_menu_render_pass_from_plan(
-        &self,
+        &mut self,
         plan: &MenuFramePlan,
         viewport: RenderViewport,
     ) -> RenderPass {
@@ -50812,12 +50841,11 @@ impl DesktopLauncher {
         }
     }
 
-    fn menu_background_layer_commands(&self, viewport: RenderViewport) -> Vec<RenderCommand> {
+    fn build_menu_background_static_base_commands(viewport: RenderViewport) -> Vec<RenderCommand> {
         let width = viewport.width.max(1.0);
         let height = viewport.height.max(1.0);
         let rect = viewport.as_rect();
-        let time = self.menu_renderer_state.time;
-        let mut commands = Vec::with_capacity(80);
+        let mut commands = Vec::with_capacity(12);
         commands.push(RenderCommand::fill_rect(
             rect,
             [0.010, 0.015, 0.030, 1.0],
@@ -50840,6 +50868,43 @@ impl DesktopLauncher {
                 -119.0,
             ));
         }
+        commands
+    }
+
+    fn menu_background_static_base_commands(
+        &mut self,
+        viewport: RenderViewport,
+    ) -> Vec<RenderCommand> {
+        let key = DesktopMenuBackgroundStaticCacheKey::from_viewport(viewport);
+        if self
+            .menu_background_static_cache
+            .as_ref()
+            .map_or(true, |cache| cache.key != key)
+        {
+            let commands = Self::build_menu_background_static_base_commands(viewport);
+            self.menu_background_static_cache =
+                Some(DesktopMenuBackgroundStaticCache { key, commands });
+            self.menu_background_static_cache_rebuilds =
+                self.menu_background_static_cache_rebuilds.saturating_add(1);
+        }
+        self.menu_background_static_cache
+            .as_ref()
+            .map(|cache| cache.commands.clone())
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    fn menu_background_static_cache_rebuilds(&self) -> u64 {
+        self.menu_background_static_cache_rebuilds
+    }
+
+    fn menu_background_layer_commands(&mut self, viewport: RenderViewport) -> Vec<RenderCommand> {
+        let width = viewport.width.max(1.0);
+        let height = viewport.height.max(1.0);
+        let rect = viewport.as_rect();
+        let time = self.menu_renderer_state.time;
+        let mut commands = self.menu_background_static_base_commands(viewport);
+        commands.reserve(68);
 
         for index in 0..42usize {
             let seed = index as u32;
@@ -50970,7 +51035,7 @@ impl DesktopLauncher {
         })
     }
 
-    fn insert_menu_background_layers(&self, pass: &mut RenderPass, viewport: RenderViewport) {
+    fn insert_menu_background_layers(&mut self, pass: &mut RenderPass, viewport: RenderViewport) {
         if Self::menu_pass_has_java_world_background(pass)
             || Self::menu_pass_has_synthetic_background(pass)
         {
@@ -78309,7 +78374,7 @@ repo: "Beta/Override"
 
     #[test]
     fn desktop_launcher_synthetic_menu_background_uses_bucketed_layers_for_batching() {
-        let launcher = DesktopLauncher::new(Vec::new());
+        let mut launcher = DesktopLauncher::new(Vec::new());
         let commands =
             launcher.menu_background_layer_commands(RenderViewport::new(0.0, 0.0, 1280.0, 720.0));
 
@@ -78334,6 +78399,35 @@ repo: "Beta/Override"
                 -106000, -90000,
             ],
             "menu background must keep heavy repeated primitives in stable layer buckets so the OpenGL backend can batch them"
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_synthetic_menu_background_reuses_static_base_cache() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+
+        let first = launcher.menu_background_layer_commands(viewport);
+        assert_eq!(launcher.menu_background_static_cache_rebuilds(), 1);
+
+        launcher.menu_renderer_state.time += 3.0;
+        let second = launcher.menu_background_layer_commands(viewport);
+        assert_eq!(
+            launcher.menu_background_static_cache_rebuilds(),
+            1,
+            "time-only animation frames should reuse the cached static background base"
+        );
+        assert_ne!(
+            first, second,
+            "dynamic star/planet commands must still change with menu time instead of freezing"
+        );
+
+        let resized = RenderViewport::new(0.0, 0.0, 1024.0, 720.0);
+        let _ = launcher.menu_background_layer_commands(resized);
+        assert_eq!(
+            launcher.menu_background_static_cache_rebuilds(),
+            2,
+            "viewport resize should invalidate the cached static background base"
         );
     }
 
