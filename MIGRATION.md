@@ -17,6 +17,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 776. SettingsMenuDialog description tooltip 对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **91.0%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容与所有子菜单接近原版。
+- 背景：
+  - Java `SettingsMenuDialog` 的 `CheckSetting.add()` / `SliderSetting.add()` 会通过 `addDescTooltip(...)` 为存在 `setting.<key>.description` 的设置项显示说明；
+  - Rust 此前已有 hover 状态，但没有渲染 description tooltip，且内置 bundle 未接入这些 description key。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 补齐 `setting.alwaysmusic.description / setting.uiscale.description / setting.uiEdgePadding.description / setting.detach-camera.description / setting.macnotch.description / setting.minmagnificationmultiplierpercent.description` 的 EN、zh_CN、zh_TW 内置文案；
+    - 扩展 bundle 回归测试。
+  - `desktop/src/lib.rs`
+    - Settings 控件 hover 时查询 `setting.<key>.description`，存在才绘制轻量 tooltip；
+    - tooltip 不在 ScrollPane clip 内渲染，并高亮当前设置行；
+    - 扩展 Settings 页面渲染测试，锁定 UI Scaling 行悬停显示 `Restart required to apply changes.`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle_entries_cover_menu_fragment_buttons --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core upstream_menu_bundle_locale_entries_cover_chinese_menu_fragment_buttons --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Settings 设置项 label 本身仍有大量 raw key，需要后续逐步切到本地化显示；
+  - LoadDialog 导入失败文案仍需继续对齐 Java 用户文案；
+  - 其他前端子菜单仍需持续对照原版 Scene2D 行为。
+
 ## 775. SettingsMenuDialog 条件过滤对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -445,7 +445,31 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("setting.fpscap.name", "Max FPS"),
     ("setting.fpscap.none", "None"),
     ("setting.fpscap.text", "{0} FPS"),
+    (
+        "setting.alwaysmusic.description",
+        "When enabled, music will always play on loop in-game.\\nWhen disabled, it only plays at random intervals.",
+    ),
+    (
+        "setting.uiscale.description",
+        "Restart required to apply changes.",
+    ),
+    (
+        "setting.uiEdgePadding.description",
+        "Adds padding to the edges of the UI. Useful for displays with rounded corners or notches.",
+    ),
+    (
+        "setting.detach-camera.description",
+        "If enabled, the camera moves independently of the player unit.\\nThis setting can be assigned a hotkey.",
+    ),
     ("setting.macnotch.name", "Adapt interface to display notch"),
+    (
+        "setting.macnotch.description",
+        "Restart required to apply changes",
+    ),
+    (
+        "setting.minmagnificationmultiplierpercent.description",
+        "High values may cause performance issues.",
+    ),
     ("setting.musicvol.name", "Music Volume"),
     ("setting.playerlimit.name", "Player Limit"),
     ("setting.saveinterval.name", "Save Interval"),
@@ -877,7 +901,25 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES: &[(&str, &str)] = &[
     ("setting.fpscap.name", "最大帧数"),
     ("setting.fpscap.none", "无"),
     ("setting.fpscap.text", "{0} FPS"),
+    (
+        "setting.alwaysmusic.description",
+        "启用后，游戏内音乐将持续循环播放。\\n禁用时，音乐将在随机间隔播放。",
+    ),
+    ("setting.uiscale.description", "需要重新启动"),
+    (
+        "setting.uiEdgePadding.description",
+        "在UI内部添加边距。有助于圆角屏或刘海屏的显示效果。",
+    ),
+    (
+        "setting.detach-camera.description",
+        "启用后，视角可独立于玩家单位自由移动。\\n此设置可绑定快捷键。",
+    ),
     ("setting.macnotch.name", "适应刘海显示"),
+    ("setting.macnotch.description", "需要重启才能应用更改"),
+    (
+        "setting.minmagnificationmultiplierpercent.description",
+        "较高的数值可能会导致性能问题。",
+    ),
     ("setting.musicvol.name", "音乐音量"),
     ("setting.playerlimit.name", "玩家数量限制"),
     ("setting.saveinterval.name", "自动保存间隔"),
@@ -1327,7 +1369,31 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
     ("setting.fpscap.name", "最大FPS"),
     ("setting.fpscap.none", "無"),
     ("setting.fpscap.text", "{0}FPS"),
+    (
+        "setting.alwaysmusic.description",
+        "When enabled, music will always play on loop in-game.\\nWhen disabled, it only plays at random intervals.",
+    ),
+    (
+        "setting.uiscale.description",
+        "需要重新啟動遊戲以更改大小",
+    ),
+    (
+        "setting.uiEdgePadding.description",
+        "Adds padding to the edges of the UI. Useful for displays with rounded corners or notches.",
+    ),
+    (
+        "setting.detach-camera.description",
+        "If enabled, the camera moves independently of the player unit.\\nThis setting can be assigned a hotkey.",
+    ),
     ("setting.macnotch.name", "使界面適應顯示槽口"),
+    (
+        "setting.macnotch.description",
+        "需要重新啟動遊戲以更改大小",
+    ),
+    (
+        "setting.minmagnificationmultiplierpercent.description",
+        "High values may cause performance issues.",
+    ),
     ("setting.musicvol.name", "音樂音量"),
     ("setting.playerlimit.name", "玩家數限制"),
     ("setting.saveinterval.name", "自動存檔間隔"),
@@ -1559,6 +1625,14 @@ mod tests {
             Some("Enemy Team")
         );
         assert_eq!(upstream_bundle_en_value("rules.weather"), Some("Weather"));
+        assert_eq!(
+            upstream_bundle_en_value("setting.uiscale.description"),
+            Some("Restart required to apply changes.")
+        );
+        assert_eq!(
+            upstream_bundle_en_value("setting.alwaysmusic.description"),
+            Some("When enabled, music will always play on loop in-game.\\nWhen disabled, it only plays at random intervals.")
+        );
         assert_eq!(upstream_bundle_en_value("missing.menu.key"), None);
     }
 
@@ -1708,6 +1782,14 @@ mod tests {
             Some("天气")
         );
         assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "setting.uiscale.description"),
+            Some("需要重新启动")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "setting.uiEdgePadding.description"),
+            Some("在UI内部添加边距。有助于圆角屏或刘海屏的显示效果。")
+        );
+        assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "keybind.chat.name"),
             Some("聊天")
         );
@@ -1802,6 +1884,10 @@ mod tests {
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_TW", "rules.weather"),
             Some("天氣")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "setting.uiscale.description"),
+            Some("需要重新啟動遊戲以更改大小")
         );
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_TW", "server.invalidaddress"),

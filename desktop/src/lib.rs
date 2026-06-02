@@ -25306,6 +25306,35 @@ impl DesktopLauncher {
         format!("@setting.{key}.name")
     }
 
+    fn settings_pref_description_key(key: &str) -> String {
+        format!("setting.{key}.description")
+    }
+
+    fn settings_pref_description(&self, spec: &DesktopSettingsPrefSpec) -> Option<String> {
+        let key = Self::settings_pref_description_key(spec.key);
+        upstream_menu_bundle_value_for_locale(&self.settings_locale, &key).map(ToOwned::to_owned)
+    }
+
+    fn settings_pref_description_tooltip_rect(
+        panel: RenderRect,
+        cursor: RenderPoint,
+        text: &str,
+    ) -> RenderRect {
+        let tooltip_width = (text.chars().count() as f32 * 6.0 + 28.0).clamp(220.0, 440.0);
+        let wrap_width = tooltip_width - 24.0;
+        let estimated_lines = ((text.chars().count() as f32 * 6.0) / wrap_width)
+            .ceil()
+            .max(1.0);
+        let tooltip_height = (estimated_lines * 18.0 + 20.0).clamp(38.0, 120.0);
+        let tooltip_x = (cursor.x + 14.0)
+            .min(panel.right() - tooltip_width - 4.0)
+            .max(panel.x + 4.0);
+        let tooltip_y = (cursor.y + 14.0)
+            .min(panel.y + panel.height - tooltip_height - 4.0)
+            .max(panel.y + 4.0);
+        RenderRect::new(tooltip_x, tooltip_y, tooltip_width, tooltip_height)
+    }
+
     fn settings_pref_widget_specs(table: &str) -> Vec<&'static DesktopSettingsPrefSpec> {
         Self::settings_pref_group(table)
             .map(|group| {
@@ -26586,6 +26615,49 @@ impl DesktopLauncher {
         ));
     }
 
+    fn push_settings_pref_description_tooltip(
+        &self,
+        pass: &mut RenderPass,
+        panel: RenderRect,
+        target: RenderRect,
+        text: &str,
+    ) {
+        let cursor = self.last_menu_cursor.unwrap_or_else(|| target.center());
+        let tooltip = Self::settings_pref_description_tooltip_rect(panel, cursor, text);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            tooltip,
+            [1.0, 1.0, 1.0, 0.96],
+            0.0,
+            Layer::END_PIXELED + 0.064,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            tooltip,
+            [0.42, 0.58, 0.70, 0.94],
+            1.0,
+            Layer::END_PIXELED + 0.065,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            target,
+            [0.86, 0.94, 1.0, 0.98],
+            2.0,
+            Layer::END_PIXELED + 0.0655,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            text.to_string(),
+            RenderPoint::new(tooltip.x + 12.0, tooltip.center().y),
+            [0.94, 0.98, 1.0, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_wrap_width(tooltip.width - 24.0)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.066,
+        ));
+    }
+
     fn push_settings_route_controls(&self, pass: &mut RenderPass, panel: RenderRect) {
         let (DesktopSettingsPage::Game
         | DesktopSettingsPage::Graphics
@@ -26601,6 +26673,7 @@ impl DesktopLauncher {
         let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
         let table_container = Self::settings_pref_table_container_rect_for_panel(panel);
         let scroll_offset = self.settings_scroll_offset_pixels(table, clip);
+        let mut hovered_description = None;
 
         pass.push(RenderCommand::draw_sprite(
             Self::settings_drawable_symbol("button"),
@@ -26625,6 +26698,11 @@ impl DesktopLauncher {
                 index,
                 scroll_offset,
             );
+            if hovered {
+                if let Some(description) = self.settings_pref_description(spec) {
+                    hovered_description = Some((description, row));
+                }
+            }
             if hovered || pressed {
                 pass.push(RenderCommand::fill_rect(
                     row,
@@ -26732,6 +26810,9 @@ impl DesktopLauncher {
             scroll_track_symbol,
             scroll_knob_symbol,
         );
+        if let Some((description, row)) = hovered_description {
+            self.push_settings_pref_description_tooltip(pass, panel, row, &description);
+        }
     }
 
     fn settings_route_control_action_at_point(
@@ -82611,6 +82692,42 @@ repo: "Beta/Override"
         assert!(!graphics_texts
             .iter()
             .any(|text| text.starts_with("value: ")));
+        let graphics_clip = DesktopLauncher::settings_pref_widget_clip_rect_for_panel(panel);
+        let graphics_specs = DesktopLauncher::settings_pref_widget_specs("graphics");
+        let uiscale_index = graphics_specs
+            .iter()
+            .position(|spec| spec.key == "uiscale")
+            .expect("graphics settings should include uiscale");
+        let uiscale_row = DesktopLauncher::settings_pref_widget_row_rect_for_clip_with_scroll(
+            graphics_clip,
+            uiscale_index,
+            0.0,
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: uiscale_row.center().x,
+                y: uiscale_row.center().y,
+            }],
+        );
+        let description_frame = launcher.menu_graphics_frame_for_surface(3, viewport);
+        let description_texts = description_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("settings description tooltip frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(description_texts.contains(&"Restart required to apply changes."));
+        assert!(!description_texts
+            .iter()
+            .any(|text| text.contains("setting.uiscale.description")));
 
         launcher.settings_dialog_state.page = super::DesktopSettingsPage::Sound;
         let sound_frame = launcher.menu_graphics_frame_for_surface(2, viewport);
