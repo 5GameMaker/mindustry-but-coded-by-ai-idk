@@ -3721,6 +3721,8 @@ pub enum DesktopMenuRouteShellAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DesktopPausedOverlayAction {
     GameOverMenu,
+    GameOverContinue,
+    GameOverDisconnect,
     Back,
     Settings,
     Objective,
@@ -30218,6 +30220,75 @@ impl DesktopLauncher {
         rows
     }
 
+    fn game_over_sector_name(&self) -> Option<String> {
+        self.game_state.get_sector().map(|sector| {
+            sector
+                .preset
+                .as_ref()
+                .map(|preset| preset.localized_name.clone())
+                .or_else(|| sector.info.name.clone())
+                .unwrap_or_else(|| sector.id.to_string())
+        })
+    }
+
+    fn game_over_title_text(&self) -> String {
+        if self.game_state.is_campaign() {
+            if let Some(sector_name) = self.game_over_sector_name() {
+                return self.format_bundle_text("sector.lost", &[sector_name.as_str()]);
+            }
+        }
+        self.localize_bundle_markup_text("@gameover")
+    }
+
+    fn game_over_is_high_score(&self) -> bool {
+        if !self.game_state.rules.waves {
+            return false;
+        }
+        let current_wave = self
+            .game_state
+            .stats
+            .waves_lasted
+            .max(self.game_state.wave)
+            .max(0);
+        current_wave > 0 && self.map_play_high_score(&self.game_state.map) < current_wave
+    }
+
+    fn current_loaded_save_slot(&self) -> Option<&SaveSlotRecord> {
+        let action = self.last_load_game_result.as_ref()?;
+        if action.kind != DesktopLoadGameActionKind::Load || action.status != "loaded" {
+            return None;
+        }
+        self.load_game_slots
+            .iter()
+            .find(|slot| slot.file.display().to_string() == action.file)
+    }
+
+    fn game_over_playtime_text(&self) -> Option<String> {
+        self.current_loaded_save_slot()
+            .map(|slot| Self::format_save_playtime(slot.time_played()))
+    }
+
+    fn game_over_primary_action(&self) -> DesktopPausedOverlayAction {
+        if self.game_state.is_campaign() {
+            if self.pause_overlay_net_active() {
+                DesktopPausedOverlayAction::GameOverDisconnect
+            } else {
+                DesktopPausedOverlayAction::GameOverContinue
+            }
+        } else {
+            DesktopPausedOverlayAction::GameOverMenu
+        }
+    }
+
+    fn game_over_primary_button_label(&self) -> String {
+        let key = match self.game_over_primary_action() {
+            DesktopPausedOverlayAction::GameOverDisconnect => "@gameover.disconnect",
+            DesktopPausedOverlayAction::GameOverContinue => "@continue",
+            _ => "@menu",
+        };
+        self.localize_bundle_markup_text(key)
+    }
+
     fn pause_overlay_net_active(&self) -> bool {
         self.net_client
             .state()
@@ -30380,7 +30451,7 @@ impl DesktopLauncher {
         {
             let dialog = Self::game_over_dialog_rect_for_viewport(viewport);
             if Self::game_over_menu_button_rect(dialog).contains_point(point) {
-                return Some(DesktopPausedOverlayAction::GameOverMenu);
+                return Some(self.game_over_primary_action());
             }
             return None;
         }
@@ -39452,11 +39523,51 @@ impl DesktopLauncher {
         self.runtime.state.set(GameStateState::Menu);
         self.game_state.game_over = false;
         self.runtime.state.game_over = false;
+        self.game_state.after_game_over = false;
+        self.runtime.state.after_game_over = false;
         self.menu_renderer_state.reset_desktop_root();
         self.menu_mobile_terminal_open = false;
         self.pause_overlay_modal = None;
         self.last_menu_route_shell_action = None;
         self.last_menu_guard_message = None;
+    }
+
+    fn execute_game_over_continue_button(&mut self) {
+        self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CloseRoute);
+        self.game_state.set(GameStateState::Menu);
+        self.runtime.state.set(GameStateState::Menu);
+        self.game_state.game_over = false;
+        self.runtime.state.game_over = false;
+        self.game_state.after_game_over = false;
+        self.runtime.state.after_game_over = false;
+        self.active_menu_route = Some(DesktopMenuRoute::Campaign);
+        self.campaign_planet_dialog = Some(CampaignPlanetDialogState::look(
+            &self.content_loader,
+            &self.game_state,
+        ));
+        self.menu_mobile_terminal_open = false;
+        self.pause_overlay_modal = None;
+        self.last_menu_route_shell_action = None;
+        self.last_menu_guard_message = None;
+        self.last_menu_info_message = Some("GameOverDialog.continue: Campaign".into());
+    }
+
+    fn execute_game_over_disconnect_button(&mut self) {
+        self.net_client.disconnect_quietly();
+        self.reset_network_before_load_save();
+        self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CloseRoute);
+        self.game_state.set(GameStateState::Menu);
+        self.runtime.state.set(GameStateState::Menu);
+        self.game_state.game_over = false;
+        self.runtime.state.game_over = false;
+        self.game_state.after_game_over = false;
+        self.runtime.state.after_game_over = false;
+        self.menu_renderer_state.reset_desktop_root();
+        self.menu_mobile_terminal_open = false;
+        self.pause_overlay_modal = None;
+        self.last_menu_route_shell_action = None;
+        self.last_menu_guard_message = None;
+        self.last_menu_info_message = Some("GameOverDialog.disconnect".into());
     }
 
     fn playtesting_map_for_resume(&self) -> Option<MapDescriptor> {
@@ -39482,6 +39593,8 @@ impl DesktopLauncher {
     fn dispatch_pause_overlay_action(&mut self, action: DesktopPausedOverlayAction) {
         let action_enabled = match action {
             DesktopPausedOverlayAction::GameOverMenu
+            | DesktopPausedOverlayAction::GameOverContinue
+            | DesktopPausedOverlayAction::GameOverDisconnect
             | DesktopPausedOverlayAction::CloseModal
             | DesktopPausedOverlayAction::ConfirmQuit => true,
             _ => self
@@ -39497,6 +39610,12 @@ impl DesktopLauncher {
         match action {
             DesktopPausedOverlayAction::GameOverMenu => {
                 self.execute_game_over_menu_button();
+            }
+            DesktopPausedOverlayAction::GameOverContinue => {
+                self.execute_game_over_continue_button();
+            }
+            DesktopPausedOverlayAction::GameOverDisconnect => {
+                self.execute_game_over_disconnect_button();
             }
             DesktopPausedOverlayAction::CloseModal => {
                 self.close_pause_overlay_modal();
@@ -52494,7 +52613,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.142,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                "GameOverDialog",
+                self.game_over_title_text(),
                 RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 34.0),
                 [0.94, 0.98, 1.0, 1.0],
                 15.0,
@@ -52505,6 +52624,20 @@ impl DesktopLauncher {
                     .with_outline(true),
                 Layer::END_PIXELED + 0.143,
             ));
+            if self.game_over_is_high_score() {
+                pass.push(RenderCommand::draw_text_styled(
+                    self.localize_bundle_markup_text("@highscore"),
+                    RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 62.0),
+                    [1.0, 0.82, 0.42, 1.0],
+                    11.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.1435,
+                ));
+            }
             let stats_rect = Self::game_over_stats_rect(dialog);
             pass.push(RenderCommand::draw_sprite(
                 "whiteui",
@@ -52540,10 +52673,51 @@ impl DesktopLauncher {
                     Layer::END_PIXELED + 0.1455 + index as f32 * 0.0001,
                 ));
             }
+            if let Some(playtime) = self.game_over_playtime_text() {
+                let row_y = stats_rect.y + 18.0;
+                pass.push(RenderCommand::draw_text_styled(
+                    self.localize_bundle_markup_text("@stats.playtime"),
+                    RenderPoint::new(stats_rect.x + 14.0, row_y),
+                    [0.86, 0.92, 0.98, 1.0],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.146,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    format!("[accent]{playtime}"),
+                    RenderPoint::new(stats_rect.right() - 14.0, row_y),
+                    [1.0, 0.82, 0.42, 1.0],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::End)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.1465,
+                ));
+            }
+            if self.game_state.is_campaign() && self.pause_overlay_net_active() {
+                pass.push(RenderCommand::draw_text_styled(
+                    self.localize_bundle_markup_text("@gameover.waiting"),
+                    RenderPoint::new(dialog.center().x, dialog.y + 100.0),
+                    [0.94, 0.98, 1.0, 1.0],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.147,
+                ));
+            }
             self.push_settings_text_button(
                 &mut pass,
                 Self::game_over_menu_button_rect(dialog),
-                self.localize_bundle_markup_text("@menu"),
+                self.game_over_primary_button_label(),
                 Some("left"),
                 Layer::END_PIXELED + 0.150,
             );
@@ -54984,7 +55158,8 @@ mod tests {
     };
     use mindustry_core::mindustry::io::{
         write_deflated_save_meta_prefix, ContentHeaderEntry, ContentHeaderSnapshot,
-        LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, LATEST_SAVE_VERSION,
+        LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, SaveMeta, SaveSlotRecord,
+        LATEST_SAVE_VERSION,
     };
     use mindustry_core::mindustry::maps::MapDescriptor;
     use mindustry_core::mindustry::modsys::{ModMetadata, ModResourcePlan, ModSpritePackSource};
@@ -72707,6 +72882,28 @@ repo: "Beta/Override"
         launcher.game_state.stats.buildings_built = 78;
         launcher.game_state.stats.buildings_destroyed = 9;
         launcher.game_state.stats.buildings_deconstructed = 10;
+        launcher
+            .settings_overrides
+            .insert(map.high_score_key(), "7".into());
+        let mut save_tags = BTreeMap::new();
+        save_tags.insert("version".into(), LATEST_SAVE_VERSION.to_string());
+        save_tags.insert("build".into(), "158".into());
+        save_tags.insert("saved".into(), "42".into());
+        save_tags.insert("playtime".into(), "123000".into());
+        save_tags.insert("mapname".into(), "Game Over Resume".into());
+        save_tags.insert("wave".into(), "12".into());
+        save_tags.insert("mods".into(), "[]".into());
+        let save_path = std::path::PathBuf::from("saves/game-over-resume.msav");
+        let save_slot = SaveSlotRecord::with_meta(save_path, SaveMeta::from_tags(save_tags));
+        launcher.load_game_slots = vec![save_slot.clone()];
+        launcher.last_load_game_result = Some(super::DesktopLoadGameAction {
+            slot: save_slot.index(),
+            file: save_slot.file.display().to_string(),
+            map_name: Some("Game Over Resume".into()),
+            timestamp: save_slot.timestamp(),
+            kind: super::DesktopLoadGameActionKind::Load,
+            status: "loaded".into(),
+        });
 
         let surface = DesktopSurfaceSize::new(1280, 720);
         let viewport = launcher.default_render_viewport_for_surface(surface);
@@ -72721,7 +72918,13 @@ repo: "Beta/Override"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"GameOverDialog"));
+        let game_over_title = launcher.localize_bundle_markup_text("@gameover");
+        let high_score_text = launcher.localize_bundle_markup_text("@highscore");
+        let playtime_label = launcher.localize_bundle_markup_text("@stats.playtime");
+        assert!(texts.contains(&game_over_title.as_str()));
+        assert!(texts.contains(&high_score_text.as_str()));
+        assert!(texts.contains(&playtime_label.as_str()));
+        assert!(texts.contains(&"[accent]2m 03s"));
         assert!(texts.iter().any(|text| {
             let lower = text.to_ascii_lowercase();
             lower.contains("menu") || text.contains('菜')
@@ -72802,6 +73005,117 @@ repo: "Beta/Override"
         assert!(launcher.game_state.playtesting_map.is_none());
         assert!(launcher.runtime.state.playtesting_map.is_none());
         assert_eq!(launcher.last_menu_route_shell_action, None);
+    }
+
+    #[test]
+    fn desktop_launcher_game_over_campaign_server_continues_to_planet_route_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.runtime.state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Playing);
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.game_state.game_over = true;
+        launcher.runtime.state.game_over = true;
+        launcher.game_state.after_game_over = true;
+        launcher.runtime.state.after_game_over = true;
+        let mut sector = Sector::new(15);
+        sector.preset = Some(
+            mindustry_core::mindustry::r#type::SectorPreset::new("groundZero")
+                .localized("Ground Zero")
+                .require_unlock(true),
+        );
+        launcher.game_state.set_sector(Some(sector.clone()));
+        launcher.runtime.state.set_sector(Some(sector));
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let pass = launcher
+            .pause_overlay_render_pass(viewport)
+            .expect("campaign game over dialog should render");
+        let texts = pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let title = launcher.format_bundle_text("sector.lost", &["Ground Zero"]);
+        let continue_text = launcher.localize_bundle_markup_text("@continue");
+        assert!(texts.contains(&title.as_str()));
+        assert!(texts.contains(&continue_text.as_str()));
+
+        let dialog = DesktopLauncher::game_over_dialog_rect_for_viewport(viewport);
+        let button = DesktopLauncher::game_over_menu_button_rect(dialog).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, button.x, button.y),
+            Some(super::DesktopPausedOverlayAction::GameOverContinue)
+        );
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::GameOverContinue);
+
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Campaign)
+        );
+        assert!(launcher.campaign_planet_dialog.is_some());
+        assert!(launcher.game_state.is_menu());
+        assert!(launcher.runtime.state.is_menu());
+        assert!(!launcher.game_state.game_over);
+        assert!(!launcher.runtime.state.game_over);
+        assert!(!launcher.game_state.after_game_over);
+        assert!(!launcher.runtime.state.after_game_over);
+    }
+
+    #[test]
+    fn desktop_launcher_game_over_campaign_client_shows_waiting_and_disconnects_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.runtime.state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Playing);
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.game_state.game_over = true;
+        launcher.runtime.state.game_over = true;
+        let mut sector = Sector::new(16);
+        sector.info.name = Some("Remote Sector".into());
+        launcher.game_state.set_sector(Some(sector.clone()));
+        launcher.runtime.state.set_sector(Some(sector));
+        launcher.net_client.state().lock().unwrap().connected = true;
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let pass = launcher
+            .pause_overlay_render_pass(viewport)
+            .expect("campaign client game over dialog should render");
+        let texts = pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let title = launcher.format_bundle_text("sector.lost", &["Remote Sector"]);
+        let waiting = launcher.localize_bundle_markup_text("@gameover.waiting");
+        let disconnect = launcher.localize_bundle_markup_text("@gameover.disconnect");
+        assert!(texts.contains(&title.as_str()));
+        assert!(texts.contains(&waiting.as_str()));
+        assert!(texts.contains(&disconnect.as_str()));
+
+        let dialog = DesktopLauncher::game_over_dialog_rect_for_viewport(viewport);
+        let button = DesktopLauncher::game_over_menu_button_rect(dialog).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, button.x, button.y),
+            Some(super::DesktopPausedOverlayAction::GameOverDisconnect)
+        );
+        launcher
+            .dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::GameOverDisconnect);
+
+        assert_eq!(launcher.active_menu_route, None);
+        assert!(launcher.game_state.is_menu());
+        assert!(launcher.runtime.state.is_menu());
+        assert!(!launcher.game_state.game_over);
+        assert!(!launcher.runtime.state.game_over);
+        assert!(!launcher.net_client.state().lock().unwrap().connected);
     }
 
     #[test]

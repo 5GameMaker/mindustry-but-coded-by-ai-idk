@@ -17,6 +17,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 814. GameOverDialog 标题、高分、时长与 campaign 按钮分支接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.45%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `GameOverDialog.java` 标题分支：campaign 使用 `sector.lost`，普通分支使用 `@gameover`，pvp 需要 winner 后使用 `gameover.pvp`；
+  - `control.isHighScore()` 成立时显示 `@highscore`；
+  - stats pane 后显示当前存档 `stats.playtime` 与 `SaveSlot.getPlayTime()`；
+  - campaign client 显示 `@gameover.waiting` 与 `@gameover.disconnect`，campaign server 显示 `@continue`，非 campaign 仍保留 `@menu` + playtest 回 editor 语义。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopPausedOverlayAction` 新增 `GameOverContinue` / `GameOverDisconnect`；
+    - 新增 `game_over_title_text(...)`，普通 game-over 走 bundle `@gameover`，campaign 走 `sector.lost` + 当前 sector/preset 名称；
+    - 新增 `game_over_is_high_score(...)`，复用 `MapDescriptor::high_score_key()` 与 `settings_overrides` 中的 Java `hiscore...` 存储规则；
+    - 新增 `current_loaded_save_slot(...)` / `game_over_playtime_text(...)`，把当前已加载存档的 `SaveSlotRecord::time_played()` 接入 GameOver stats pane；
+    - 新增 `game_over_primary_action(...)` / `game_over_primary_button_label(...)`，按 campaign/client/server/普通分支选择 `@gameover.disconnect` / `@continue` / `@menu`；
+    - 新增 `execute_game_over_continue_button()`，进入现有 `DesktopMenuRoute::Campaign` 与 `CampaignPlanetDialogState::look(...)`；
+    - 新增 `execute_game_over_disconnect_button()`，断开 net client 并回主菜单；
+    - `pause_overlay_action_at_surface_point(...)` 的 game-over hit-test 改为返回当前分支真实 action；
+    - `pause_overlay_render_pass(...)` 的 GameOverDialog 去掉硬编码 `GameOverDialog` 标题，追加 highscore、playtime、campaign waiting 文案与分支按钮。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_game_over --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - `GameOverCallPacket.winner` / `UpdateGameOverCallPacket.winner` 尚未镜像到 `GameState`，因此 pvp `winner.coloredName()` 与 `gameover.pvp` 标题仍需后续补齐；
+  - Java `SaveSlot.getPlayTime()` 的 live `totalPlaytime` 累计仍未完全迁移，本轮只接入当前已加载 `SaveSlotRecord` 的静态 meta playtime；
+  - Java `FLabel`/`StatLabel` 动画、campaign difficulty guide、真实 `logic.reset()` 等价清理仍需继续迁移。
+
 ## 813. GameOverDialog 非 playtest `@menu` 回主菜单验证
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
