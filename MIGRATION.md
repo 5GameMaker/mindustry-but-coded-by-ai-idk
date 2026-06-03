@@ -17,6 +17,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 813. GameOverDialog 非 playtest `@menu` 回主菜单验证
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.44%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `GameOverDialog.java` 非 campaign 分支的 `@menu`：`hide(); if(!ui.paused.checkPlaytest()) logic.reset();`；
+  - 812/811 已接入 playtest 分支，本轮补齐非 playtest 的主菜单回退验证。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_game_over_menu_resets_to_main_menu_without_playtest`；
+    - 覆盖：GameOverDialog menu hit-test、无 playtesting_map 时进入非 playtest 分支、`game_state/runtime.state` 回到 menu、清理 `game_over`、不残留 route action。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_game_over_menu_resets_to_main_menu_without_playtest --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - 非 playtest 分支的真实 `logic.reset()` 等价内容清理、campaign continue/disconnect 分支、pvp winner/highscore/playtime 仍需继续迁移。
+
 ## 812. GameOverDialog stats pane 前端迁移
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

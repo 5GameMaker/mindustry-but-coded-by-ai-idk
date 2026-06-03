@@ -72774,6 +72774,37 @@ repo: "Beta/Override"
     }
 
     #[test]
+    fn desktop_launcher_game_over_menu_resets_to_main_menu_without_playtest() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.runtime.state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Playing);
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.game_state.game_over = true;
+        launcher.runtime.state.game_over = true;
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let dialog = DesktopLauncher::game_over_dialog_rect_for_viewport(viewport);
+        let menu = DesktopLauncher::game_over_menu_button_rect(dialog).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, menu.x, menu.y),
+            Some(super::DesktopPausedOverlayAction::GameOverMenu)
+        );
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::GameOverMenu);
+
+        assert_eq!(launcher.active_menu_route, None);
+        assert!(launcher.game_state.is_menu());
+        assert!(launcher.runtime.state.is_menu());
+        assert!(!launcher.game_state.game_over);
+        assert!(!launcher.runtime.state.game_over);
+        assert!(launcher.game_state.playtesting_map.is_none());
+        assert!(launcher.runtime.state.playtesting_map.is_none());
+        assert_eq!(launcher.last_menu_route_shell_action, None);
+    }
+
+    #[test]
     fn desktop_launcher_paused_world_overlay_opens_host_dialog_route() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let host_ports = Arc::new(Mutex::new(Vec::new()));
