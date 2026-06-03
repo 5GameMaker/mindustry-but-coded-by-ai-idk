@@ -17,6 +17,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 864. ModsDialog GitHub import 输入框与 lastmod 回写
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **93.96%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 对照 Java `ModsDialog.java:207-217` 的 `ui.showTextInput("@mod.import.github", "", 64, Core.settings.getString("lastmod", ""), ...)`；
+    - `@mod.import.github` 不再只是占位记录，而是关闭 import 选择弹窗后打开 GitHub repo 输入子弹窗；
+    - 输入框预填 `lastmod`，支持 focus、Text、Backspace/Delete、Enter/Escape、OK/Cancel hit-test 和渲染；
+    - Confirm 时按 Java 语义执行 `trim().replace(" ", "")`，并仅剥离 `https://github.com/` 前缀；
+    - Confirm 后回写 `settings_overrides["lastmod"]`，并记录 `DesktopModsImportGithubRequest { repo, is_java: false, release: None }`，作为后续真实 `githubImportMod(text, false, null)` 下载/导入执行链的非孤立接入点。
+- 已验证：
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_route_import_dialog_renders_and_records_file_request -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop mods -- --nocapture`
+- 下一步优先：
+  - ModsDialog：本地 file import 选择结果消费、真实 GitHub import/reinstall 下载执行链、进度/取消/错误反馈；
+  - 前端/UI：按只读审查结果优先收口主菜单子菜单状态机、Settings 路由和 Join 命中/弹窗优先级。
+
 ## 863. HostDialog beta/alpha Steam public lobby 保护
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
