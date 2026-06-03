@@ -596,6 +596,7 @@ pub struct NetClientState {
     pub last_campaign_event_packet: Option<PacketKind>,
     pub last_campaign_event_packet_at: Option<Instant>,
     pub campaign_event_packets_seen: u64,
+    pub last_game_over_winner: Option<TeamId>,
     pub last_player_disconnect: Option<PlayerDisconnectCallPacket>,
     pub last_player_disconnect_at: Option<Instant>,
     pub player_disconnect_packets_seen: u64,
@@ -896,6 +897,7 @@ impl fmt::Debug for NetClientState {
                 "campaign_event_packets_seen",
                 &self.campaign_event_packets_seen,
             )
+            .field("last_game_over_winner", &self.last_game_over_winner)
             .field(
                 "player_disconnect_packets_seen",
                 &self.player_disconnect_packets_seen,
@@ -1156,6 +1158,7 @@ impl NetClientState {
     fn reset_client_gameplay_sync_state(&mut self) {
         self.next_client_snapshot_at = None;
         self.next_client_plan_snapshot_at = None;
+        self.last_game_over_winner = None;
     }
 
     fn clear_loading_stream_tracking(&mut self) {
@@ -1209,6 +1212,15 @@ impl NetClientState {
 
     fn record_campaign_event_packet(&mut self, packet: &PacketKind) {
         self.campaign_event_packets_seen = self.campaign_event_packets_seen.saturating_add(1);
+        match packet {
+            PacketKind::GameOverCallPacket(packet) => {
+                self.last_game_over_winner = Some(packet.winner);
+            }
+            PacketKind::UpdateGameOverCallPacket(packet) => {
+                self.last_game_over_winner = Some(packet.winner);
+            }
+            _ => {}
+        }
         self.last_campaign_event_packet = Some(packet.clone());
         self.last_campaign_event_packet_at = Some(Instant::now());
     }
@@ -3698,9 +3710,9 @@ mod tests {
         TransferItemToCallPacket, TransferItemToUnitCallPacket,
         UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
         UnitDeathCallPacket, UnitDestroyCallPacket, UnitEnteredPayloadCallPacket,
-        UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket, UpdateMarkerCallPacket,
-        UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket, WarningToastCallPacket,
-        WorldDataBeginCallPacket,
+        UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket, UpdateGameOverCallPacket,
+        UpdateMarkerCallPacket, UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket,
+        WarningToastCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
@@ -4215,6 +4227,7 @@ mod tests {
         };
         let remove_marker = RemoveMarkerCallPacket { id: 5 };
         let game_over = GameOverCallPacket { winner: TeamId(2) };
+        let update_game_over = UpdateGameOverCallPacket { winner: TeamId(4) };
 
         {
             let mut net = client.net_mut();
@@ -4228,6 +4241,7 @@ mod tests {
             net.handle_client_received(PacketKind::CreateMarkerCallPacket(create_marker));
             net.handle_client_received(PacketKind::RemoveMarkerCallPacket(remove_marker));
             net.handle_client_received(PacketKind::GameOverCallPacket(game_over));
+            net.handle_client_received(PacketKind::UpdateGameOverCallPacket(update_game_over));
         }
 
         client.update();
@@ -4260,11 +4274,12 @@ mod tests {
             Some(PacketKind::RemoveMarkerCallPacket(_))
         ));
         assert!(state.last_marker_packet_at.is_some());
-        assert_eq!(state.campaign_event_packets_seen, 1);
+        assert_eq!(state.campaign_event_packets_seen, 2);
         assert!(matches!(
             state.last_campaign_event_packet.as_ref(),
-            Some(PacketKind::GameOverCallPacket(_))
+            Some(PacketKind::UpdateGameOverCallPacket(_))
         ));
+        assert_eq!(state.last_game_over_winner, Some(TeamId(4)));
         assert!(state.last_campaign_event_packet_at.is_some());
     }
 

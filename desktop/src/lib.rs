@@ -19913,6 +19913,7 @@ impl DesktopLauncher {
         self.sync_loaded_world_data();
         self.sync_client_loaded_state();
         self.sync_state_snapshot();
+        self.sync_game_over_winner_from_net_client();
         self.sync_snapshot_mirrors();
         self.runtime
             .update_client_effect_snapshot_parent_transforms();
@@ -30232,12 +30233,31 @@ impl DesktopLauncher {
     }
 
     fn game_over_title_text(&self) -> String {
+        if self.game_state.rules.pvp {
+            if let Some(winner_name) = self.game_over_winner_colored_name() {
+                return self.format_bundle_text("gameover.pvp", &[winner_name.as_str()]);
+            }
+        }
         if self.game_state.is_campaign() {
             if let Some(sector_name) = self.game_over_sector_name() {
                 return self.format_bundle_text("sector.lost", &[sector_name.as_str()]);
             }
         }
         self.localize_bundle_markup_text("@gameover")
+    }
+
+    fn team_colored_name(&self, team_id: TeamId) -> String {
+        let teams = vanilla_teams();
+        let team = teams.get(team_id.0 as i32);
+        let key = format!("@team.{}.name", team.name);
+        let localized = self.localize_bundle_markup_text_or(&key, team.name.as_str());
+        team.colored_name_with(&localized)
+    }
+
+    fn game_over_winner_colored_name(&self) -> Option<String> {
+        self.game_state
+            .game_over_winner
+            .map(|winner| self.team_colored_name(winner))
     }
 
     fn game_over_is_high_score(&self) -> bool {
@@ -39523,6 +39543,8 @@ impl DesktopLauncher {
         self.runtime.state.set(GameStateState::Menu);
         self.game_state.game_over = false;
         self.runtime.state.game_over = false;
+        self.game_state.game_over_winner = None;
+        self.runtime.state.game_over_winner = None;
         self.game_state.after_game_over = false;
         self.runtime.state.after_game_over = false;
         self.menu_renderer_state.reset_desktop_root();
@@ -39538,6 +39560,8 @@ impl DesktopLauncher {
         self.runtime.state.set(GameStateState::Menu);
         self.game_state.game_over = false;
         self.runtime.state.game_over = false;
+        self.game_state.game_over_winner = None;
+        self.runtime.state.game_over_winner = None;
         self.game_state.after_game_over = false;
         self.runtime.state.after_game_over = false;
         self.active_menu_route = Some(DesktopMenuRoute::Campaign);
@@ -39560,6 +39584,8 @@ impl DesktopLauncher {
         self.runtime.state.set(GameStateState::Menu);
         self.game_state.game_over = false;
         self.runtime.state.game_over = false;
+        self.game_state.game_over_winner = None;
+        self.runtime.state.game_over_winner = None;
         self.game_state.after_game_over = false;
         self.runtime.state.after_game_over = false;
         self.menu_renderer_state.reset_desktop_root();
@@ -54601,6 +54627,33 @@ impl DesktopLauncher {
         self.game_state.apply_state_snapshot(&snapshot);
         self.sync_runtime_state_from_game_state();
         self.last_applied_state_snapshot = Some(snapshot);
+    }
+
+    fn sync_game_over_winner_from_net_client(&mut self) {
+        if self.last_applied_world_data.is_none() {
+            return;
+        }
+
+        let winner = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            state.last_game_over_winner
+        };
+
+        if self.game_state.game_over_winner == winner
+            && self.runtime.state.game_over_winner == winner
+        {
+            return;
+        }
+
+        self.game_state.game_over_winner = winner;
+        self.runtime.state.game_over_winner = winner;
+        if winner.is_some() {
+            self.game_state.game_over = true;
+            self.runtime.state.game_over = true;
+            self.game_state.after_game_over = true;
+            self.runtime.state.after_game_over = true;
+        }
     }
 
     fn sync_client_loaded_state(&mut self) {
@@ -73005,6 +73058,66 @@ repo: "Beta/Override"
         assert!(launcher.game_state.playtesting_map.is_none());
         assert!(launcher.runtime.state.playtesting_map.is_none());
         assert_eq!(launcher.last_menu_route_shell_action, None);
+    }
+
+    #[test]
+    fn desktop_launcher_game_over_dialog_shows_pvp_winner_title_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.runtime.state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Playing);
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.game_state.rules.pvp = true;
+        launcher.runtime.state.rules.pvp = true;
+        launcher.game_state.game_over = true;
+        launcher.runtime.state.game_over = true;
+        launcher.game_state.game_over_winner = Some(TeamId(2));
+        launcher.runtime.state.game_over_winner = Some(TeamId(2));
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let pass = launcher
+            .pause_overlay_render_pass(viewport)
+            .expect("pvp game over dialog should render");
+        let texts = pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let winner = launcher.team_colored_name(TeamId(2));
+        let title = launcher.format_bundle_text("gameover.pvp", &[winner.as_str()]);
+        assert!(
+            texts.contains(&title.as_str()),
+            "GameOverDialog should use Java gameover.pvp winner title; texts={texts:?}"
+        );
+        assert!(
+            !texts.contains(&launcher.localize_bundle_markup_text("@gameover").as_str()),
+            "plain gameover title should be replaced by pvp winner title; texts={texts:?}"
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_game_over_winner_from_net_client() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.last_applied_world_data = Some(NetworkWorldData::default());
+        launcher
+            .net_client
+            .state()
+            .lock()
+            .unwrap()
+            .last_game_over_winner = Some(TeamId(2));
+
+        launcher.sync_game_over_winner_from_net_client();
+
+        assert_eq!(launcher.game_state.game_over_winner, Some(TeamId(2)));
+        assert_eq!(launcher.runtime.state.game_over_winner, Some(TeamId(2)));
+        assert!(launcher.game_state.game_over);
+        assert!(launcher.runtime.state.game_over);
+        assert!(launcher.game_state.after_game_over);
+        assert!(launcher.runtime.state.after_game_over);
     }
 
     #[test]

@@ -17,6 +17,38 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 815. GameOverDialog PVP winner 标题接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.46%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `GameOverDialog.java`：`state.rules.pvp && winner != null` 时标题使用 `Core.bundle.format("gameover.pvp", winner.coloredName())`；
+  - `GameOverCallPacket` / `UpdateGameOverCallPacket` 均携带 `winner: TeamId`；
+  - `Team.coloredName()` 语义是 team emoji + team color + 本地化团队名，Rust UI 侧需使用本地 bundle 名称再套 team color。
+- 本轮主改动：
+  - `core/src/mindustry/core/game_state.rs`
+    - 新增 `game_over_winner: Option<TeamId>`，默认 `None`；
+    - `apply_state_snapshot(...)` 在服务端 snapshot 退出 game-over 时清空 winner，避免旧胜者残留到下一局。
+  - `core/src/mindustry/core/net_client.rs`
+    - `NetClientState` 新增 `last_game_over_winner`；
+    - 收到 `GameOverCallPacket` / `UpdateGameOverCallPacket` 时记录 winner，并在连接/断开 gameplay sync reset 时清空。
+  - `desktop/src/lib.rs`
+    - `sync_game_over_winner_from_net_client()` 将 net client winner 同步到 `game_state/runtime.state` 并置入 game-over/after-game-over；
+    - `game_over_title_text()` 增加 PVP winner 优先分支，按 `gameover.pvp` 格式化标题；
+    - `team_colored_name(...)` 使用 `vanilla_teams()` 与 `team.{name}.name` bundle 文案生成接近 Java `coloredName()` 的 team 标题；
+    - GameOver menu/continue/disconnect 退出路径同步清空 `game_over_winner`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core game_state --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core net_client --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_game_over --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_game_over_winner --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - GameOverDialog 的 Java `FLabel`/`StatLabel` 动画、campaign difficulty guide、真实 `logic.reset()` 等价清理仍需继续迁移；
+  - 前端/UI 仍需继续优先推进，尤其主菜单/子菜单/设置/Mods/编辑器/资源复用与低帧率问题。
+
 ## 814. GameOverDialog 标题、高分、时长与 campaign 按钮分支接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

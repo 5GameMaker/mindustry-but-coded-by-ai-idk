@@ -16,7 +16,7 @@ use crate::mindustry::{
     game::{BlockPlan, FogControl, GameStats, MapMarkers, Rules, Teams, Universe},
     io::{
         read_custom_chunks, type_io::read_u8, CustomChunkSet, LegacyTeamBlocks,
-        MarkerRegionSummary, TypeValue, CUSTOM_CHUNK_STATIC_FOG_DATA,
+        MarkerRegionSummary, TeamId, TypeValue, CUSTOM_CHUNK_STATIC_FOG_DATA,
     },
     maps::MapDescriptor,
     net::{NetworkWorldData, StateSnapshotCallPacket},
@@ -132,6 +132,8 @@ pub struct GameState {
     pub update_id: i64,
     /// Whether the game is in game over state.
     pub game_over: bool,
+    /// Winner team supplied by Java `GameOverCallPacket`/`UpdateGameOverCallPacket`.
+    pub game_over_winner: Option<TeamId>,
     /// Campaign-only "after game over" marker; such maps are kept paused by higher layers.
     pub after_game_over: bool,
     /// Whether the player's team won the match.
@@ -201,6 +203,7 @@ impl GameState {
             rand_seed1: 0,
             update_id: 0,
             game_over: false,
+            game_over_winner: None,
             after_game_over: false,
             won: false,
             server_tps: -1,
@@ -371,6 +374,9 @@ impl GameState {
         let wave_changed = self.wave != snapshot.wave;
 
         self.game_over = snapshot.game_over;
+        if !snapshot.game_over {
+            self.game_over_winner = None;
+        }
         self.wavetime = snapshot.wave_time;
         self.wave = snapshot.wave;
         self.enemies = snapshot.enemies;
@@ -716,6 +722,7 @@ mod tests {
         assert_eq!(state.rand_seed1, 0);
         assert_eq!(state.update_id, 0);
         assert!(!state.game_over);
+        assert_eq!(state.game_over_winner, None);
         assert!(!state.after_game_over);
         assert!(!state.won);
         assert_eq!(state.server_tps, -1);
@@ -1352,6 +1359,7 @@ mod tests {
         assert_eq!(state.wave, snapshot.wave);
         assert_eq!(state.enemies, snapshot.enemies);
         assert_eq!(state.game_over, snapshot.game_over);
+        assert_eq!(state.game_over_winner, None);
         assert_eq!(state.server_tps, 255);
         assert_eq!(state.rand_seed0, 11);
         assert_eq!(state.rand_seed1, 22);
@@ -1370,6 +1378,7 @@ mod tests {
             rand1: 44,
             core_data: Vec::new(),
         };
+        state.game_over_winner = Some(TeamId(TEAM_CRUX));
 
         let result = state.apply_state_snapshot(&next);
 
@@ -1386,6 +1395,7 @@ mod tests {
         assert_eq!(state.wavetime, next.wave_time);
         assert_eq!(state.wave, next.wave);
         assert_eq!(state.enemies, next.enemies);
+        assert_eq!(state.game_over_winner, None);
         assert_eq!(state.server_tps, 60);
         assert_eq!(state.rand_seed0, 33);
         assert_eq!(state.rand_seed1, 44);
