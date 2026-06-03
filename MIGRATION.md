@@ -17,6 +17,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 861. CustomRulesDialog additionalSetup 扩展钩子接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **93.93%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 对照 Java `CustomRulesDialog.additionalSetup` 与 `additionalSetup.each(Runnable::run)`；
+    - 新增 `DesktopCustomRulesAdditionalSetupEntry` 和 `DesktopLauncher::register_custom_rules_additional_setup_entry(...)`；
+    - 先落地 tag-toggle 型扩展行：支持分类、label、搜索、渲染、hit-test、dispatch，并写入 pending `Rules.tags`；
+    - 同时接入 map-play 与 paused CustomRules 两条主链路，分别保持 `PlaySelected` / 关闭 CustomRulesDialog 后才提交到 `runtime/game_state`，避免成为孤立 helper。
+- 已验证：
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_custom_rules_additional_setup_hook_like_java -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop map_play -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop paused_world_overlay_custom_rules -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop custom_rules -- --nocapture`
+- 下一步优先：继续沿本地 Java UI 前端做差距审查；CustomRulesDialog 当前已覆盖子菜单与扩展钩子，后续应回到主菜单/设置/内容浏览/Mods 等前端还原与黑屏/FPS 收口。
+
 ## 860. MapPlay CustomRules solarMultiplier 数值项接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
