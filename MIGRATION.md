@@ -17,6 +17,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 845. ModsDialog View Content icon grid 滚动接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.77%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ModsDialog.showMod()` 的 content 子窗使用 `pane(...)`，大量 content icon 应可滚动访问；
+  - 滚动后点击首个可见 icon，必须映射到滚动后的真实 `UnlockableContent` entry。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `mods_content_scroll_offset`，接入 content/detail 打开关闭与删除弹窗清理；
+    - 新增 content icon grid 的列数、可见行、max scroll 与滚轮 delta 处理；
+    - content grid 渲染和命中从固定首屏改为按 row scroll offset 映射真实 entry index；
+    - 新增 64 content 文件的回归测试，锁定滚动后首个 icon 命中到下一行真实 entry。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods`
+- 仍未完成：
+  - content grid 仍需继续补 tooltip/hover 亮度与真实 `uiIcon` 图标来源；
+  - browser/release/content ScrollPane 的视觉滚动条样式仍需继续贴近 Java；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 844. ModsDialog View Content icon grid 对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。

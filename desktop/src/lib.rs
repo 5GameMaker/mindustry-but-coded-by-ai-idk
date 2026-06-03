@@ -19039,6 +19039,7 @@ pub struct DesktopLauncher {
     pub last_mods_content_index: Option<usize>,
     pub last_mods_content_entry_index: Option<usize>,
     pub mods_content_dialog_index: Option<usize>,
+    pub mods_content_scroll_offset: usize,
     pub mods_import_dialog_open: bool,
     pub mods_browser_dialog_open: bool,
     pub mods_search: String,
@@ -20258,6 +20259,7 @@ impl DesktopLauncher {
             last_mods_content_index: None,
             last_mods_content_entry_index: None,
             mods_content_dialog_index: None,
+            mods_content_scroll_offset: 0,
             mods_import_dialog_open: false,
             mods_browser_dialog_open: false,
             mods_search: String::new(),
@@ -40661,6 +40663,7 @@ impl DesktopLauncher {
                     self.mods_selected_mod_index = Some(index);
                     self.close_mods_browser_dialog();
                     self.mods_search_focused = false;
+                    self.mods_content_scroll_offset = 0;
                 }
             }
             DesktopMenuRouteShellAction::ToggleModsEnabled(index) => {
@@ -40671,6 +40674,7 @@ impl DesktopLauncher {
                     self.mods_delete_dialog_index = Some(index);
                     self.mods_selected_mod_index = None;
                     self.mods_content_dialog_index = None;
+                    self.mods_content_scroll_offset = 0;
                     self.close_mods_browser_dialog();
                     self.mods_search_focused = false;
                 }
@@ -40712,6 +40716,7 @@ impl DesktopLauncher {
                     self.last_mods_content_index = Some(index);
                     self.last_mods_content_entry_index = None;
                     self.mods_content_dialog_index = Some(index);
+                    self.mods_content_scroll_offset = 0;
                 }
             }
             DesktopMenuRouteShellAction::OpenModsContentEntry(index) => {
@@ -40731,11 +40736,13 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::CloseModsContent => {
                 self.mods_content_dialog_index = None;
                 self.last_mods_content_entry_index = None;
+                self.mods_content_scroll_offset = 0;
             }
             DesktopMenuRouteShellAction::CloseModsDetail => {
                 self.mods_selected_mod_index = None;
                 self.mods_content_dialog_index = None;
                 self.last_mods_content_entry_index = None;
+                self.mods_content_scroll_offset = 0;
             }
             DesktopMenuRouteShellAction::FocusSchematicSearch => {
                 self.schematic_search_focused = true;
@@ -50557,6 +50564,9 @@ impl DesktopLauncher {
                     if self.apply_about_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
+                    if self.apply_mods_content_scroll_delta(surface_size, *delta_y) {
+                        continue;
+                    }
                     if self.apply_mods_browser_releases_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
@@ -52526,14 +52536,20 @@ impl DesktopLauncher {
             return Some(DesktopMenuRouteShellAction::CloseModsContent);
         }
         let grid = Self::mods_content_grid_rect_for_dialog(dialog);
+        let columns = Self::mods_content_entry_columns_for_grid(grid);
+        let start = self
+            .mods_content_scroll_offset
+            .min(self.max_mods_content_scroll_offset(grid, self.mods_content_dialog_index?))
+            * columns;
         let capacity = Self::mods_content_visible_entry_capacity_for_grid(grid);
-        for (entry_index, _) in self
-            .mods_content_entries_for_mod(self.mods_content_dialog_index?)
-            .iter()
+        for (visible_index, entry_index) in (start
+            ..self
+                .mods_content_entries_for_mod(self.mods_content_dialog_index?)
+                .len())
             .take(capacity)
             .enumerate()
         {
-            if Self::mods_content_entry_rect_for_grid(grid, entry_index).contains_point(point) {
+            if Self::mods_content_entry_rect_for_grid(grid, visible_index).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::OpenModsContentEntry(
                     entry_index,
                 ));
@@ -52581,8 +52597,68 @@ impl DesktopLauncher {
 
     fn mods_content_visible_entry_capacity_for_grid(grid: RenderRect) -> usize {
         let columns = Self::mods_content_entry_columns_for_grid(grid);
-        let rows = ((grid.height + 8.0) / 58.0).floor().max(1.0) as usize;
+        let rows = Self::mods_content_visible_rows_for_grid(grid);
         columns * rows
+    }
+
+    fn mods_content_visible_rows_for_grid(grid: RenderRect) -> usize {
+        ((grid.height + 8.0) / 58.0).floor().max(1.0) as usize
+    }
+
+    fn max_mods_content_scroll_offset_for_counts(
+        total_entries: usize,
+        columns: usize,
+        visible_rows: usize,
+    ) -> usize {
+        let total_rows = total_entries.div_ceil(columns.max(1));
+        total_rows.saturating_sub(visible_rows.max(1))
+    }
+
+    fn max_mods_content_scroll_offset(&self, grid: RenderRect, mod_index: usize) -> usize {
+        Self::max_mods_content_scroll_offset_for_counts(
+            self.mods_content_entries_for_mod(mod_index).len(),
+            Self::mods_content_entry_columns_for_grid(grid),
+            Self::mods_content_visible_rows_for_grid(grid),
+        )
+    }
+
+    fn apply_mods_content_scroll_delta(
+        &mut self,
+        surface_size: DesktopSurfaceSize,
+        delta_y: f32,
+    ) -> bool {
+        if self.active_menu_route != Some(DesktopMenuRoute::Mods) {
+            return false;
+        }
+        let Some(mod_index) = self.mods_content_dialog_index else {
+            return false;
+        };
+        let Some(cursor) = self.last_menu_cursor else {
+            return false;
+        };
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel = Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Mods);
+        let dialog = Self::mods_content_dialog_rect_for_panel(panel);
+        let grid = Self::mods_content_grid_rect_for_dialog(dialog);
+        if !grid.contains_point(cursor) {
+            return false;
+        }
+        let max = self.max_mods_content_scroll_offset(grid, mod_index);
+        if max == 0 {
+            return false;
+        }
+        let current = self.mods_content_scroll_offset.min(max);
+        let rows = delta_y.abs().ceil().max(1.0) as isize;
+        let step = if delta_y < 0.0 {
+            rows
+        } else if delta_y > 0.0 {
+            -rows
+        } else {
+            0
+        };
+        let next = (current as isize + step).clamp(0, max as isize) as usize;
+        self.mods_content_scroll_offset = next;
+        next != current
     }
 
     fn mods_route_mod_content_dir_at_index(&self, index: usize) -> Option<PathBuf> {
@@ -52901,10 +52977,21 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.090,
             ));
         }
+        let columns = Self::mods_content_entry_columns_for_grid(grid);
+        let scroll_offset = self
+            .mods_content_scroll_offset
+            .min(self.max_mods_content_scroll_offset(grid, index));
+        let start = scroll_offset * columns;
         let capacity = Self::mods_content_visible_entry_capacity_for_grid(grid);
-        for (entry_index, entry) in entries.iter().take(capacity).enumerate() {
-            let card = Self::mods_content_entry_rect_for_grid(grid, entry_index);
-            let layer = Layer::END_PIXELED + 0.090 + entry_index as f32 * 0.001;
+        for (visible_index, (entry_index, entry)) in entries
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(capacity)
+            .enumerate()
+        {
+            let card = Self::mods_content_entry_rect_for_grid(grid, visible_index);
+            let layer = Layer::END_PIXELED + 0.090 + visible_index as f32 * 0.001;
             let selected = self.last_mods_content_entry_index == Some(entry_index);
             pass.push(RenderCommand::draw_sprite(
                 Self::settings_image_button_symbol("flati", selected, false),
@@ -73511,6 +73598,88 @@ repo: "Beta/Override"
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseRoute);
         assert_eq!(launcher.active_menu_route, None);
         assert_eq!(launcher.mods_selected_mod_index, None);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn desktop_launcher_mods_content_grid_scrolls_icon_rows_like_java_pane() {
+        let root = temp_desktop_path("mods-content-scroll");
+        let alpha_root = root.join("alpha");
+        let content_dir = alpha_root.join("content/blocks");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&content_dir).expect("content dir should be creatable");
+        for index in 0..64 {
+            std::fs::write(
+                content_dir.join(format!("block{index:02}.hjson")),
+                format!("name: block{index:02}\n"),
+            )
+            .expect("content file should be writable");
+        }
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.last_mods_directory_mod_names = vec!["alpha".into()];
+        launcher.last_mods_directory_mod_roots = vec![alpha_root.to_string_lossy().into_owned()];
+        launcher.last_mods_directory_mod_metas = vec![ModMetadata::from_source_text(
+            "alpha",
+            Some("mod.hjson"),
+            r#"
+name: alpha
+displayName: "Alpha Pack"
+"#,
+        )];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsDetail(0),
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsContent(0),
+        );
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let dialog = DesktopLauncher::mods_content_dialog_rect_for_panel(panel);
+        let grid = DesktopLauncher::mods_content_grid_rect_for_dialog(dialog);
+        let columns = DesktopLauncher::mods_content_entry_columns_for_grid(grid);
+        assert!(launcher.max_mods_content_scroll_offset(grid, 0) > 0);
+
+        let cursor = grid.center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: cursor.x,
+                    y: cursor.y,
+                },
+                DesktopInputTickEvent::Scroll {
+                    delta_x: 0.0,
+                    delta_y: -1.0,
+                },
+            ],
+        );
+        assert_eq!(launcher.mods_content_scroll_offset, 1);
+
+        let first_visible = DesktopLauncher::mods_content_entry_rect_for_grid(grid, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                first_visible.x,
+                first_visible.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::OpenModsContentEntry(
+                columns
+            )),
+            "scrolling Java-style content pane must map the first visible icon to the first entry of the next row"
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsContentEntry(columns),
+        );
+        assert_eq!(launcher.last_mods_content_entry_index, Some(columns));
 
         let _ = std::fs::remove_dir_all(root);
     }
