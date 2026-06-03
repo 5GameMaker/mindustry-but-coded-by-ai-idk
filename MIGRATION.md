@@ -17,6 +17,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 803. Editor export createDialog 前端入口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.34%**，仍未达到完整可玩；继续优先前端/UI、编辑器/地图相关子菜单、黑屏/启动兼容、性能收口与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `MapEditorDialog.java` 的 `@editor.export` 使用 `createDialog("@editor.export", ...)` 展示两个动作；
+  - `@editor.exportfile` 走 `platform.export(..., mapExtension, MapIO.writeMap(...))`；
+  - `@editor.exportimage` 走 `platform.export(..., "png", MapIO.writeImage(...))`；
+  - Rust 当前平台层只有通用 `show_file_chooser(...)`，本轮只接入前端 dialog 与导出请求记录，不伪造未实现的真实 `MapIO.writeMap/writeImage`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopEditorExportKind::{MapFile, Image}`；
+    - 新增 `DesktopMenuRouteShellAction::{EditorExport, EditorExportFile, EditorExportImage, CloseEditorExportDialog}`；
+    - Editor route 顶部按钮扩展为 `@editor.newmap / @editor.importmap / @editor.export / @editor.playtest`；
+    - 新增 `editor_export_dialog_open`、`last_editor_export_request`、`editor_last_export_kind`，并在 route 清理路径关闭 export dialog；
+    - 新增 `push_editor_export_dialog(...)`，渲染 Java createDialog 风格的 `@editor.exportfile` 与 `@editor.exportimage` 两个选项；
+    - 新增 `dispatch_editor_export_with_platform(...)`，分别生成 `msav` 与 `png` save-mode `FileChooserRequest`；
+    - 新增 `desktop_launcher_editor_route_dispatches_export_actions_like_java_dialog`，覆盖按钮命中、dialog route lines、file/image 请求。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_route_dispatches_export_actions_like_java_dialog --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_card_dialog_buttons_dispatch_play_and_editor_actions --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `@editor.exportfile` 的真实 map bytes 写出、`@editor.exportimage` 的真实 PNG 生成仍需继续接入 MapIO/renderer 侧；
+  - `@editor.ingame`、`@editor.publish.workshop` 仍未接入；
+  - GameOverDialog 的 playtest 返回菜单 UI 路径仍未完成，因为 Rust 当前尚无独立 GameOverDialog 前端。
+
 ## 802. PausedDialog.checkPlaytest 恢复编辑器链路
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

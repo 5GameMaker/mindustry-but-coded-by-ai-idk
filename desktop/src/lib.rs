@@ -3645,6 +3645,10 @@ pub enum DesktopMenuRouteShellAction {
     ConfirmEditorNewMap,
     CancelEditorNewMap,
     ImportEditorMap,
+    EditorExport,
+    EditorExportFile,
+    EditorExportImage,
+    CloseEditorExportDialog,
     EditorPlaytest,
     ConfirmEditorImportOverwrite,
     CancelEditorImportOverwrite,
@@ -3747,6 +3751,12 @@ enum DesktopPauseQuitResult {
     Shown,
     Cancelled,
     Confirmed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DesktopEditorExportKind {
+    MapFile,
+    Image,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18226,6 +18236,9 @@ pub struct DesktopLauncher {
     pub last_editor_import_result: Option<DesktopEditorMapImportResult>,
     pub editor_import_error: Option<String>,
     pub editor_import_overwrite_pending: Option<DesktopEditorMapImportOverwrite>,
+    pub editor_export_dialog_open: bool,
+    pub last_editor_export_request: Option<FileChooserRequest>,
+    editor_last_export_kind: Option<DesktopEditorExportKind>,
     pub tech_tree_selected_root: Option<String>,
     pub tech_tree_select_dialog_open: bool,
     pub tech_tree_selected_node: Option<TechNodeId>,
@@ -19422,6 +19435,9 @@ impl DesktopLauncher {
             last_editor_import_result: None,
             editor_import_error: None,
             editor_import_overwrite_pending: None,
+            editor_export_dialog_open: false,
+            last_editor_export_request: None,
+            editor_last_export_kind: None,
             tech_tree_selected_root: None,
             tech_tree_select_dialog_open: false,
             tech_tree_selected_node: None,
@@ -31825,6 +31841,23 @@ impl DesktopLauncher {
         )
     }
 
+    fn editor_export_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        Self::editor_new_map_dialog_rect_for_panel(panel)
+    }
+
+    fn editor_export_option_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 34.0,
+            dialog.y + dialog.height - 128.0 - index as f32 * 74.0,
+            dialog.width - 68.0,
+            58.0,
+        )
+    }
+
+    fn editor_export_close_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.center().x - 90.0, dialog.y + 18.0, 180.0, 42.0)
+    }
+
     fn map_list_search_rect_for_panel(panel: RenderRect, route: DesktopMenuRoute) -> RenderRect {
         let action_offset = if route == DesktopMenuRoute::Editor {
             MAP_LIST_ACTION_BUTTON_HEIGHT - 8.0
@@ -33937,6 +33970,11 @@ impl DesktopLauncher {
         self.editor_import_map_dialog_open = false;
         self.editor_import_error = None;
         self.editor_import_overwrite_pending = None;
+        self.editor_export_dialog_open = false;
+    }
+
+    fn clear_editor_export_dialog(&mut self) {
+        self.editor_export_dialog_open = false;
     }
 
     fn commit_editor_new_map(&mut self) -> bool {
@@ -34071,12 +34109,34 @@ impl DesktopLauncher {
         platform: &mut P,
     ) -> FileChooserRequest {
         self.clear_editor_new_map_dialog();
+        self.clear_editor_export_dialog();
         self.editor_import_map_dialog_open = true;
         self.editor_import_error = None;
         self.editor_import_overwrite_pending = None;
         self.map_list_search_focused = false;
         let request = platform.show_file_chooser(true, "@editor.importmap", "msav");
         self.last_editor_import_request = Some(request.clone());
+        request
+    }
+
+    fn dispatch_editor_export_with_platform<P: Platform>(
+        &mut self,
+        kind: DesktopEditorExportKind,
+        platform: &mut P,
+    ) -> FileChooserRequest {
+        self.clear_editor_export_dialog();
+        let (title, extension) = match kind {
+            DesktopEditorExportKind::MapFile => ("@editor.exportfile", "msav"),
+            DesktopEditorExportKind::Image => ("@editor.exportimage", "png"),
+        };
+        let request = platform.show_file_chooser(false, title, extension);
+        self.last_editor_export_request = Some(request.clone());
+        self.editor_last_export_kind = Some(kind);
+        self.last_menu_info_message = Some(format!(
+            "MapEditorDialog.export {:?}: {}",
+            kind,
+            self.game_state.map.plain_name()
+        ));
         request
     }
 
@@ -36217,6 +36277,19 @@ impl DesktopLauncher {
             }
             return None;
         }
+        if route == DesktopMenuRoute::Editor && self.editor_export_dialog_open {
+            let dialog = Self::editor_export_dialog_rect_for_panel(panel);
+            if Self::editor_export_option_rect(dialog, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::EditorExportFile);
+            }
+            if Self::editor_export_option_rect(dialog, 1).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::EditorExportImage);
+            }
+            if Self::editor_export_close_rect(dialog).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CloseEditorExportDialog);
+            }
+            return None;
+        }
         if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseRoute);
         }
@@ -36235,6 +36308,11 @@ impl DesktopLauncher {
             }
             if self.game_state.rules.editor
                 && Self::map_list_action_button_rect_for_panel(panel, 2).contains_point(point)
+            {
+                return Some(DesktopMenuRouteShellAction::EditorExport);
+            }
+            if self.game_state.rules.editor
+                && Self::map_list_action_button_rect_for_panel(panel, 3).contains_point(point)
             {
                 return Some(DesktopMenuRouteShellAction::EditorPlaytest);
             }
@@ -38506,6 +38584,7 @@ impl DesktopLauncher {
                 self.map_play_rules_error = None;
             }
             DesktopMenuRouteShellAction::NewEditorMap => {
+                self.clear_editor_export_dialog();
                 self.editor_new_map_dialog_open = true;
                 self.editor_new_map_name_text.clear();
                 self.editor_new_map_name_focused = true;
@@ -38531,6 +38610,33 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::ImportEditorMap => {
                 let mut platform = DefaultPlatform;
                 let _ = self.dispatch_editor_import_map_with_platform(&mut platform);
+            }
+            DesktopMenuRouteShellAction::EditorExport => {
+                self.clear_editor_new_map_dialog();
+                self.clear_editor_import_map_dialog();
+                self.editor_export_dialog_open = true;
+                self.map_list_search_focused = false;
+                self.map_list_filter_dialog_open = false;
+                self.map_list_planet_filter_dialog_open = false;
+                self.map_play_dialog_index = None;
+                self.editor_map_info_dialog_index = None;
+            }
+            DesktopMenuRouteShellAction::EditorExportFile => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_editor_export_with_platform(
+                    DesktopEditorExportKind::MapFile,
+                    &mut platform,
+                );
+            }
+            DesktopMenuRouteShellAction::EditorExportImage => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_editor_export_with_platform(
+                    DesktopEditorExportKind::Image,
+                    &mut platform,
+                );
+            }
+            DesktopMenuRouteShellAction::CloseEditorExportDialog => {
+                self.clear_editor_export_dialog();
             }
             DesktopMenuRouteShellAction::EditorPlaytest => {
                 if let Some(index) = self.current_editor_map_index() {
@@ -43205,9 +43311,16 @@ impl DesktopLauncher {
                 self.push_settings_text_button(
                     pass,
                     Self::map_list_action_button_rect_for_panel(panel, 2),
+                    self.localize_bundle_markup_text_or("@editor.export", "Export"),
+                    Some("upload"),
+                    Layer::END_PIXELED + 0.027,
+                );
+                self.push_settings_text_button(
+                    pass,
+                    Self::map_list_action_button_rect_for_panel(panel, 3),
                     self.localize_bundle_markup_text_or("@editor.playtest", "Playtest"),
                     Some("play"),
-                    Layer::END_PIXELED + 0.027,
+                    Layer::END_PIXELED + 0.028,
                 );
             }
         }
@@ -43434,6 +43547,7 @@ impl DesktopLauncher {
         self.push_map_list_planet_filter_dialog(pass, panel);
         self.push_editor_new_map_dialog(pass, panel, route);
         self.push_editor_import_map_dialog(pass, panel, route);
+        self.push_editor_export_dialog(pass, panel, route);
     }
 
     fn push_editor_new_map_dialog(
@@ -43646,6 +43760,90 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.098,
             );
         }
+    }
+
+    fn push_editor_export_dialog(
+        &self,
+        pass: &mut RenderPass,
+        panel: RenderRect,
+        route: DesktopMenuRoute,
+    ) {
+        if route != DesktopMenuRoute::Editor || !self.editor_export_dialog_open {
+            return;
+        }
+        let dialog = Self::editor_export_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.48],
+            Layer::END_PIXELED + 0.090,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.091,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.092,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text_or("@editor.export", "Export"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.093,
+        ));
+        for (index, (label, description, icon)) in [
+            (
+                "@editor.exportfile",
+                "@editor.exportfile.description",
+                "file",
+            ),
+            (
+                "@editor.exportimage",
+                "@editor.exportimage.description",
+                "fileImage",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let rect = Self::editor_export_option_rect(dialog, index);
+            self.push_settings_text_button(
+                pass,
+                rect,
+                self.localize_bundle_markup_text_or(label, label),
+                Some(icon),
+                Layer::END_PIXELED + 0.095 + index as f32 * 0.001,
+            );
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text_or(description, description),
+                RenderPoint::new(rect.x + 18.0, rect.y + 10.0),
+                [0.60, 0.70, 0.78, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.096 + index as f32 * 0.001,
+            ));
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::editor_export_close_rect(dialog),
+            self.localize_bundle_markup_text("@cancel"),
+            None,
+            Layer::END_PIXELED + 0.099,
+        );
     }
 
     fn push_map_card_dialog(
@@ -48643,7 +48841,12 @@ impl DesktopLauncher {
             ],
         );
         if self.game_state.rules.editor {
+            lines.push("button: @editor.export Icon.upload".into());
             lines.push("button: @editor.playtest Icon.play".into());
+        }
+        if self.editor_export_dialog_open {
+            lines.push("dialog: @editor.export createDialog".into());
+            lines.push("button hierarchy: @editor.exportfile / @editor.exportimage".into());
         }
         lines.push("map click: @editor.mapinfo".into());
         if self.map_play_dialog_index.is_some() {
@@ -73407,6 +73610,108 @@ repo: "Beta/Override"
             Some(super::DesktopMenuPlatformAction::OpenWorkshop)
         );
         assert_eq!(launcher.map_list_cards.len(), 1);
+    }
+
+    #[test]
+    fn desktop_launcher_editor_route_dispatches_export_actions_like_java_dialog() {
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), "Export Arena".to_string());
+        tags.insert("author".to_string(), "Mapper".to_string());
+        let mut map = MapDescriptor::new(
+            "maps/custom/export-arena.msav",
+            180,
+            180,
+            tags,
+            true,
+            1,
+            158,
+        );
+        map.spawns = 1;
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.map_list_cards = vec![map.clone()];
+        launcher.begin_edit_map(map);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Editor,
+        );
+        let export_center =
+            DesktopLauncher::map_list_action_button_rect_for_panel(panel, 2).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                export_center.x,
+                export_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::EditorExport)
+        );
+
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::EditorExport);
+        assert!(launcher.editor_export_dialog_open);
+        assert!(launcher
+            .editor_maps_route_lines()
+            .iter()
+            .any(|line| line.contains("@editor.exportfile")));
+
+        let dialog = DesktopLauncher::editor_export_dialog_rect_for_panel(panel);
+        let file_center = DesktopLauncher::editor_export_option_rect(dialog, 0).center();
+        let image_center = DesktopLauncher::editor_export_option_rect(dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                file_center.x,
+                file_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::EditorExportFile)
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                image_center.x,
+                image_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::EditorExportImage)
+        );
+
+        let mut platform = RecordingPlatform::default();
+        let file_request = launcher.dispatch_editor_export_with_platform(
+            super::DesktopEditorExportKind::MapFile,
+            &mut platform,
+        );
+        assert_eq!(
+            file_request,
+            FileChooserRequest::new(false, "@editor.exportfile", "msav")
+        );
+        assert_eq!(
+            launcher.last_editor_export_request,
+            Some(file_request.clone())
+        );
+        assert_eq!(
+            launcher.editor_last_export_kind,
+            Some(super::DesktopEditorExportKind::MapFile)
+        );
+        assert!(!launcher.editor_export_dialog_open);
+
+        launcher.editor_export_dialog_open = true;
+        let image_request = launcher.dispatch_editor_export_with_platform(
+            super::DesktopEditorExportKind::Image,
+            &mut platform,
+        );
+        assert_eq!(
+            image_request,
+            FileChooserRequest::new(false, "@editor.exportimage", "png")
+        );
+        assert_eq!(
+            launcher.editor_last_export_kind,
+            Some(super::DesktopEditorExportKind::Image)
+        );
+        assert_eq!(
+            launcher.last_menu_info_message.as_deref(),
+            Some("MapEditorDialog.export Image: Export Arena")
+        );
     }
 
     #[test]
