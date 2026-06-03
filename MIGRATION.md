@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 821. ModsDialog Guide 按钮打开官方 modding 文档
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.52%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `Vars.java`：`modGuideURL = "https://mindustrygame.github.io/wiki/modding/1-modding/"`；
+  - `ModsDialog.java`：主按钮 `@mods.guide` 使用 `Core.app.openURI(modGuideURL)`；
+  - 这是打开现有外部 URI 的 UI 行为，不引入远端 listing/release fetch。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `MODS_GUIDE_URL` 常量，保持与 Java `Vars.modGuideURL` 一致；
+    - `DesktopMenuRouteShellAction` 新增 `OpenModsGuide`；
+    - 新增 `DesktopModsGuideAction` 与 `last_mods_guide_action`；
+    - 新增 `dispatch_mods_guide_action_with_platform(...)`，通过现有 `Platform::open_uri` 打开文档；
+    - `mods_route_main_button_specs(...)` 中 `@mods.guide` 改为实际可点击 action；
+    - 扩展 Mods route 测试，覆盖按钮命中、URI、opened 记录与 platform 调用顺序。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_renders_scanned_mod_cards_and_back_button --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Mods browser 真实远端 listing/release fetch 仍是后续较大闭环；
+  - 继续对照 Java 补齐 Settings/Mods/Editor 其他按钮行为与 mobile/desktop 差异。
+
 ## 820. ModsDialog mobile 隐藏 Open Folder
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

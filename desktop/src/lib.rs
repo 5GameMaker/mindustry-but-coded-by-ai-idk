@@ -261,6 +261,7 @@ const MODS_ROUTE_MOD_CARD_GAP: f32 = 8.0;
 const MODS_ROUTE_MOD_CARD_ACTION_SIZE: f32 = 50.0;
 #[cfg(test)]
 const MODS_ROUTE_MAIN_ACTION_COUNT: usize = 4;
+const MODS_GUIDE_URL: &str = "https://mindustrygame.github.io/wiki/modding/1-modding/";
 const MODS_BROWSER_MIN_JAVA_MOD_GAME_VERSION: f64 = 154.0;
 const PAUSE_OVERLAY_PANEL_WIDTH: f32 = 304.0;
 const PAUSE_OVERLAY_PANEL_TOP_MARGIN: f32 = 54.0;
@@ -3663,6 +3664,7 @@ pub enum DesktopMenuRouteShellAction {
     CloseTechTreeNode,
     FocusModsSearch,
     ClearModsSearch,
+    OpenModsGuide,
     OpenModsDirectory,
     OpenModsImport,
     CloseModsImport,
@@ -3837,6 +3839,12 @@ pub struct DesktopModsFolderAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopModsDirectoryAction {
     pub path: String,
+    pub uri: String,
+    pub opened: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopModsGuideAction {
     pub uri: String,
     pub opened: bool,
 }
@@ -18410,6 +18418,7 @@ pub struct DesktopLauncher {
     pub last_mods_delete_result: Option<DesktopModsDeleteResult>,
     pub last_mods_folder_action: Option<DesktopModsFolderAction>,
     pub last_mods_directory_action: Option<DesktopModsDirectoryAction>,
+    pub last_mods_guide_action: Option<DesktopModsGuideAction>,
     pub last_mods_content_index: Option<usize>,
     pub last_mods_content_entry_index: Option<usize>,
     pub mods_content_dialog_index: Option<usize>,
@@ -19611,6 +19620,7 @@ impl DesktopLauncher {
             last_mods_delete_result: None,
             last_mods_folder_action: None,
             last_mods_directory_action: None,
+            last_mods_guide_action: None,
             last_mods_content_index: None,
             last_mods_content_entry_index: None,
             mods_content_dialog_index: None,
@@ -37640,6 +37650,17 @@ impl DesktopLauncher {
         action
     }
 
+    fn dispatch_mods_guide_action_with_platform<P: Platform>(
+        &mut self,
+        platform: &mut P,
+    ) -> DesktopModsGuideAction {
+        let uri = MODS_GUIDE_URL.to_string();
+        let opened = platform.open_uri(&uri);
+        let action = DesktopModsGuideAction { uri, opened };
+        self.last_mods_guide_action = Some(action.clone());
+        action
+    }
+
     fn dispatch_mods_listing_action_with_platform<P: Platform>(
         &mut self,
         index: usize,
@@ -39032,6 +39053,10 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::ClearModsSearch => {
                 self.mods_search.clear();
                 self.mods_search_focused = true;
+            }
+            DesktopMenuRouteShellAction::OpenModsGuide => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_mods_guide_action_with_platform(&mut platform);
             }
             DesktopMenuRouteShellAction::OpenModsDirectory => {
                 let mut platform = DefaultPlatform;
@@ -49735,7 +49760,11 @@ impl DesktopLauncher {
         &'static str,
         &'static str,
     )> {
-        let mut specs = vec![(None, "@mods.guide", "link")];
+        let mut specs = vec![(
+            Some(DesktopMenuRouteShellAction::OpenModsGuide),
+            "@mods.guide",
+            "link",
+        )];
         if !self.menu_renderer_state.config.mobile {
             specs.push((
                 Some(DesktopMenuRouteShellAction::OpenModsDirectory),
@@ -68435,6 +68464,25 @@ repo: "Beta/Override"
         let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Mods);
         assert!(lines.contains(&"browser: BaseDialog @mods.browser".to_string()));
 
+        let mut platform = RecordingPlatform {
+            open_result: true,
+            ..Default::default()
+        };
+        let guide = DesktopLauncher::mods_route_action_button_rect_for_panel(panel, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, guide.x, guide.y),
+            Some(super::DesktopMenuRouteShellAction::OpenModsGuide),
+            "Java ModsDialog wires @mods.guide to Core.app.openURI(modGuideURL)"
+        );
+        let guide_action = launcher.dispatch_mods_guide_action_with_platform(&mut platform);
+        assert_eq!(guide_action.uri, super::MODS_GUIDE_URL);
+        assert!(guide_action.opened);
+        assert_eq!(launcher.last_mods_guide_action, Some(guide_action));
+        assert_eq!(
+            platform.opened_uris,
+            vec![super::MODS_GUIDE_URL.to_string()]
+        );
+
         let open_folder =
             DesktopLauncher::mods_route_action_button_rect_for_panel(panel, 1).center();
         assert_eq!(
@@ -68445,10 +68493,6 @@ repo: "Beta/Override"
             ),
             Some(super::DesktopMenuRouteShellAction::OpenModsDirectory)
         );
-        let mut platform = RecordingPlatform {
-            open_result: true,
-            ..Default::default()
-        };
         let directory_action = launcher.dispatch_mods_directory_action_with_platform(&mut platform);
         assert_eq!(directory_action.path, "C:/mods directory");
         assert_eq!(directory_action.uri, "file:///C:/mods%20directory");
@@ -68459,7 +68503,10 @@ repo: "Beta/Override"
         );
         assert_eq!(
             platform.opened_uris,
-            vec!["file:///C:/mods%20directory".to_string()]
+            vec![
+                super::MODS_GUIDE_URL.to_string(),
+                "file:///C:/mods%20directory".to_string()
+            ]
         );
 
         let back = DesktopLauncher::route_back_button_rect_for_panel(panel).center();
