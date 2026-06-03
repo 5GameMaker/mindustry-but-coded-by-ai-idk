@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 824. Settings Data 页平台动作分发
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.55%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `SettingsMenuDialog.java` Data 页 `@data.export` 触发 `platform.showFileChooser(false, "zip", ...)`；
+  - `@data.import` 触发确认后 `platform.showFileChooser(true, "zip", ...)`；
+  - 桌面端 `@data.openfolder` 调用 `Core.app.openFolder(Core.settings.getDataDirectory().absolutePath())`，mobile 下不显示；
+  - `@crash.export` 在非 iOS 下触发 `platform.showFileChooser(false, "txt", ...)`。
+- 本轮主改动：
+  - `core/src/mindustry/core/platform.rs`
+    - `Platform` 新增默认 no-op `open_folder(&str) -> bool`，补齐 Java `Core.app.openFolder(...)` 对应平台边界。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 Settings Data 请求/结果记录：export/import/crash chooser、open-folder path/result；
+    - `dispatch_settings_action(...)` 拆出 `dispatch_settings_action_with_platform(...)`，默认 wrapper 继续使用 `DefaultPlatform`；
+    - `ExportData` / `ImportData` / `ExportCrashLogs` 不再是空分支，分别记录并触发对应 `FileChooserRequest`；
+    - `OpenDataFolder` 调用 `Platform::open_folder(data_dir)`，记录路径和返回值；
+    - 扩展测试用 `RecordingPlatform`，记录 file chooser / open folder / share file 调用。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_settings_data_actions_dispatch_platform_hooks_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_settings_data --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - Java `exportData(Fi)` / `importData(Fi)` 的真实 zip 内容复制、导入后 save reset / state reset / app exit、crash log 内容拼接与 iOS shareFile 分支仍需继续迁移；
+  - 本轮仅把 Data 页按钮从“只命中/记录 action”推进到真实平台请求边界，后续必须继续接文件读写副作用。
+
 ## 823. Editor Shift 直进 playtest
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

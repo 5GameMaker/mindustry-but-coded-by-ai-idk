@@ -79,6 +79,10 @@ pub trait Platform {
         false
     }
 
+    fn open_folder(&mut self, _path: &str) -> bool {
+        false
+    }
+
     fn set_clipboard_text(&mut self, _text: &str) {}
 
     fn get_clipboard_text(&mut self) -> Option<String> {

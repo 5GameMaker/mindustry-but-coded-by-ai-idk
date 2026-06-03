@@ -18311,6 +18311,11 @@ pub struct DesktopLauncher {
     pub last_settings_action: Option<DesktopSettingsAction>,
     pub pending_settings_confirm_action: Option<DesktopSettingsAction>,
     pub last_settings_confirmed_action: Option<DesktopSettingsAction>,
+    pub last_settings_data_export_request: Option<FileChooserRequest>,
+    pub last_settings_data_import_request: Option<FileChooserRequest>,
+    pub last_settings_crash_export_request: Option<FileChooserRequest>,
+    pub last_settings_open_data_folder_path: Option<String>,
+    pub last_settings_open_data_folder_result: Option<bool>,
     pub last_settings_hovered_control: Option<DesktopSettingsControlId>,
     pub last_settings_pressed_control: Option<DesktopSettingsControlId>,
     pub settings_scroll_drag_state: Option<DesktopSettingsScrollDragState>,
@@ -19515,6 +19520,11 @@ impl DesktopLauncher {
             last_settings_action: None,
             pending_settings_confirm_action: None,
             last_settings_confirmed_action: None,
+            last_settings_data_export_request: None,
+            last_settings_data_import_request: None,
+            last_settings_crash_export_request: None,
+            last_settings_open_data_folder_path: None,
+            last_settings_open_data_folder_result: None,
             last_settings_hovered_control: None,
             last_settings_pressed_control: None,
             settings_scroll_drag_state: None,
@@ -37457,7 +37467,11 @@ impl DesktopLauncher {
         report
     }
 
-    fn dispatch_settings_action(&mut self, action: DesktopSettingsAction) {
+    fn dispatch_settings_action_with_platform<P: Platform>(
+        &mut self,
+        action: DesktopSettingsAction,
+        platform: &mut P,
+    ) {
         match action {
             DesktopSettingsAction::OpenPage(page) => {
                 self.settings_dialog_state.page = page;
@@ -37605,12 +37619,31 @@ impl DesktopLauncher {
             | DesktopSettingsAction::ClearPlanetCampaignSaves => {
                 self.pending_settings_confirm_action = Some(action);
             }
-            DesktopSettingsAction::ExportData
-            | DesktopSettingsAction::ImportData
-            | DesktopSettingsAction::OpenDataFolder
-            | DesktopSettingsAction::ExportCrashLogs => {}
+            DesktopSettingsAction::ExportData => {
+                let request = platform.show_file_chooser(false, "@data.export", "zip");
+                self.last_settings_data_export_request = Some(request);
+            }
+            DesktopSettingsAction::ImportData => {
+                let request = platform.show_file_chooser(true, "@data.import", "zip");
+                self.last_settings_data_import_request = Some(request);
+            }
+            DesktopSettingsAction::OpenDataFolder => {
+                let path = self.client.context.paths.data_dir.clone();
+                let opened = platform.open_folder(&path);
+                self.last_settings_open_data_folder_path = Some(path);
+                self.last_settings_open_data_folder_result = Some(opened);
+            }
+            DesktopSettingsAction::ExportCrashLogs => {
+                let request = platform.show_file_chooser(false, "@crash.export", "txt");
+                self.last_settings_crash_export_request = Some(request);
+            }
         }
         self.last_settings_action = Some(action);
+    }
+
+    fn dispatch_settings_action(&mut self, action: DesktopSettingsAction) {
+        let mut platform = DefaultPlatform;
+        self.dispatch_settings_action_with_platform(action, &mut platform);
     }
 
     fn open_schematic_modal(&mut self, modal: DesktopSchematicModal) {
@@ -55428,6 +55461,9 @@ mod tests {
     struct RecordingPlatform {
         open_result: bool,
         opened_uris: Vec<String>,
+        opened_folders: Vec<String>,
+        file_chooser_requests: Vec<FileChooserRequest>,
+        shared_files: Vec<String>,
         viewed_listing_ids: Vec<String>,
         viewed_listings: Vec<String>,
         published: Vec<String>,
@@ -55444,6 +55480,26 @@ mod tests {
         fn open_uri(&mut self, uri: &str) -> bool {
             self.opened_uris.push(uri.to_string());
             self.open_result
+        }
+
+        fn open_folder(&mut self, path: &str) -> bool {
+            self.opened_folders.push(path.to_string());
+            self.open_result
+        }
+
+        fn share_file(&mut self, file: &str) {
+            self.shared_files.push(file.to_string());
+        }
+
+        fn show_file_chooser(
+            &mut self,
+            open: bool,
+            title: &str,
+            extension: &str,
+        ) -> FileChooserRequest {
+            let request = FileChooserRequest::new(open, title, extension);
+            self.file_chooser_requests.push(request.clone());
+            request
         }
 
         fn view_listing(&mut self, publishable_name: &str) {
@@ -86122,6 +86178,74 @@ repo: "Beta/Override"
         assert!(
             !texts.contains(&"settings page: data"),
             "Data page should render Java-like action buttons instead of the diagnostic route-line shell"
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_settings_data_actions_dispatch_platform_hooks_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.data_dir = "D:/MDT/rust-mindustry/data-test".into();
+        let mut platform = RecordingPlatform {
+            open_result: true,
+            ..RecordingPlatform::default()
+        };
+
+        launcher.dispatch_settings_action_with_platform(
+            super::DesktopSettingsAction::ExportData,
+            &mut platform,
+        );
+        assert_eq!(
+            launcher.last_settings_data_export_request,
+            Some(FileChooserRequest::new(false, "@data.export", "zip"))
+        );
+        assert_eq!(
+            platform.file_chooser_requests.last(),
+            Some(&FileChooserRequest::new(false, "@data.export", "zip"))
+        );
+
+        launcher.dispatch_settings_action_with_platform(
+            super::DesktopSettingsAction::ImportData,
+            &mut platform,
+        );
+        assert_eq!(
+            launcher.last_settings_data_import_request,
+            Some(FileChooserRequest::new(true, "@data.import", "zip"))
+        );
+
+        launcher.dispatch_settings_action_with_platform(
+            super::DesktopSettingsAction::ExportCrashLogs,
+            &mut platform,
+        );
+        assert_eq!(
+            launcher.last_settings_crash_export_request,
+            Some(FileChooserRequest::new(false, "@crash.export", "txt"))
+        );
+
+        launcher.dispatch_settings_action_with_platform(
+            super::DesktopSettingsAction::OpenDataFolder,
+            &mut platform,
+        );
+        assert_eq!(
+            platform.opened_folders,
+            vec!["D:/MDT/rust-mindustry/data-test".to_string()]
+        );
+        assert_eq!(
+            launcher.last_settings_open_data_folder_path.as_deref(),
+            Some("D:/MDT/rust-mindustry/data-test")
+        );
+        assert_eq!(launcher.last_settings_open_data_folder_result, Some(true));
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::OpenDataFolder)
+        );
+
+        assert_eq!(
+            platform.file_chooser_requests,
+            vec![
+                FileChooserRequest::new(false, "@data.export", "zip"),
+                FileChooserRequest::new(true, "@data.import", "zip"),
+                FileChooserRequest::new(false, "@crash.export", "txt")
+            ]
         );
     }
 
