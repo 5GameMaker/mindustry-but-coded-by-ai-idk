@@ -251,6 +251,7 @@ struct RulesJsonPatch {
     banned_blocks: Option<BTreeSet<String>>,
     banned_units: Option<BTreeSet<String>>,
     weather: Option<Vec<WeatherEntry>>,
+    ambient_light: Option<[f32; 4]>,
     core_capture: Option<bool>,
     wave_spacing: Option<f32>,
     initial_wave_spacing: Option<f32>,
@@ -428,6 +429,9 @@ impl RulesJsonPatch {
         if let Some(value) = self.weather {
             rules.weather = value;
         }
+        if let Some(value) = self.ambient_light {
+            rules.ambient_light = value;
+        }
         if let Some(value) = self.core_capture {
             rules.core_capture = value;
         }
@@ -513,6 +517,7 @@ impl<'a> RulesJsonParser<'a> {
                 "bannedBlocks" => patch.banned_blocks = self.parse_optional_string_set()?,
                 "bannedUnits" => patch.banned_units = self.parse_optional_string_set()?,
                 "weather" => patch.weather = self.parse_optional_weather_entries()?,
+                "ambientLight" => patch.ambient_light = self.parse_optional_f32_array4()?,
                 "coreCapture" => patch.core_capture = self.parse_optional_bool()?,
                 "waveSpacing" => patch.wave_spacing = self.parse_optional_f32()?,
                 "initialWaveSpacing" => patch.initial_wave_spacing = self.parse_optional_f32()?,
@@ -571,6 +576,50 @@ impl<'a> RulesJsonParser<'a> {
                 self.skip_value()?;
                 Ok(None)
             }
+        }
+    }
+
+    fn parse_optional_f32_array4(&mut self) -> Result<Option<[f32; 4]>, String> {
+        self.skip_ws();
+        if self.peek() != Some('[') {
+            self.skip_value()?;
+            return Ok(None);
+        }
+        self.expect('[')?;
+        self.skip_ws();
+        let mut values = Vec::new();
+        let mut valid = true;
+        if self.peek() == Some(']') {
+            self.index += 1;
+            return Ok(None);
+        }
+        loop {
+            self.skip_ws();
+            match self.peek() {
+                Some('-' | '0'..='9') => {
+                    let value = self.parse_number_string()?;
+                    match value.parse::<f32>() {
+                        Ok(parsed) if parsed.is_finite() => values.push(parsed),
+                        _ => valid = false,
+                    }
+                }
+                _ => {
+                    valid = false;
+                    self.skip_value()?;
+                }
+            }
+            self.skip_ws();
+            match self.next() {
+                Some(',') => continue,
+                Some(']') => break,
+                Some(ch) => return Err(format!("expected ',' or ']', found '{ch}'")),
+                None => return Err("unterminated json number array".into()),
+            }
+        }
+        if valid && values.len() == 4 {
+            Ok(Some([values[0], values[1], values[2], values[3]]))
+        } else {
+            Ok(None)
         }
     }
 
@@ -1610,6 +1659,7 @@ mod tests {
                         "intensity": 0.75,
                         "always": true
                     }],
+                    "ambientLight": [0.2, 0.3, 0.4, 0.5],
                     "coreCapture": true,
                     "waveSpacing": 7200.5,
                     "initialWaveSpacing": 600.25,
@@ -1673,6 +1723,7 @@ mod tests {
         assert_eq!(rules.weather[0].cooldown, 5.0);
         assert_eq!(rules.weather[0].intensity, 0.75);
         assert!(rules.weather[0].always);
+        assert_eq!(rules.ambient_light, [0.2, 0.3, 0.4, 0.5]);
         assert!(rules.core_capture);
         assert_eq!(rules.wave_spacing, 7200.5);
         assert_eq!(rules.initial_wave_spacing, 600.25);
@@ -1715,6 +1766,7 @@ mod tests {
         rules.mode_name = Some("keep".into());
         rules.planet = "serpulo".into();
         rules.env = 7;
+        rules.ambient_light = [0.2, 0.3, 0.4, 0.5];
 
         rules
             .apply_json_str(
@@ -1725,6 +1777,7 @@ mod tests {
                     "modeName": [1, 2, 3],
                     "planet": null,
                     "env": {"value": 9},
+                    "ambientLight": [0.1, 0.2, "bad"],
                     "teams": {
                         "1": {"protectCores": false, "unknown": {"nested": true}},
                         "bad": {"protectCores": false},
@@ -1741,6 +1794,7 @@ mod tests {
         assert_eq!(rules.mode_name.as_deref(), Some("keep"));
         assert_eq!(rules.planet, "serpulo");
         assert_eq!(rules.env, 7);
+        assert_eq!(rules.ambient_light, [0.2, 0.3, 0.4, 0.5]);
         assert!(!rules.teams.get_or_default(1).protect_cores);
         assert!(rules.teams.get_or_default(2).protect_cores);
     }

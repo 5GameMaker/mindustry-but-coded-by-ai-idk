@@ -1491,6 +1491,13 @@ fn json_string_array_from_set(values: &BTreeSet<String>) -> String {
     format!("[{}]", items.join(","))
 }
 
+fn json_f32_array4(values: [f32; 4]) -> String {
+    format!(
+        "[{:.4},{:.4},{:.4},{:.4}]",
+        values[0], values[1], values[2], values[3]
+    )
+}
+
 fn json_weather_entries(values: &[WeatherEntry]) -> String {
     let items = values
         .iter()
@@ -4338,6 +4345,9 @@ enum DesktopPausedOverlayAction {
     MaxPauseLoadout,
     ResetPauseLoadout,
     AdjustPauseLoadoutItem(usize, i32),
+    OpenPauseAmbientLight,
+    ClosePauseAmbientLight,
+    SelectPauseAmbientLight(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18844,6 +18854,7 @@ pub struct DesktopLauncher {
     pause_custom_rules_loadout_dialog_open: bool,
     pause_custom_rules_loadout_scroll_offset: usize,
     pause_custom_rules_loadout_draft: Vec<ItemStack>,
+    pause_custom_rules_ambient_light_dialog_open: bool,
     last_pause_custom_rules_clipboard_text: Option<String>,
     pause_custom_rules_error: Option<String>,
     last_pause_quit_result: Option<DesktopPauseQuitResult>,
@@ -20080,6 +20091,7 @@ impl DesktopLauncher {
             pause_custom_rules_loadout_dialog_open: false,
             pause_custom_rules_loadout_scroll_offset: 0,
             pause_custom_rules_loadout_draft: Vec::new(),
+            pause_custom_rules_ambient_light_dialog_open: false,
             last_pause_custom_rules_clipboard_text: None,
             pause_custom_rules_error: None,
             last_pause_quit_result: None,
@@ -31596,7 +31608,8 @@ impl DesktopLauncher {
         index: usize,
     ) -> RenderRect {
         let gap = 8.0;
-        let width = ((dialog.width - 228.0) / 5.0).clamp(64.0, 112.0);
+        let count = 6.0;
+        let width = ((dialog.width - 196.0 - (count - 1.0) * gap) / count).clamp(52.0, 112.0);
         RenderRect::new(
             dialog.x + 28.0 + index as f32 * (width + gap),
             dialog.y + 18.0,
@@ -31798,6 +31811,24 @@ impl DesktopLauncher {
                                 ));
                             }
                         }
+                    }
+                    return None;
+                }
+                if self.pause_custom_rules_ambient_light_dialog_open {
+                    let ambient_dialog = Self::pause_ambient_light_dialog_rect(dialog);
+                    for index in 0..HOST_PALETTE_COLORS.len() {
+                        if Self::host_route_palette_color_rect_for_dialog(ambient_dialog, index)
+                            .contains_point(point)
+                        {
+                            return Some(DesktopPausedOverlayAction::SelectPauseAmbientLight(
+                                index,
+                            ));
+                        }
+                    }
+                    if Self::host_route_palette_close_rect_for_dialog(ambient_dialog)
+                        .contains_point(point)
+                    {
+                        return Some(DesktopPausedOverlayAction::ClosePauseAmbientLight);
                     }
                     return None;
                 }
@@ -32105,6 +32136,11 @@ impl DesktopLauncher {
                     .contains_point(point)
                 {
                     return Some(DesktopPausedOverlayAction::OpenPauseLoadout);
+                }
+                if Self::pause_overlay_custom_rules_child_button_rect(dialog, 5)
+                    .contains_point(point)
+                {
+                    return Some(DesktopPausedOverlayAction::OpenPauseAmbientLight);
                 }
                 if Self::pause_overlay_modal_close_rect(dialog).contains_point(point) {
                     return Some(DesktopPausedOverlayAction::CloseModal);
@@ -35441,6 +35477,21 @@ impl DesktopLauncher {
         RenderRect::new(row.x + 76.0, row.center().y - 14.0, 28.0, 28.0)
     }
 
+    fn pause_ambient_light_dialog_rect(child: RenderRect) -> RenderRect {
+        let width = 420.0_f32.min(child.width - 60.0).max(320.0);
+        let height = 236.0_f32.min(child.height - 80.0).max(196.0);
+        RenderRect::new(
+            child.center().x - width * 0.5,
+            child.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn pause_ambient_light_preview_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.x + 28.0, dialog.y + dialog.height - 88.0, 58.0, 50.0)
+    }
+
     fn map_play_team_options() -> Vec<(usize, String, u32)> {
         vanilla_teams()
             .base_teams()
@@ -36183,6 +36234,7 @@ impl DesktopLauncher {
         self.pause_custom_rules_team_rules_dialog_open = false;
         self.pause_custom_rules_edit_dialog_open = false;
         self.pause_custom_rules_search_focused = false;
+        self.pause_custom_rules_ambient_light_dialog_open = false;
         self.pause_custom_rules_error = None;
     }
 
@@ -36199,6 +36251,7 @@ impl DesktopLauncher {
         self.pause_custom_rules_loadout_dialog_open = false;
         self.pause_custom_rules_loadout_scroll_offset = 0;
         self.pause_custom_rules_loadout_draft.clear();
+        self.pause_custom_rules_ambient_light_dialog_open = false;
         self.pause_custom_rules_error = None;
     }
 
@@ -36248,6 +36301,16 @@ impl DesktopLauncher {
             .unwrap_or_else(|| name.to_string())
     }
 
+    fn select_pause_ambient_light(&mut self, index: usize) {
+        let Some(color) = HOST_PALETTE_COLORS.get(index).copied() else {
+            return;
+        };
+        let rgba = rgba8888_to_render_color(color, 1.0);
+        self.ensure_pause_custom_rules_edit_rules().ambient_light = rgba;
+        self.pause_custom_rules_ambient_light_dialog_open = false;
+        self.pause_custom_rules_error = None;
+    }
+
     fn map_play_rules_clipboard_json(rules: &Rules) -> String {
         let mode_name = rules.mode_name.as_deref().unwrap_or("custom");
         format!(
@@ -36266,6 +36329,7 @@ impl DesktopLauncher {
                 "\"bannedBlocks\":{},",
                 "\"bannedUnits\":{},",
                 "\"weather\":{},",
+                "\"ambientLight\":{},",
                 "\"attackMode\":{},",
                 "\"pvp\":{},",
                 "\"coreCapture\":{},",
@@ -36291,6 +36355,7 @@ impl DesktopLauncher {
             json_string_array_from_set(&rules.banned_blocks),
             json_string_array_from_set(&rules.banned_units),
             json_weather_entries(&rules.weather),
+            json_f32_array4(rules.ambient_light),
             rules.attack_mode,
             rules.pvp,
             rules.core_capture,
@@ -42170,6 +42235,7 @@ impl DesktopLauncher {
         self.pause_custom_rules_loadout_dialog_open = false;
         self.pause_custom_rules_loadout_scroll_offset = 0;
         self.pause_custom_rules_loadout_draft.clear();
+        self.pause_custom_rules_ambient_light_dialog_open = false;
         self.pause_custom_rules_error = None;
         self.pause_overlay_modal = None;
     }
@@ -42328,7 +42394,10 @@ impl DesktopLauncher {
             | DesktopPausedOverlayAction::ClosePauseLoadout
             | DesktopPausedOverlayAction::MaxPauseLoadout
             | DesktopPausedOverlayAction::ResetPauseLoadout
-            | DesktopPausedOverlayAction::AdjustPauseLoadoutItem(_, _) => {
+            | DesktopPausedOverlayAction::AdjustPauseLoadoutItem(_, _)
+            | DesktopPausedOverlayAction::OpenPauseAmbientLight
+            | DesktopPausedOverlayAction::ClosePauseAmbientLight
+            | DesktopPausedOverlayAction::SelectPauseAmbientLight(_) => {
                 self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
                     && self.pause_overlay_custom_rules_visible()
             }
@@ -42375,6 +42444,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_loadout_dialog_open = false;
                 self.pause_custom_rules_loadout_scroll_offset = 0;
                 self.pause_custom_rules_loadout_draft.clear();
+                self.pause_custom_rules_ambient_light_dialog_open = false;
                 self.pause_custom_rules_error = None;
                 self.last_menu_guard_message = None;
             }
@@ -42395,6 +42465,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_loadout_dialog_open = false;
                 self.pause_custom_rules_loadout_scroll_offset = 0;
                 self.pause_custom_rules_loadout_draft.clear();
+                self.pause_custom_rules_ambient_light_dialog_open = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseCustomRulesEdit => {
@@ -42435,6 +42506,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_loadout_dialog_open = false;
                 self.pause_custom_rules_loadout_scroll_offset = 0;
                 self.pause_custom_rules_loadout_draft.clear();
+                self.pause_custom_rules_ambient_light_dialog_open = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseBannedContent => {
@@ -42492,6 +42564,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_loadout_dialog_open = false;
                 self.pause_custom_rules_loadout_scroll_offset = 0;
                 self.pause_custom_rules_loadout_draft.clear();
+                self.pause_custom_rules_ambient_light_dialog_open = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseWeather => {
@@ -42537,6 +42610,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_loadout_dialog_open = false;
                 self.pause_custom_rules_loadout_scroll_offset = 0;
                 self.pause_custom_rules_loadout_draft.clear();
+                self.pause_custom_rules_ambient_light_dialog_open = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseTeamRules => {
@@ -42595,8 +42669,34 @@ impl DesktopLauncher {
                 self.adjust_pause_loadout_item(index, direction);
                 self.pause_custom_rules_loadout_dialog_open = true;
             }
+            DesktopPausedOverlayAction::OpenPauseAmbientLight => {
+                self.pause_custom_rules_ambient_light_dialog_open = true;
+                self.pause_custom_rules_banned_content_dialog = None;
+                self.pause_custom_rules_banned_content_search_focused = false;
+                self.pause_custom_rules_weather_dialog_open = false;
+                self.pause_custom_rules_weather_add_dialog_open = false;
+                self.pause_custom_rules_team_rules_dialog_open = false;
+                self.pause_custom_rules_loadout_dialog_open = false;
+                self.pause_custom_rules_loadout_scroll_offset = 0;
+                self.pause_custom_rules_loadout_draft.clear();
+                self.pause_custom_rules_edit_dialog_open = false;
+                self.pause_custom_rules_search_focused = false;
+                self.pause_custom_rules_error = None;
+            }
+            DesktopPausedOverlayAction::ClosePauseAmbientLight => {
+                self.pause_custom_rules_ambient_light_dialog_open = false;
+            }
+            DesktopPausedOverlayAction::SelectPauseAmbientLight(index) => {
+                self.select_pause_ambient_light(index);
+            }
             DesktopPausedOverlayAction::Back => {
                 if self.pause_overlay_modal.is_some() {
+                    if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
+                        && self.pause_custom_rules_ambient_light_dialog_open
+                    {
+                        self.pause_custom_rules_ambient_light_dialog_open = false;
+                        return;
+                    }
                     if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
                         && self.pause_custom_rules_loadout_dialog_open
                     {
@@ -56742,6 +56842,112 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_pause_ambient_light_dialog(
+        &self,
+        pass: &mut RenderPass,
+        dialog_parent: RenderRect,
+        rules: &Rules,
+    ) {
+        let layer = Layer::END_PIXELED + 0.238;
+        let dialog = Self::pause_ambient_light_dialog_rect(dialog_parent);
+        pass.push(RenderCommand::fill_rect(
+            dialog_parent,
+            [0.0, 0.0, 0.0, 0.52],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.62, 0.82, 1.0, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@rules.ambientlight"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.004,
+        ));
+        let preview = Self::pause_ambient_light_preview_rect(dialog);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            preview,
+            [1.0, 1.0, 1.0, 0.30],
+            0.0,
+            layer + 0.005,
+        ));
+        pass.push(RenderCommand::fill_rect(
+            RenderRect::new(
+                preview.x + 6.0,
+                preview.y + 6.0,
+                preview.width - 12.0,
+                preview.height - 12.0,
+            ),
+            rules.ambient_light,
+            layer + 0.006,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!(
+                "rgba {:.2} {:.2} {:.2} {:.2}",
+                rules.ambient_light[0],
+                rules.ambient_light[1],
+                rules.ambient_light[2],
+                rules.ambient_light[3]
+            ),
+            RenderPoint::new(preview.right() + 18.0, preview.center().y),
+            [0.82, 0.91, 0.98, 1.0],
+            9.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            layer + 0.007,
+        ));
+        for (index, color_value) in HOST_PALETTE_COLORS.iter().copied().enumerate() {
+            let swatch = Self::host_route_palette_color_rect_for_dialog(dialog, index);
+            let color = rgba8888_to_render_color(color_value, 1.0);
+            let selected = rules
+                .ambient_light
+                .iter()
+                .zip(color.iter())
+                .all(|(a, b)| (*a - *b).abs() < 0.002);
+            pass.push(RenderCommand::fill_rect(
+                swatch,
+                color,
+                layer + 0.020 + index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                swatch,
+                if selected {
+                    [1.0, 1.0, 1.0, 1.0]
+                } else {
+                    [0.30, 0.42, 0.52, 0.92]
+                },
+                if selected { 3.0 } else { 1.0 },
+                layer + 0.021 + index as f32 * 0.001,
+            ));
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::host_route_palette_close_rect_for_dialog(dialog),
+            "@back",
+            Some("left"),
+            layer + 0.060,
+        );
+    }
+
     fn push_pause_team_rules_dialog(
         &self,
         pass: &mut RenderPass,
@@ -57219,6 +57425,10 @@ impl DesktopLauncher {
                 self.pause_custom_rules_team_rules_dialog_open,
             ),
             ("@configure", self.pause_custom_rules_loadout_dialog_open),
+            (
+                "@rules.ambientlight",
+                self.pause_custom_rules_ambient_light_dialog_open,
+            ),
         ]
         .into_iter()
         .enumerate()
@@ -57251,6 +57461,9 @@ impl DesktopLauncher {
         }
         if self.pause_custom_rules_loadout_dialog_open {
             self.push_pause_loadout_dialog(pass, dialog);
+        }
+        if self.pause_custom_rules_ambient_light_dialog_open {
+            self.push_pause_ambient_light_dialog(pass, dialog, rules);
         }
         if let Some(kind) = self.pause_custom_rules_banned_content_dialog {
             self.push_pause_banned_content_dialog(pass, dialog, kind, rules);
@@ -78780,12 +78993,18 @@ displayName: "Alpha Pack"
             .as_mut()
             .unwrap()
             .infinite_resources = true;
+        launcher
+            .pause_custom_rules_edit
+            .as_mut()
+            .unwrap()
+            .ambient_light = [0.25, 0.5, 0.75, 1.0];
         launcher.dispatch_pause_overlay_action_with_platform(
             super::DesktopPausedOverlayAction::CopyPauseCustomRules,
             &mut platform,
         );
         let copied = platform.clipboard_texts.last().cloned().unwrap();
         assert!(copied.contains("\"infiniteResources\":true"));
+        assert!(copied.contains("\"ambientLight\":[0.2500,0.5000,0.7500,1.0000]"));
         assert_eq!(
             launcher.last_pause_custom_rules_clipboard_text.as_deref(),
             Some(copied.as_str())
@@ -78798,6 +79017,7 @@ displayName: "Alpha Pack"
         let mut load_rules = launcher.game_state.rules.copy();
         load_rules.infinite_resources = true;
         load_rules.win_wave = 9;
+        load_rules.ambient_light = [0.1, 0.2, 0.3, 0.4];
         platform.clipboard_read = Some(DesktopLauncher::map_play_rules_clipboard_json(&load_rules));
         launcher.dispatch_pause_overlay_action(
             super::DesktopPausedOverlayAction::OpenPauseCustomRulesEdit,
@@ -78814,6 +79034,7 @@ displayName: "Alpha Pack"
         let edit = launcher.pause_custom_rules_edit.as_ref().unwrap();
         assert!(edit.infinite_resources);
         assert_eq!(edit.win_wave, 9);
+        assert_eq!(edit.ambient_light, [0.1, 0.2, 0.3, 0.4]);
         assert_eq!(launcher.pause_custom_rules_error, None);
         assert!(
             !launcher.pause_custom_rules_edit_dialog_open,
@@ -79680,6 +79901,82 @@ displayName: "Alpha Pack"
                 .map(|stack| stack.amount),
             Some(200)
         );
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_custom_rules_ambient_light_picker_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.game_state.rules.allow_edit_rules = true;
+        launcher.runtime.state.rules = launcher.game_state.rules.copy();
+        let original = launcher.game_state.rules.ambient_light;
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CustomRules);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = launcher.pause_overlay_panel_for_current_state(viewport);
+        let dialog = DesktopLauncher::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let ambient_center =
+            DesktopLauncher::pause_overlay_custom_rules_child_button_rect(dialog, 5).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                ambient_center.x,
+                ambient_center.y
+            ),
+            Some(super::DesktopPausedOverlayAction::OpenPauseAmbientLight)
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::OpenPauseAmbientLight,
+        );
+        assert!(launcher.pause_custom_rules_ambient_light_dialog_open);
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.iter().any(
+            |text| text.contains(&launcher.localize_bundle_markup_text("@rules.ambientlight"))
+        ));
+
+        let picker = DesktopLauncher::pause_ambient_light_dialog_rect(dialog);
+        let swatch = DesktopLauncher::host_route_palette_color_rect_for_dialog(picker, 2).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, swatch.x, swatch.y),
+            Some(super::DesktopPausedOverlayAction::SelectPauseAmbientLight(
+                2
+            ))
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::SelectPauseAmbientLight(2),
+        );
+        let expected = super::rgba8888_to_render_color(super::HOST_PALETTE_COLORS[2], 1.0);
+        assert_eq!(
+            launcher
+                .pause_custom_rules_edit
+                .as_ref()
+                .unwrap()
+                .ambient_light,
+            expected
+        );
+        assert_eq!(
+            launcher.game_state.rules.ambient_light, original,
+            "ambient light remains pending until CustomRulesDialog closes"
+        );
+        assert!(!launcher.pause_custom_rules_ambient_light_dialog_open);
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CloseModal);
+        assert_eq!(launcher.game_state.rules.ambient_light, expected);
+        assert_eq!(launcher.runtime.state.rules.ambient_light, expected);
     }
 
     #[test]

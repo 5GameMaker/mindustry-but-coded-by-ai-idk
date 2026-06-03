@@ -17,6 +17,37 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 852. PausedDialog CustomRules ambient light picker 子流接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.84%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `CustomRulesDialog.setupMain()` 的 environment 区域里 `@rules.ambientlight` 是色块按钮；
+  - 点击后打开 picker，选择颜色直接修改 pending `rules.ambientLight`；
+  - Copy/Load rules JSON 应能透传 `ambientLight`。
+- 本轮主改动：
+  - `core/src/mindustry/game/rules.rs`
+    - `RulesJsonPatch` 新增 `ambient_light`；
+    - `RulesJsonParser` 支持 top-level `"ambientLight": [r,g,b,a]`；
+    - 增加错形状忽略回归，保持 JSON 兼容。
+  - `desktop/src/lib.rs`
+    - Pause CustomRules 顶部子入口新增 `@rules.ambientlight`；
+    - 新增 ambient picker open/close/select action、状态、hit-test、render 与 Back 栈；
+    - picker 暂复用现有 palette swatch 形态，选择后写入 pending `Rules.ambient_light`，父 CustomRules 关闭后同步 game/runtime；
+    - rules clipboard JSON 输出 `ambientLight`，load 时可恢复；
+    - 新增回归测试覆盖打开 picker、选择颜色、pending-only 修改、最终同步与 JSON roundtrip。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop paused_world_overlay_custom_rules`
+  - `cargo test -p mindustry-desktop map_play`
+  - `cargo test -p mindustry-desktop paused_world_overlay`
+  - `cargo test -p mindustry-core rules`
+- 仍未完成：
+  - Java 里 ambient light 入口位于 environment 区域内的色块行；当前 Rust 先做成顶栏快捷入口，后续应迁回滚动内容区并让搜索过滤按 `@rules.ambientlight` 精确控制；
+  - 当前 picker 是 palette swatch，尚不是完整连续 RGBA picker；
+  - `@rules.title.planet` / `@rules.anyenv` 尚未接入 pause CustomRules；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 851. PausedDialog CustomRules loadout/configure 子流接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
