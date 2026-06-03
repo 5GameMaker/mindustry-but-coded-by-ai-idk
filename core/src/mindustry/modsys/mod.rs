@@ -22,6 +22,12 @@ pub struct ModMetadata {
     pub version: Option<String>,
     pub description: Option<String>,
     pub repo: Option<String>,
+    /// Java `mindustry.mod.ModListing.stars`; used by `ModsDialog` browser when
+    /// toggled away from date ordering.
+    pub stars: Option<i32>,
+    /// Java `mindustry.mod.ModListing.lastUpdated`; kept as source text so the
+    /// desktop browser can later mirror the upstream date parser exactly.
+    pub last_updated: Option<String>,
     pub steam_id: Option<String>,
     pub source_path: Option<String>,
 }
@@ -71,6 +77,10 @@ impl ModMetadata {
             version: extract_mod_metadata_value(source, "version"),
             description: extract_mod_metadata_value(source, "description"),
             repo: extract_mod_metadata_value(source, "repo"),
+            stars: extract_mod_metadata_i32(source, "stars"),
+            last_updated: extract_mod_metadata_value(source, "lastUpdated")
+                .or_else(|| extract_mod_metadata_value(source, "last-updated"))
+                .or_else(|| extract_mod_metadata_value(source, "last_updated")),
             steam_id: extract_mod_metadata_value(source, "steamID")
                 .or_else(|| extract_mod_metadata_value(source, "steamId"))
                 .or_else(|| extract_mod_metadata_value(source, "steamid"))
@@ -720,6 +730,10 @@ fn extract_mod_metadata_value(source: &str, key: &str) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
+fn extract_mod_metadata_i32(source: &str, key: &str) -> Option<i32> {
+    extract_mod_metadata_value(source, key).and_then(|value| value.trim().parse().ok())
+}
+
 fn metadata_value_start(source: &str, index: usize, key: &str) -> Option<usize> {
     if !is_metadata_key_boundary(source, index.checked_sub(1)) {
         return None;
@@ -1062,6 +1076,27 @@ mod tests {
 
         let empty_root = ModConfigPaths::new("", "plugin");
         assert_eq!(empty_root.config_folder(), "./plugin");
+    }
+
+    #[test]
+    fn mod_metadata_parses_java_mod_listing_browser_fields() {
+        let meta = ModMetadata::from_source_text(
+            "fallback",
+            Some("listing.json"),
+            r#"
+{
+    name: "Remote Mod",
+    repo: "Example/RemoteMod",
+    stars: 128,
+    lastUpdated: "2026-05-31T12:34:56Z"
+}
+"#,
+        );
+
+        assert_eq!(meta.name.as_deref(), Some("Remote Mod"));
+        assert_eq!(meta.repo.as_deref(), Some("Example/RemoteMod"));
+        assert_eq!(meta.stars, Some(128));
+        assert_eq!(meta.last_updated.as_deref(), Some("2026-05-31T12:34:56Z"));
     }
 
     #[test]

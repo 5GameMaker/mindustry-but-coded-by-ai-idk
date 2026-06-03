@@ -49459,6 +49459,12 @@ impl DesktopLauncher {
             .filter(|repo| !repo.is_empty())
     }
 
+    fn mods_route_mod_stars_at_index(&self, index: usize) -> i32 {
+        self.mods_route_mod_meta_at_index(index)
+            .and_then(|meta| meta.stars)
+            .unwrap_or(0)
+    }
+
     fn mods_route_mod_display_name_at_index(&self, index: usize) -> Option<&str> {
         self.mods_route_mod_meta_at_index(index)
             .and_then(ModMetadata::display_name_or_name)
@@ -49497,6 +49503,16 @@ impl DesktopLauncher {
 
     fn mods_browser_entry_info_text_at_index(&self, index: usize) -> String {
         let mut info_parts = Vec::new();
+        if self
+            .mods_route_mod_meta_at_index(index)
+            .is_some_and(|meta| meta.stars.is_some())
+        {
+            info_parts.push(format!(
+                "{} {}",
+                desktop_ui_icon_glyph_or_label("star", "star"),
+                self.mods_route_mod_stars_at_index(index)
+            ));
+        }
         if let Some(description) = self.mods_route_mod_short_description_at_index(index) {
             info_parts.push(description);
         }
@@ -49621,10 +49637,21 @@ impl DesktopLauncher {
             })
             .collect::<Vec<_>>();
         if !self.mods_browser_sort_date {
-            indices.sort_by_key(|index| {
-                self.mods_route_mod_display_name_at_index(*index)
-                    .unwrap_or_default()
-                    .to_ascii_lowercase()
+            indices.sort_by(|left, right| {
+                self.mods_route_mod_stars_at_index(*right)
+                    .cmp(&self.mods_route_mod_stars_at_index(*left))
+                    .then_with(|| {
+                        self.mods_route_mod_display_name_at_index(*left)
+                            .unwrap_or_default()
+                            .to_ascii_lowercase()
+                            .cmp(
+                                &self
+                                    .mods_route_mod_display_name_at_index(*right)
+                                    .unwrap_or_default()
+                                    .to_ascii_lowercase(),
+                            )
+                    })
+                    .then_with(|| left.cmp(right))
             });
         }
         indices
@@ -68423,6 +68450,7 @@ name: gamma
 displayName: "Gamma Tools"
 author: "Gamma Author"
 version: "3.0.0"
+stars: 7
 "#,
             ),
             ModMetadata::from_source_text(
@@ -68434,6 +68462,7 @@ displayName: "Beta Override"
 author: "Beta Author"
 version: "2.0.0"
 repo: "Beta/Override"
+stars: 42
 "#,
             ),
             ModMetadata::from_source_text(
@@ -68444,6 +68473,7 @@ name: alpha
 displayName: "Alpha Pack"
 author: "Alpha Author"
 version: "1.0.0"
+stars: 3
 "#,
             ),
         ];
@@ -68506,6 +68536,10 @@ version: "1.0.0"
             .iter()
             .any(|text| text.contains("Author: Beta Author")));
         assert!(texts.iter().any(|text| text.contains("Repo Beta/Override")));
+        assert!(
+            texts.iter().any(|text| text.contains("42")),
+            "Java ModsDialog browser card shows ModListing.stars in the entry info"
+        );
         assert!(!texts.contains(&"Reinstall"));
         assert!(!texts.contains(&"View Releases"));
         assert_eq!(launcher.filtered_mods_browser_indices(), vec![1]);
@@ -68789,8 +68823,8 @@ version: "1.0.0"
         assert!(!launcher.mods_browser_sort_date);
         assert_eq!(
             launcher.filtered_mods_browser_indices(),
-            vec![2, 1, 0],
-            "Rust fallback for Java stars mode should no longer use the date/source order"
+            vec![1, 0, 2],
+            "Java ModsDialog stars mode sorts by ModListing.stars descending, not display name"
         );
         let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Mods);
         assert!(lines

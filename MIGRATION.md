@@ -17,6 +17,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 804. ModsDialog browser stars 排序字段接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.35%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `mindustry.mod.ModListing` 有 `repo/name/author/lastUpdated/description/minGameVersion/stars`；
+  - `ModsDialog.getModList(...)` 默认按 `lastUpdated` 倒序；
+  - `ModsDialog.rebuildBrowser()` 在 `orderDate == false` 时复制 listings 并按 `-m1.stars` 排序；
+  - browser 卡片正文显示 stars，卡片仍是整卡点击进入 selection dialog，动作按钮留在 selection/release dialog。
+- 本轮主改动：
+  - `core/src/mindustry/modsys/mod.rs`
+    - `ModMetadata` 新增 `stars: Option<i32>` 与 `last_updated: Option<String>`；
+    - `from_source_text(...)` 支持解析 `stars`、`lastUpdated / last-updated / last_updated`；
+    - 新增 `mod_metadata_parses_java_mod_listing_browser_fields` 锁定 Java `ModListing` 字段解析。
+  - `desktop/src/lib.rs`
+    - 新增 `mods_route_mod_stars_at_index(...)`；
+    - `mods_browser_entry_info_text_at_index(...)` 在有 stars metadata 时显示星标数；
+    - `filtered_mods_browser_indices(...)` 的 `@mods.browser.sortstars` 模式改为按 stars 降序，再按显示名/原 index 稳定兜底；
+    - 扩展 `desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries`，用非字母顺序 stars fixture 锁定排序结果。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core mod_metadata_parses_java_mod_listing_browser_fields --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - browser 真实远端 listings 拉取与 `lastUpdated` 日期解析/排序仍未完整接入；
+  - releases dialog 目前仍是 Rust 侧过渡的 latest/synthetic entry，尚未迁移完整 GitHub releases JSON 多条列表；
+  - Java 的脚本/Java/ios/minGameVersion 过滤与 installed border/icon async cache 仍需继续对照迁移。
+
 ## 803. Editor export createDialog 前端入口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
