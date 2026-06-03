@@ -1707,6 +1707,9 @@ const PAUSE_CUSTOM_RULE_TOGGLE_GROUPS: &[(&str, &[DesktopCustomRulesToggle])] = 
         PAUSE_CUSTOM_RULE_ENVIRONMENT_TOGGLES,
     ),
 ];
+const PAUSE_CUSTOM_RULE_SCROLL_ROW_HEIGHT: f32 = 27.0;
+const PAUSE_CUSTOM_RULE_TOGGLE_ROW_HEIGHT: f32 = 24.0;
+const PAUSE_CUSTOM_RULE_TOGGLE_GROUP_HEADER_HEIGHT: f32 = 46.0;
 const MAP_PLAY_CUSTOM_RULE_WAVE_TOGGLES: &[DesktopCustomRulesToggle] = &[
     DesktopCustomRulesToggle::Waves,
     DesktopCustomRulesToggle::WaveSending,
@@ -18797,6 +18800,7 @@ pub struct DesktopLauncher {
     pause_custom_rules_edit_dialog_open: bool,
     pause_custom_rules_search: String,
     pause_custom_rules_search_focused: bool,
+    pause_custom_rules_scroll_offset: f32,
     last_pause_custom_rules_clipboard_text: Option<String>,
     pause_custom_rules_error: Option<String>,
     last_pause_quit_result: Option<DesktopPauseQuitResult>,
@@ -20019,6 +20023,7 @@ impl DesktopLauncher {
             pause_custom_rules_edit_dialog_open: false,
             pause_custom_rules_search: String::new(),
             pause_custom_rules_search_focused: false,
+            pause_custom_rules_scroll_offset: 0.0,
             last_pause_custom_rules_clipboard_text: None,
             pause_custom_rules_error: None,
             last_pause_quit_result: None,
@@ -31530,6 +31535,69 @@ impl DesktopLauncher {
         RenderRect::new(dialog.right() - 160.0, dialog.y + 18.0, 132.0, 38.0)
     }
 
+    fn pause_custom_rules_visible_number_count(&self) -> usize {
+        DesktopCustomRulesNumber::PAUSE_ALL
+            .into_iter()
+            .filter(|number| self.pause_custom_rule_label_matches(number.label_key()))
+            .count()
+    }
+
+    fn pause_custom_rules_visible_policy_count(&self) -> usize {
+        MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES
+            .iter()
+            .copied()
+            .filter(|toggle| self.pause_custom_rule_label_matches(toggle.label_key()))
+            .count()
+    }
+
+    fn pause_custom_rules_toggle_content_height(&self) -> f32 {
+        let mut height = 40.0;
+        for (_, toggles) in PAUSE_CUSTOM_RULE_TOGGLE_GROUPS {
+            let visible_count = toggles
+                .iter()
+                .copied()
+                .filter(|toggle| self.pause_custom_rule_label_matches(toggle.label_key()))
+                .count();
+            if visible_count == 0 {
+                continue;
+            }
+            height += PAUSE_CUSTOM_RULE_TOGGLE_GROUP_HEADER_HEIGHT
+                + visible_count as f32 * PAUSE_CUSTOM_RULE_TOGGLE_ROW_HEIGHT;
+        }
+        height
+    }
+
+    fn pause_custom_rules_number_policy_content_height(&self) -> f32 {
+        let row_count = self
+            .pause_custom_rules_visible_number_count()
+            .max(self.pause_custom_rules_visible_policy_count());
+        40.0 + row_count as f32 * PAUSE_CUSTOM_RULE_SCROLL_ROW_HEIGHT
+    }
+
+    fn pause_custom_rules_content_height(&self, content: RenderRect) -> f32 {
+        self.pause_custom_rules_toggle_content_height()
+            .max(self.pause_custom_rules_number_policy_content_height())
+            .max(content.height)
+    }
+
+    fn pause_custom_rules_max_scroll_offset(&self, content: RenderRect) -> f32 {
+        ((self.pause_custom_rules_content_height(content) - content.height).max(0.0)
+            / PAUSE_CUSTOM_RULE_SCROLL_ROW_HEIGHT)
+            .ceil()
+    }
+
+    fn pause_custom_rules_scrolled_content_rect(&self, content: RenderRect) -> RenderRect {
+        let offset = self
+            .pause_custom_rules_scroll_offset
+            .clamp(0.0, self.pause_custom_rules_max_scroll_offset(content));
+        RenderRect::new(
+            content.x,
+            content.y + offset * PAUSE_CUSTOM_RULE_SCROLL_ROW_HEIGHT,
+            content.width,
+            content.height,
+        )
+    }
+
     fn pause_overlay_custom_rules_toggle_rects(
         &self,
         content: RenderRect,
@@ -31545,14 +31613,8 @@ impl DesktopLauncher {
             if visible_toggles.is_empty() {
                 continue;
             }
-            if y < content.y + 34.0 {
-                break;
-            }
             y -= 36.0;
             for toggle in visible_toggles {
-                if y < content.y + 18.0 {
-                    return rects;
-                }
                 rects.push((
                     toggle,
                     RenderRect::new(content.x + 16.0, y - 12.0, content.width - 32.0, 22.0),
@@ -31655,6 +31717,10 @@ impl DesktopLauncher {
                     return Some(DesktopPausedOverlayAction::CloseModal);
                 }
                 let content = Self::pause_overlay_custom_rules_content_rect(dialog);
+                if !content.contains_point(point) {
+                    return None;
+                }
+                let scrolled_content = self.pause_custom_rules_scrolled_content_rect(content);
                 let rules = self.pause_custom_rules_current_rules();
                 let visible_numbers = DesktopCustomRulesNumber::PAUSE_ALL
                     .into_iter()
@@ -31666,7 +31732,7 @@ impl DesktopLauncher {
                         continue;
                     }
                     let row = Self::pause_custom_rules_number_row_rect(
-                        content,
+                        scrolled_content,
                         visible_number_index,
                         visible_number_count,
                     );
@@ -31689,7 +31755,7 @@ impl DesktopLauncher {
                         continue;
                     }
                     if Self::map_play_customize_banned_policy_row_rect(
-                        content,
+                        scrolled_content,
                         visible_policy_index,
                     )
                     .contains_point(point)
@@ -31698,7 +31764,8 @@ impl DesktopLauncher {
                     }
                     visible_policy_index += 1;
                 }
-                for (toggle, rect) in self.pause_overlay_custom_rules_toggle_rects(content) {
+                for (toggle, rect) in self.pause_overlay_custom_rules_toggle_rects(scrolled_content)
+                {
                     if rect.contains_point(point) && toggle.enabled(rules) {
                         return Some(DesktopPausedOverlayAction::TogglePauseCustomRule(toggle));
                     }
@@ -41119,6 +41186,49 @@ impl DesktopLauncher {
         self.pause_custom_rules_error = None;
     }
 
+    fn apply_pause_custom_rules_scroll_delta(
+        &mut self,
+        surface_size: DesktopSurfaceSize,
+        delta_y: f32,
+    ) -> bool {
+        if self.pause_overlay_modal != Some(DesktopPausedOverlayModal::CustomRules)
+            || !self.pause_overlay_custom_rules_visible()
+            || self.pause_custom_rules_edit_dialog_open
+        {
+            return false;
+        }
+        let Some(cursor) = self.last_menu_cursor else {
+            return false;
+        };
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel = Self::pause_overlay_panel_for_viewport_with_button_count(
+            viewport,
+            self.pause_overlay_button_specs().len(),
+        );
+        let dialog = Self::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let content = Self::pause_overlay_custom_rules_content_rect(dialog);
+        if !content.contains_point(cursor) {
+            return false;
+        }
+        let max = self.pause_custom_rules_max_scroll_offset(content);
+        if max <= 0.0 {
+            self.pause_custom_rules_scroll_offset = 0.0;
+            return false;
+        }
+        let current = self.pause_custom_rules_scroll_offset.clamp(0.0, max);
+        let rows = delta_y.abs().ceil().max(1.0);
+        let step = if delta_y < 0.0 {
+            rows
+        } else if delta_y > 0.0 {
+            -rows
+        } else {
+            0.0
+        };
+        let next = (current + step).clamp(0.0, max);
+        self.pause_custom_rules_scroll_offset = next;
+        (next - current).abs() > f32::EPSILON
+    }
+
     fn close_pause_overlay_modal(&mut self) {
         if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::QuitConfirm) {
             self.last_pause_quit_result = Some(DesktopPauseQuitResult::Cancelled);
@@ -41130,6 +41240,7 @@ impl DesktopLauncher {
         }
         self.pause_custom_rules_edit_dialog_open = false;
         self.pause_custom_rules_search_focused = false;
+        self.pause_custom_rules_scroll_offset = 0.0;
         self.pause_custom_rules_error = None;
         self.pause_overlay_modal = None;
     }
@@ -41294,6 +41405,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_edit = Some(self.game_state.rules.copy());
                 self.pause_overlay_modal = Some(DesktopPausedOverlayModal::CustomRules);
                 self.pause_custom_rules_edit_dialog_open = false;
+                self.pause_custom_rules_scroll_offset = 0.0;
                 self.pause_custom_rules_error = None;
                 self.last_menu_guard_message = None;
             }
@@ -41332,6 +41444,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_search.clear();
                 self.pause_custom_rules_search_focused = true;
                 self.pause_custom_rules_edit_dialog_open = false;
+                self.pause_custom_rules_scroll_offset = 0.0;
             }
             DesktopPausedOverlayAction::Back => {
                 if self.pause_overlay_modal.is_some() {
@@ -50164,6 +50277,7 @@ impl DesktopLauncher {
                     } else {
                         self.pause_custom_rules_search.clear();
                     }
+                    self.pause_custom_rules_scroll_offset = 0.0;
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
@@ -50552,6 +50666,9 @@ impl DesktopLauncher {
                             continue;
                         }
                     }
+                    if self.apply_pause_custom_rules_scroll_delta(surface_size, *delta_y) {
+                        continue;
+                    }
                     if self.apply_settings_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
@@ -50655,6 +50772,7 @@ impl DesktopLauncher {
                             }
                             self.pause_custom_rules_search.push(ch);
                         }
+                        self.pause_custom_rules_scroll_offset = 0.0;
                     } else if matches!(
                         self.active_menu_route,
                         Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
@@ -54909,9 +55027,12 @@ impl DesktopLauncher {
             layer + 0.007,
         ));
 
-        let mut y = content.y + content.height - 20.0;
+        let scrolled_content = self.pause_custom_rules_scrolled_content_rect(content);
+        pass.push(RenderCommand::set_clip(content));
+
+        let mut y = scrolled_content.y + scrolled_content.height - 20.0;
         let mut row_index = 0usize;
-        'categories: for (title_key, toggles) in PAUSE_CUSTOM_RULE_TOGGLE_GROUPS {
+        for (title_key, toggles) in PAUSE_CUSTOM_RULE_TOGGLE_GROUPS {
             let visible_toggles = toggles
                 .iter()
                 .copied()
@@ -54920,12 +55041,9 @@ impl DesktopLauncher {
             if visible_toggles.is_empty() {
                 continue;
             }
-            if y < content.y + 34.0 {
-                break;
-            }
             pass.push(RenderCommand::draw_text_styled(
                 self.localize_bundle_markup_text(*title_key),
-                RenderPoint::new(content.x + 14.0, y),
+                RenderPoint::new(scrolled_content.x + 14.0, y),
                 [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
                 11.0,
                 0.0,
@@ -54937,20 +55055,26 @@ impl DesktopLauncher {
             ));
             y -= 16.0;
             pass.push(RenderCommand::stroke_rect(
-                RenderRect::new(content.x + 14.0, y, content.width - 28.0, 1.0),
+                RenderRect::new(
+                    scrolled_content.x + 14.0,
+                    y,
+                    scrolled_content.width - 28.0,
+                    1.0,
+                ),
                 [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.72],
                 1.0,
                 layer + 0.011 + row_index as f32 * 0.001,
             ));
             y -= 20.0;
             for toggle in visible_toggles {
-                if y < content.y + 18.0 {
-                    break 'categories;
-                }
                 let enabled = toggle.enabled(rules);
                 let value = toggle.value(rules);
-                let row_rect =
-                    RenderRect::new(content.x + 16.0, y - 12.0, content.width - 32.0, 22.0);
+                let row_rect = RenderRect::new(
+                    scrolled_content.x + 16.0,
+                    y - 12.0,
+                    scrolled_content.width - 32.0,
+                    22.0,
+                );
                 pass.push(RenderCommand::draw_sprite(
                     Self::settings_drawable_symbol("button"),
                     row_rect,
@@ -54968,7 +55092,7 @@ impl DesktopLauncher {
                         if value { "✓" } else { "□" },
                         self.localize_bundle_markup_text(toggle.label_key())
                     ),
-                    RenderPoint::new(content.x + 22.0, y),
+                    RenderPoint::new(scrolled_content.x + 22.0, y),
                     if enabled {
                         [0.82, 0.91, 0.98, 1.0]
                     } else {
@@ -54979,7 +55103,7 @@ impl DesktopLauncher {
                     RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_markup(true)
-                        .with_wrap_width((content.width - 44.0).max(80.0))
+                        .with_wrap_width((scrolled_content.width - 44.0).max(80.0))
                         .with_integer_position(true),
                     layer + 0.012 + row_index as f32 * 0.001,
                 ));
@@ -54989,8 +55113,14 @@ impl DesktopLauncher {
             y -= 10.0;
         }
 
-        self.push_pause_custom_rules_number_rows(pass, content, rules, layer + 0.050);
-        self.push_pause_custom_rules_banned_policy_rows(pass, content, rules, layer + 0.058);
+        self.push_pause_custom_rules_number_rows(pass, scrolled_content, rules, layer + 0.050);
+        self.push_pause_custom_rules_banned_policy_rows(
+            pass,
+            scrolled_content,
+            rules,
+            layer + 0.058,
+        );
+        pass.push(RenderCommand::clear_clip());
         self.push_settings_text_button(
             pass,
             Self::pause_overlay_custom_rules_edit_button_rect(dialog),
@@ -76672,6 +76802,98 @@ displayName: "Alpha Pack"
             }],
         );
         assert!(launcher.pause_custom_rules_search.is_empty());
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_custom_rules_scrolls_rows_like_java_scrollpane() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.game_state.rules.allow_edit_rules = true;
+        launcher.runtime.state.rules = launcher.game_state.rules.copy();
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CustomRules);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = launcher.pause_overlay_panel_for_current_state(viewport);
+        let dialog = DesktopLauncher::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let content = DesktopLauncher::pause_overlay_custom_rules_content_rect(dialog);
+        let max_scroll = launcher.pause_custom_rules_max_scroll_offset(content);
+        assert!(
+            max_scroll > 0.0,
+            "Java CustomRulesDialog places pause rules inside a scroll pane instead of truncating the lower rows"
+        );
+
+        let initial_visible = launcher
+            .pause_overlay_custom_rules_toggle_rects(
+                launcher.pause_custom_rules_scrolled_content_rect(content),
+            )
+            .into_iter()
+            .filter(|(_, rect)| content.contains_point(rect.center()))
+            .map(|(toggle, _)| toggle)
+            .collect::<Vec<_>>();
+
+        launcher.pause_custom_rules_scroll_offset = max_scroll;
+        let scrolled_content = launcher.pause_custom_rules_scrolled_content_rect(content);
+        let (target_toggle, target_rect) = launcher
+            .pause_overlay_custom_rules_toggle_rects(scrolled_content)
+            .into_iter()
+            .find(|(toggle, rect)| {
+                content.contains_point(rect.center()) && !initial_visible.contains(toggle)
+            })
+            .expect("scrolling should expose lower CustomRulesDialog toggle rows");
+        let target_center = target_rect.center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                target_center.x,
+                target_center.y
+            ),
+            Some(super::DesktopPausedOverlayAction::TogglePauseCustomRule(
+                target_toggle
+            )),
+            "hit testing must use the same scrolled content offset as rendering"
+        );
+
+        launcher.pause_custom_rules_scroll_offset = 0.0;
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: content.center().x,
+                    y: content.center().y,
+                },
+                DesktopInputTickEvent::Scroll {
+                    delta_x: 0.0,
+                    delta_y: -4.0,
+                },
+            ],
+        );
+        assert!(
+            launcher.pause_custom_rules_scroll_offset > 0.0,
+            "mouse wheel inside CustomRulesDialog content should advance the Java-style scroll pane"
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let clip_count = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter(|command| matches!(command, RenderCommand::SetClip { .. }))
+            .count();
+        let clear_count = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter(|command| matches!(command, RenderCommand::ClearClip))
+            .count();
+        assert!(
+            clip_count > 0 && clear_count > 0,
+            "rendering should clip scrolled pause custom-rule rows to the content pane"
+        );
     }
 
     #[test]

@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 846. PausedDialog CustomRules 主内容滚动接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.78%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `CustomRulesDialog.setup()` 中搜索栏不在 `ScrollPane` 内，规则主体通过 `cont.pane(m -> main = m)` 滚动；
+  - `setupMain()` 会按搜索结果重建规则行，主内容必须能访问下方 toggle/number/policy 行；
+  - `PausedDialog` 只负责入口，关闭整个规则弹窗时才提交规则，保持 Java `rulesDialog.hidden(...)` 的单点提交语义。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `pause_custom_rules_scroll_offset` 及 CustomRules 主内容高度、最大滚动、scrolled content rect 计算；
+    - `push_pause_overlay_custom_rules_modal(...)` 对规则主体加入 `SetClip/ClearClip`，toggle/number/banned policy 渲染全部共用同一滚动 offset；
+    - `pause_overlay_action_at_surface_point(...)` 的数值按钮、封禁策略、toggle 命中全部改为 scrolled content 坐标，并限制在 content pane 内；
+    - 接入 `DesktopInputTickEvent::Scroll`，搜索文本变化、清空、关闭/重新打开弹窗时重置滚动位置；
+    - 新增暂停规则滚动回归测试，锁定滚轮推进、滚动后下方 toggle 命中、渲染裁剪。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop paused_world_overlay_custom_rules`
+  - `cargo test -p mindustry-desktop paused_world_overlay`
+- 仍未完成：
+  - CustomRules 主 ScrollPane 仍需继续补 Java 风格滚动条/knob 视觉与拖拽；
+  - 天气、team rules、banned blocks/units 的暂停规则子流仍需继续补齐；
+  - 关闭规则后向联机端广播 `Call.setRules(toEdit)` 的 Java 互通语义仍需继续接入；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 845. ModsDialog View Content icon grid 滚动接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
