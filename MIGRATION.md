@@ -17,6 +17,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 831. ModsDialog Releases JSON 字段闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.62%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ModsDialog.java` 的 releases 弹窗读取 GitHub `/releases` JSON 数组，并使用 `name`、`published_at`、`html_url`、`url`；
+  - UI 中第一个 release 才追加 `@mods.browser.latest`；
+  - “Release Page” 打开 `html_url`，“Install” 使用 API `url` 的 release id 继续安装流程。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopModsBrowserReleaseEntry` 新增 `api_url`；
+    - 新增本地 releases JSON parser，提取 `name/published_at/html_url/url/tag_name`，并按 Java 把 `published_at` 显示为 `YYYY/MM/DD`；
+    - 新增 `apply_mods_browser_releases_json_for_mod(...)`，用于后续真实网络回调或本地 fixture 把 JSON 落入 releases 弹窗；
+    - `ViewReleases` action 的 URI 改为 Java API 端点 `https://api.github.com/repos/<repo>/releases`；
+    - `InstallRelease` action 改为携带 `api_url`，`OpenRelease` 保持 `html_url`；
+    - release name 的 latest 标记从 synthetic 数据层移到渲染层，只对 index 0 追加；
+    - 新增回归测试覆盖多 release JSON、日期格式、latest 标记、按钮命中、OpenRelease/InstallRelease URI 分流。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_mods_browser_view_releases_lists_all_releases_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_mods_ --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 还没有真实 HTTP 拉取 GitHub releases；当前闭环是本地 JSON 注入解析；
+  - 安装流程仍未继续解析 `assets[*].browser_download_url` / `zipball_url`，后续需对齐 Java `handleMod(...)` 下载选择逻辑；
+  - releases 弹窗仍最多渲染前 4 条，后续需要 ScrollPane 行为以显示完整列表。
+
 ## 830. ModsDialog View Content 点击接入内容详情
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。

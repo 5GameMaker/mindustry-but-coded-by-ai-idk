@@ -4132,6 +4132,7 @@ pub struct DesktopModsBrowserReleaseEntry {
     pub published_at: String,
     pub tag: String,
     pub html_url: String,
+    pub api_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38437,11 +38438,146 @@ impl DesktopLauncher {
         }
     }
 
+    fn mods_browser_repo_api_uri(repo: &str) -> String {
+        let repo = repo
+            .trim()
+            .trim_start_matches("https://github.com/")
+            .trim_start_matches("http://github.com/")
+            .trim_matches('/');
+        format!("https://api.github.com/repos/{repo}")
+    }
+
     fn mods_browser_releases_uri(repo: &str) -> String {
         format!(
             "{}/releases",
             Self::mods_browser_repo_uri(repo).trim_end_matches('/')
         )
+    }
+
+    fn mods_browser_releases_api_uri(repo: &str) -> String {
+        format!("{}/releases", Self::mods_browser_repo_api_uri(repo))
+    }
+
+    fn mods_browser_release_published_date(published_at: &str) -> String {
+        published_at
+            .get(..10)
+            .unwrap_or(published_at)
+            .replace('-', "/")
+    }
+
+    fn mods_browser_json_string_value(object: &str, key: &str) -> Option<String> {
+        let quoted_key = format!("\"{key}\"");
+        let key_index = object.find(&quoted_key)?;
+        let bytes = object.as_bytes();
+        let mut index = key_index + quoted_key.len();
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if bytes.get(index) != Some(&b':') {
+            return None;
+        }
+        index += 1;
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if bytes.get(index) != Some(&b'"') {
+            return None;
+        }
+        index += 1;
+        let mut value = String::new();
+        while index < bytes.len() {
+            match bytes[index] {
+                b'"' => return Some(value),
+                b'\\' => {
+                    index += 1;
+                    match bytes.get(index).copied()? {
+                        b'"' => value.push('"'),
+                        b'\\' => value.push('\\'),
+                        b'/' => value.push('/'),
+                        b'b' => value.push('\u{0008}'),
+                        b'f' => value.push('\u{000c}'),
+                        b'n' => value.push('\n'),
+                        b'r' => value.push('\r'),
+                        b't' => value.push('\t'),
+                        other => value.push(other as char),
+                    }
+                }
+                byte => value.push(byte as char),
+            }
+            index += 1;
+        }
+        None
+    }
+
+    fn mods_browser_json_array_objects(value: &str) -> Vec<&str> {
+        let Some(array_start) = value.find('[') else {
+            return Vec::new();
+        };
+        let bytes = value.as_bytes();
+        let mut objects = Vec::new();
+        let mut depth = 0usize;
+        let mut object_start = None;
+        let mut in_string = false;
+        let mut escaped = false;
+        for index in array_start + 1..bytes.len() {
+            let byte = bytes[index];
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            match byte {
+                b'"' => in_string = true,
+                b'{' => {
+                    if depth == 0 {
+                        object_start = Some(index);
+                    }
+                    depth += 1;
+                }
+                b'}' if depth > 0 => {
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Some(start) = object_start.take() {
+                            objects.push(&value[start..=index]);
+                        }
+                    }
+                }
+                b']' if depth == 0 => break,
+                _ => {}
+            }
+        }
+        objects
+    }
+
+    fn mods_browser_release_entries_from_json(value: &str) -> Vec<DesktopModsBrowserReleaseEntry> {
+        Self::mods_browser_json_array_objects(value)
+            .into_iter()
+            .filter_map(|object| {
+                let name = Self::mods_browser_json_string_value(object, "name")
+                    .or_else(|| Self::mods_browser_json_string_value(object, "tag_name"))?;
+                let published_at = Self::mods_browser_json_string_value(object, "published_at")
+                    .map(|published| Self::mods_browser_release_published_date(&published))
+                    .unwrap_or_default();
+                let html_url = Self::mods_browser_json_string_value(object, "html_url")?;
+                let api_url = Self::mods_browser_json_string_value(object, "url")
+                    .unwrap_or_else(|| html_url.clone());
+                let tag = Self::mods_browser_json_string_value(object, "tag_name")
+                    .or_else(|| api_url.rsplit('/').next().map(str::to_string))
+                    .unwrap_or_else(|| name.clone());
+                Some(DesktopModsBrowserReleaseEntry {
+                    name,
+                    published_at,
+                    tag,
+                    html_url,
+                    api_url,
+                })
+            })
+            .collect()
     }
 
     fn mods_browser_release_entries_for_mod(
@@ -38467,17 +38603,16 @@ impl DesktopLauncher {
             format!("v{version}")
         };
         let release_base = Self::mods_browser_releases_uri(repo);
+        let html_url = if tag == "latest" {
+            release_base
+        } else {
+            format!("{}/tag/{tag}", release_base.trim_end_matches('/'))
+        };
         vec![DesktopModsBrowserReleaseEntry {
-            name: format!(
-                "{display_name} {}",
-                self.localize_bundle_markup_text("@mods.browser.latest")
-            ),
+            name: display_name.to_string(),
             published_at: self.localize_bundle_markup_text("@mods.browser.fetching"),
-            html_url: if tag == "latest" {
-                release_base
-            } else {
-                format!("{}/tag/{tag}", release_base.trim_end_matches('/'))
-            },
+            html_url: html_url.clone(),
+            api_url: html_url,
             tag,
         }]
     }
@@ -38491,6 +38626,19 @@ impl DesktopLauncher {
         self.mods_browser_dialog_open = true;
         self.mods_search_focused = false;
         true
+    }
+
+    pub fn apply_mods_browser_releases_json_for_mod(&mut self, index: usize, value: &str) -> usize {
+        if self.mods_route_mod_repo_at_index(index).is_none() {
+            return 0;
+        }
+        let entries = Self::mods_browser_release_entries_from_json(value);
+        let count = entries.len();
+        self.mods_browser_releases_dialog_index = Some(index);
+        self.mods_browser_release_entries = entries;
+        self.mods_browser_dialog_open = true;
+        self.mods_search_focused = false;
+        count
     }
 
     fn close_mods_browser_releases_dialog(&mut self) {
@@ -38532,7 +38680,7 @@ impl DesktopLauncher {
                 (Some(uri), Some(opened))
             }
             DesktopModsBrowserActionKind::ViewReleases => {
-                let uri = Self::mods_browser_releases_uri(repo.as_deref()?);
+                let uri = Self::mods_browser_releases_api_uri(repo.as_deref()?);
                 self.open_mods_browser_releases_dialog(index);
                 (Some(uri), None)
             }
@@ -38543,7 +38691,7 @@ impl DesktopLauncher {
             }
             DesktopModsBrowserActionKind::InstallRelease => {
                 let entry = self.mods_browser_release_entries.get(index)?;
-                (Some(entry.html_url.clone()), None)
+                (Some(entry.api_url.clone()), None)
             }
             DesktopModsBrowserActionKind::Add | DesktopModsBrowserActionKind::Reinstall => {
                 (None, None)
@@ -52245,7 +52393,15 @@ impl DesktopLauncher {
                     Layer::END_PIXELED + 0.116 + release_index as f32 * 0.001,
                 ));
                 pass.push(RenderCommand::draw_text_styled(
-                    release.name.clone(),
+                    if release_index == 0 {
+                        format!(
+                            "{} {}",
+                            release.name,
+                            self.localize_bundle_markup_text("@mods.browser.latest")
+                        )
+                    } else {
+                        release.name.clone()
+                    },
                     RenderPoint::new(entry.x + 12.0, entry.y + entry.height - 18.0),
                     [0.94, 0.98, 1.0, 1.0],
                     11.0,
@@ -70397,7 +70553,7 @@ stars: 3
         );
         assert_eq!(
             releases_action.uri.as_deref(),
-            Some("https://github.com/Beta/Override/releases")
+            Some("https://api.github.com/repos/Beta/Override/releases")
         );
         assert_eq!(releases_action.opened, None);
         assert_eq!(launcher.mods_browser_releases_dialog_index, Some(1));
@@ -70672,6 +70828,137 @@ displayName: "Local Mod"
             launcher.filtered_mods_browser_indices(),
             vec![2, 1, 0, 3],
             "without stars metadata, stars mode falls back to display-name order after equal 0-star values"
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_mods_browser_view_releases_lists_all_releases_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.last_mods_directory_mod_names = vec!["beta".into()];
+        launcher.last_mods_directory_mod_metas = vec![ModMetadata::from_source_text(
+            "beta",
+            Some("mod.hjson"),
+            r#"
+name: beta
+displayName: "Beta Override"
+repo: "Beta/Override"
+"#,
+        )];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::OpenModsBrowser);
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsBrowserSelection(0),
+        );
+
+        let json = r#"[
+            {
+                "name": "Release Two",
+                "tag_name": "v2.0.0",
+                "published_at": "2026-05-01T12:34:56Z",
+                "html_url": "https://github.com/Beta/Override/releases/tag/v2.0.0",
+                "url": "https://api.github.com/repos/Beta/Override/releases/200"
+            },
+            {
+                "name": "Release One",
+                "tag_name": "v1.0.0",
+                "published_at": "2025-04-03T02:01:00Z",
+                "html_url": "https://github.com/Beta/Override/releases/tag/v1.0.0",
+                "url": "https://api.github.com/repos/Beta/Override/releases/100"
+            }
+        ]"#;
+        assert_eq!(
+            launcher.apply_mods_browser_releases_json_for_mod(0, json),
+            2
+        );
+        assert_eq!(launcher.mods_browser_releases_dialog_index, Some(0));
+        assert_eq!(launcher.mods_browser_release_entries.len(), 2);
+        assert_eq!(launcher.mods_browser_release_entries[0].name, "Release Two");
+        assert_eq!(
+            launcher.mods_browser_release_entries[0].published_at,
+            "2026/05/01"
+        );
+        assert_eq!(
+            launcher.mods_browser_release_entries[0].api_url,
+            "https://api.github.com/repos/Beta/Override/releases/200"
+        );
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods browser releases JSON frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"Releases"));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("Release Two") && text.contains("[Latest]")));
+        assert!(texts.iter().any(|text| text.contains("Release One")));
+        assert!(!texts
+            .iter()
+            .any(|text| text.contains("Release One") && text.contains("[Latest]")));
+        assert!(texts.contains(&"2026/05/01"));
+        assert!(texts.contains(&"2025/04/03"));
+
+        let dialog = DesktopLauncher::mods_browser_releases_dialog_rect_for_browser(
+            DesktopLauncher::mods_browser_dialog_rect_for_panel(panel),
+        );
+        let second_entry = DesktopLauncher::mods_browser_release_entry_rect_for_dialog(dialog, 1);
+        let release_page =
+            DesktopLauncher::mods_browser_release_button_rect(second_entry, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                release_page.x,
+                release_page.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ModsBrowserOpenRelease(
+                1
+            ))
+        );
+        let install = DesktopLauncher::mods_browser_release_button_rect(second_entry, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, install.x, install.y),
+            Some(super::DesktopMenuRouteShellAction::ModsBrowserInstallRelease(1))
+        );
+
+        let mut platform = RecordingPlatform::default();
+        let open_action = launcher
+            .dispatch_mods_browser_action_with_platform(
+                1,
+                super::DesktopModsBrowserActionKind::OpenRelease,
+                &mut platform,
+            )
+            .expect("open release should use html_url");
+        assert_eq!(
+            open_action.uri.as_deref(),
+            Some("https://github.com/Beta/Override/releases/tag/v1.0.0")
+        );
+        let install_action = launcher
+            .dispatch_mods_browser_action_with_platform(
+                1,
+                super::DesktopModsBrowserActionKind::InstallRelease,
+                &mut platform,
+            )
+            .expect("install release should keep GitHub API release URL");
+        assert_eq!(
+            install_action.uri.as_deref(),
+            Some("https://api.github.com/repos/Beta/Override/releases/100")
         );
     }
 
