@@ -4316,6 +4316,14 @@ enum DesktopPausedOverlayAction {
     TogglePauseBannedContent(DesktopBannedContentKind, usize),
     AddAllPauseBannedContent(DesktopBannedContentKind),
     RemoveAllPauseBannedContent(DesktopBannedContentKind),
+    OpenPauseWeather,
+    ClosePauseWeather,
+    OpenPauseWeatherAdd,
+    ClosePauseWeatherAdd,
+    AddPauseWeather(usize),
+    RemovePauseWeather(usize),
+    TogglePauseWeatherAlways(usize),
+    AdjustPauseWeatherNumber(usize, DesktopWeatherNumber, i32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18814,6 +18822,9 @@ pub struct DesktopLauncher {
     pause_custom_rules_banned_content_search_focused: bool,
     pause_custom_rules_banned_content_scroll_offset: usize,
     pause_custom_rules_banned_content_selected_category: Option<Category>,
+    pause_custom_rules_weather_dialog_open: bool,
+    pause_custom_rules_weather_scroll_offset: usize,
+    pause_custom_rules_weather_add_dialog_open: bool,
     last_pause_custom_rules_clipboard_text: Option<String>,
     pause_custom_rules_error: Option<String>,
     last_pause_quit_result: Option<DesktopPauseQuitResult>,
@@ -20042,6 +20053,9 @@ impl DesktopLauncher {
             pause_custom_rules_banned_content_search_focused: false,
             pause_custom_rules_banned_content_scroll_offset: 0,
             pause_custom_rules_banned_content_selected_category: None,
+            pause_custom_rules_weather_dialog_open: false,
+            pause_custom_rules_weather_scroll_offset: 0,
+            pause_custom_rules_weather_add_dialog_open: false,
             last_pause_custom_rules_clipboard_text: None,
             pause_custom_rules_error: None,
             last_pause_quit_result: None,
@@ -31797,6 +31811,98 @@ impl DesktopLauncher {
                     }
                     return None;
                 }
+                if self.pause_custom_rules_weather_dialog_open {
+                    let weather_dialog = Self::map_play_weather_dialog_rect(dialog);
+                    let rules = self.pause_custom_rules_current_rules();
+                    if self.pause_custom_rules_weather_add_dialog_open {
+                        let add_dialog = Self::map_play_weather_add_dialog_rect(weather_dialog);
+                        if Self::map_play_weather_add_close_rect(add_dialog).contains_point(point) {
+                            return Some(DesktopPausedOverlayAction::ClosePauseWeatherAdd);
+                        }
+                        for (candidate_index, _) in self
+                            .map_play_weather_candidate_names(rules)
+                            .into_iter()
+                            .enumerate()
+                        {
+                            if Self::map_play_weather_candidate_rect(add_dialog, candidate_index)
+                                .contains_point(point)
+                            {
+                                return Some(DesktopPausedOverlayAction::AddPauseWeather(
+                                    candidate_index,
+                                ));
+                            }
+                        }
+                        return None;
+                    }
+                    if Self::map_play_weather_close_rect(weather_dialog).contains_point(point) {
+                        return Some(DesktopPausedOverlayAction::ClosePauseWeather);
+                    }
+                    let clip = Self::map_play_weather_entries_clip_rect(weather_dialog);
+                    let max_scroll = Self::map_play_weather_max_scroll_offset(
+                        weather_dialog,
+                        rules.weather.len(),
+                    );
+                    let scroll = self
+                        .pause_custom_rules_weather_scroll_offset
+                        .min(max_scroll);
+                    let visible_rows = Self::map_play_weather_visible_entry_rows(weather_dialog);
+                    let columns = Self::map_play_weather_entry_columns(weather_dialog);
+                    let first_visible = scroll * columns;
+                    let last_visible = (scroll + visible_rows) * columns;
+                    if clip.contains_point(point) {
+                        for (weather_index, _) in rules
+                            .weather
+                            .iter()
+                            .enumerate()
+                            .skip(first_visible)
+                            .take(last_visible.saturating_sub(first_visible))
+                        {
+                            let row = Self::map_play_weather_entry_rect_with_scroll(
+                                weather_dialog,
+                                weather_index,
+                                scroll,
+                            );
+                            if Self::map_play_weather_entry_remove_rect(row).contains_point(point) {
+                                return Some(DesktopPausedOverlayAction::RemovePauseWeather(
+                                    weather_index,
+                                ));
+                            }
+                            if Self::map_play_weather_entry_always_rect(row).contains_point(point) {
+                                return Some(DesktopPausedOverlayAction::TogglePauseWeatherAlways(
+                                    weather_index,
+                                ));
+                            }
+                            if !rules.weather[weather_index].always {
+                                for (field_index, number) in
+                                    DesktopWeatherNumber::ALL.into_iter().enumerate()
+                                {
+                                    let field =
+                                        Self::map_play_weather_entry_number_rect(row, field_index);
+                                    for (increase, direction) in [(false, -1), (true, 1)] {
+                                        if Self::map_play_weather_entry_number_button_rect(
+                                            field, increase,
+                                        )
+                                        .contains_point(point)
+                                        {
+                                            return Some(
+                                                DesktopPausedOverlayAction::AdjustPauseWeatherNumber(
+                                                    weather_index,
+                                                    number,
+                                                    direction,
+                                                ),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if Self::map_play_weather_add_button_rect(weather_dialog).contains_point(point)
+                    {
+                        return Some(DesktopPausedOverlayAction::OpenPauseWeatherAdd);
+                    }
+                    return None;
+                }
                 if self.pause_custom_rules_edit_dialog_open {
                     let edit = Self::map_play_rules_edit_dialog_rect(dialog);
                     for (button_index, action) in [
@@ -31841,6 +31947,11 @@ impl DesktopLauncher {
                     return Some(DesktopPausedOverlayAction::OpenPauseBannedContent(
                         DesktopBannedContentKind::Units,
                     ));
+                }
+                if Self::pause_overlay_custom_rules_child_button_rect(dialog, 2)
+                    .contains_point(point)
+                {
+                    return Some(DesktopPausedOverlayAction::OpenPauseWeather);
                 }
                 if Self::pause_overlay_modal_close_rect(dialog).contains_point(point) {
                     return Some(DesktopPausedOverlayAction::CloseModal);
@@ -35385,6 +35496,7 @@ impl DesktopLauncher {
             || !self.pause_overlay_custom_rules_visible()
             || self.pause_custom_rules_edit_dialog_open
             || self.pause_custom_rules_banned_content_dialog.is_some()
+            || self.pause_custom_rules_weather_dialog_open
         {
             return false;
         }
@@ -35478,6 +35590,51 @@ impl DesktopLauncher {
         next != current
     }
 
+    fn apply_pause_weather_scroll_delta(
+        &mut self,
+        surface_size: DesktopSurfaceSize,
+        delta_y: f32,
+    ) -> bool {
+        if self.pause_overlay_modal != Some(DesktopPausedOverlayModal::CustomRules)
+            || !self.pause_overlay_custom_rules_visible()
+            || !self.pause_custom_rules_weather_dialog_open
+            || self.pause_custom_rules_weather_add_dialog_open
+        {
+            return false;
+        }
+        let Some(cursor) = self.last_menu_cursor else {
+            return false;
+        };
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel = Self::pause_overlay_panel_for_viewport_with_button_count(
+            viewport,
+            self.pause_overlay_button_specs().len(),
+        );
+        let dialog = Self::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let weather_dialog = Self::map_play_weather_dialog_rect(dialog);
+        let clip = Self::map_play_weather_entries_clip_rect(weather_dialog);
+        if !clip.contains_point(cursor) {
+            return false;
+        }
+        let rules = self.pause_custom_rules_current_rules();
+        let max = Self::map_play_weather_max_scroll_offset(weather_dialog, rules.weather.len());
+        if max == 0 {
+            return false;
+        }
+        let current = self.pause_custom_rules_weather_scroll_offset.min(max);
+        let rows = delta_y.abs().ceil().max(1.0) as isize;
+        let step = if delta_y < 0.0 {
+            rows
+        } else if delta_y > 0.0 {
+            -rows
+        } else {
+            0
+        };
+        let next = (current as isize + step).clamp(0, max as isize) as usize;
+        self.pause_custom_rules_weather_scroll_offset = next;
+        next != current
+    }
+
     fn add_map_play_weather(&mut self, index: usize, candidate_index: usize) {
         let Some(map) = self.map_list_cards.get(index) else {
             return;
@@ -35549,6 +35706,58 @@ impl DesktopLauncher {
             number.adjust(entry, direction);
             self.map_play_rules = Some(rules);
             self.map_play_rules_error = None;
+        }
+    }
+
+    fn add_pause_weather(&mut self, candidate_index: usize) {
+        let rules_snapshot = self.pause_custom_rules_current_rules().copy();
+        let Some(name) = self
+            .map_play_weather_candidate_names(&rules_snapshot)
+            .get(candidate_index)
+            .cloned()
+        else {
+            return;
+        };
+        let Some(entry) = self
+            .content_loader
+            .weather_by_name(&name)
+            .map(|weather| WeatherEntry::new(weather.weather()))
+        else {
+            return;
+        };
+        let rules = self.ensure_pause_custom_rules_edit_rules();
+        rules.weather.push(entry);
+        self.pause_custom_rules_error = None;
+    }
+
+    fn remove_pause_weather(&mut self, weather_index: usize) {
+        let rules = self.ensure_pause_custom_rules_edit_rules();
+        if weather_index < rules.weather.len() {
+            rules.weather.remove(weather_index);
+            self.pause_custom_rules_error = None;
+        }
+    }
+
+    fn toggle_pause_weather_always(&mut self, weather_index: usize) {
+        let rules = self.ensure_pause_custom_rules_edit_rules();
+        if let Some(entry) = rules.weather.get_mut(weather_index) {
+            entry.always = !entry.always;
+            self.pause_custom_rules_error = None;
+        }
+    }
+
+    fn adjust_pause_weather_number(
+        &mut self,
+        weather_index: usize,
+        number: DesktopWeatherNumber,
+        direction: i32,
+    ) {
+        let rules = self.ensure_pause_custom_rules_edit_rules();
+        if let Some(entry) = rules.weather.get_mut(weather_index) {
+            if !entry.always {
+                number.adjust(entry, direction);
+                self.pause_custom_rules_error = None;
+            }
         }
     }
 
@@ -41512,6 +41721,9 @@ impl DesktopLauncher {
         self.pause_custom_rules_banned_content_dialog = None;
         self.pause_custom_rules_banned_content_search_focused = false;
         self.pause_custom_rules_banned_content_scroll_offset = 0;
+        self.pause_custom_rules_weather_dialog_open = false;
+        self.pause_custom_rules_weather_scroll_offset = 0;
+        self.pause_custom_rules_weather_add_dialog_open = false;
         self.pause_custom_rules_error = None;
         self.pause_overlay_modal = None;
     }
@@ -41649,7 +41861,15 @@ impl DesktopLauncher {
             | DesktopPausedOverlayAction::TogglePauseBannedContentCategory(_)
             | DesktopPausedOverlayAction::TogglePauseBannedContent(_, _)
             | DesktopPausedOverlayAction::AddAllPauseBannedContent(_)
-            | DesktopPausedOverlayAction::RemoveAllPauseBannedContent(_) => {
+            | DesktopPausedOverlayAction::RemoveAllPauseBannedContent(_)
+            | DesktopPausedOverlayAction::OpenPauseWeather
+            | DesktopPausedOverlayAction::ClosePauseWeather
+            | DesktopPausedOverlayAction::OpenPauseWeatherAdd
+            | DesktopPausedOverlayAction::ClosePauseWeatherAdd
+            | DesktopPausedOverlayAction::AddPauseWeather(_)
+            | DesktopPausedOverlayAction::RemovePauseWeather(_)
+            | DesktopPausedOverlayAction::TogglePauseWeatherAlways(_)
+            | DesktopPausedOverlayAction::AdjustPauseWeatherNumber(_, _, _) => {
                 self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
                     && self.pause_overlay_custom_rules_visible()
             }
@@ -41688,6 +41908,9 @@ impl DesktopLauncher {
                 self.pause_custom_rules_banned_content_dialog = None;
                 self.pause_custom_rules_banned_content_search_focused = false;
                 self.pause_custom_rules_banned_content_scroll_offset = 0;
+                self.pause_custom_rules_weather_dialog_open = false;
+                self.pause_custom_rules_weather_scroll_offset = 0;
+                self.pause_custom_rules_weather_add_dialog_open = false;
                 self.pause_custom_rules_error = None;
                 self.last_menu_guard_message = None;
             }
@@ -41702,6 +41925,8 @@ impl DesktopLauncher {
                 self.pause_custom_rules_search_focused = false;
                 self.pause_custom_rules_banned_content_dialog = None;
                 self.pause_custom_rules_banned_content_search_focused = false;
+                self.pause_custom_rules_weather_dialog_open = false;
+                self.pause_custom_rules_weather_add_dialog_open = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseCustomRulesEdit => {
@@ -41736,6 +41961,8 @@ impl DesktopLauncher {
                 self.pause_custom_rules_banned_content_scroll_offset = 0;
                 self.pause_custom_rules_edit_dialog_open = false;
                 self.pause_custom_rules_search_focused = false;
+                self.pause_custom_rules_weather_dialog_open = false;
+                self.pause_custom_rules_weather_add_dialog_open = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseBannedContent => {
@@ -41781,6 +42008,48 @@ impl DesktopLauncher {
                 self.pause_custom_rules_banned_content_dialog = Some(kind);
                 self.pause_custom_rules_banned_content_search_focused = false;
             }
+            DesktopPausedOverlayAction::OpenPauseWeather => {
+                self.pause_custom_rules_weather_dialog_open = true;
+                self.pause_custom_rules_weather_add_dialog_open = false;
+                self.pause_custom_rules_weather_scroll_offset = 0;
+                self.pause_custom_rules_banned_content_dialog = None;
+                self.pause_custom_rules_banned_content_search_focused = false;
+                self.pause_custom_rules_edit_dialog_open = false;
+                self.pause_custom_rules_search_focused = false;
+                self.pause_custom_rules_error = None;
+            }
+            DesktopPausedOverlayAction::ClosePauseWeather => {
+                self.pause_custom_rules_weather_dialog_open = false;
+                self.pause_custom_rules_weather_add_dialog_open = false;
+            }
+            DesktopPausedOverlayAction::OpenPauseWeatherAdd => {
+                self.pause_custom_rules_weather_dialog_open = true;
+                self.pause_custom_rules_weather_add_dialog_open = true;
+            }
+            DesktopPausedOverlayAction::ClosePauseWeatherAdd => {
+                self.pause_custom_rules_weather_add_dialog_open = false;
+            }
+            DesktopPausedOverlayAction::AddPauseWeather(candidate_index) => {
+                self.add_pause_weather(candidate_index);
+                self.pause_custom_rules_weather_dialog_open = true;
+                self.pause_custom_rules_weather_add_dialog_open = false;
+            }
+            DesktopPausedOverlayAction::RemovePauseWeather(weather_index) => {
+                self.remove_pause_weather(weather_index);
+                self.pause_custom_rules_weather_dialog_open = true;
+            }
+            DesktopPausedOverlayAction::TogglePauseWeatherAlways(weather_index) => {
+                self.toggle_pause_weather_always(weather_index);
+                self.pause_custom_rules_weather_dialog_open = true;
+            }
+            DesktopPausedOverlayAction::AdjustPauseWeatherNumber(
+                weather_index,
+                number,
+                direction,
+            ) => {
+                self.adjust_pause_weather_number(weather_index, number, direction);
+                self.pause_custom_rules_weather_dialog_open = true;
+            }
             DesktopPausedOverlayAction::Back => {
                 if self.pause_overlay_modal.is_some() {
                     if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
@@ -41788,6 +42057,18 @@ impl DesktopLauncher {
                     {
                         self.pause_custom_rules_banned_content_dialog = None;
                         self.pause_custom_rules_banned_content_search_focused = false;
+                        return;
+                    }
+                    if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
+                        && self.pause_custom_rules_weather_add_dialog_open
+                    {
+                        self.pause_custom_rules_weather_add_dialog_open = false;
+                        return;
+                    }
+                    if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
+                        && self.pause_custom_rules_weather_dialog_open
+                    {
+                        self.pause_custom_rules_weather_dialog_open = false;
                         return;
                     }
                     self.close_pause_overlay_modal();
@@ -51023,6 +51304,9 @@ impl DesktopLauncher {
                             continue;
                         }
                     }
+                    if self.apply_pause_weather_scroll_delta(surface_size, *delta_y) {
+                        continue;
+                    }
                     if self.apply_pause_banned_content_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
@@ -55504,6 +55788,260 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_pause_weather_dialog(
+        &self,
+        pass: &mut RenderPass,
+        dialog_parent: RenderRect,
+        rules: &Rules,
+    ) {
+        let layer = Layer::END_PIXELED + 0.231;
+        let dialog = Self::map_play_weather_dialog_rect(dialog_parent);
+        pass.push(RenderCommand::fill_rect(
+            dialog_parent,
+            [0.0, 0.0, 0.0, 0.52],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.62, 0.82, 1.0, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@rules.weather"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 26.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.004,
+        ));
+        if rules.weather.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text("@empty"),
+                RenderPoint::new(dialog.center().x, dialog.center().y + 28.0),
+                [0.62, 0.70, 0.76, 0.82],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.006,
+            ));
+        }
+        let max_scroll = Self::map_play_weather_max_scroll_offset(dialog, rules.weather.len());
+        let scroll = self
+            .pause_custom_rules_weather_scroll_offset
+            .min(max_scroll);
+        let visible_rows = Self::map_play_weather_visible_entry_rows(dialog);
+        let columns = Self::map_play_weather_entry_columns(dialog);
+        let first_visible = scroll * columns;
+        let last_visible = (scroll + visible_rows) * columns;
+        let clip = Self::map_play_weather_entries_clip_rect(dialog);
+        if !rules.weather.is_empty() {
+            pass.push(RenderCommand::set_clip(clip));
+            for (weather_index, entry) in rules
+                .weather
+                .iter()
+                .enumerate()
+                .skip(first_visible)
+                .take(last_visible.saturating_sub(first_visible))
+            {
+                let row =
+                    Self::map_play_weather_entry_rect_with_scroll(dialog, weather_index, scroll);
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_drawable_symbol("button"),
+                    row,
+                    [1.0, 1.0, 1.0, 0.28],
+                    0.0,
+                    layer + 0.010 + weather_index as f32 * 0.001,
+                ));
+                let display_name = self
+                    .content_loader
+                    .weather_by_name(&entry.weather)
+                    .map(|weather| weather.weather().localized_name().to_string())
+                    .unwrap_or_else(|| entry.weather.clone());
+                pass.push(RenderCommand::draw_text_styled(
+                    display_name,
+                    RenderPoint::new(row.x + 10.0, row.y + row.height - 14.0),
+                    [0.90, 0.96, 1.0, 1.0],
+                    10.5,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    layer + 0.011 + weather_index as f32 * 0.001,
+                ));
+                for (field_index, number) in DesktopWeatherNumber::ALL.into_iter().enumerate() {
+                    let field = Self::map_play_weather_entry_number_rect(row, field_index);
+                    let button_layer =
+                        layer + 0.012 + weather_index as f32 * 0.001 + field_index as f32 * 0.0001;
+                    self.push_settings_text_button_enabled(
+                        pass,
+                        Self::map_play_weather_entry_number_button_rect(field, false),
+                        "-",
+                        None,
+                        button_layer,
+                        !entry.always,
+                    );
+                    self.push_settings_text_button_enabled(
+                        pass,
+                        Self::map_play_weather_entry_number_button_rect(field, true),
+                        "+",
+                        None,
+                        button_layer + 0.00002,
+                        !entry.always,
+                    );
+                    pass.push(RenderCommand::draw_text_styled(
+                        format!("{} {}", number.label(), number.value_text(entry)),
+                        RenderPoint::new(field.center().x, field.center().y),
+                        if entry.always {
+                            [0.46, 0.52, 0.58, 0.78]
+                        } else {
+                            [0.72, 0.84, 0.92, 0.96]
+                        },
+                        8.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        button_layer + 0.00004,
+                    ));
+                }
+                self.push_settings_text_button(
+                    pass,
+                    Self::map_play_weather_entry_always_rect(row),
+                    format!(
+                        "{} {}",
+                        if entry.always { "✓" } else { "□" },
+                        self.localize_bundle_markup_text("@rules.weather.always")
+                    ),
+                    None,
+                    layer + 0.013 + weather_index as f32 * 0.001,
+                );
+                self.push_settings_text_button(
+                    pass,
+                    Self::map_play_weather_entry_remove_rect(row),
+                    "X",
+                    None,
+                    layer + 0.014 + weather_index as f32 * 0.001,
+                );
+            }
+            pass.push(RenderCommand::ClearClip);
+        }
+        if max_scroll > 0 {
+            pass.push(RenderCommand::draw_text_styled(
+                format!("{}/{}", scroll + 1, max_scroll + 1),
+                RenderPoint::new(dialog.right() - 42.0, dialog.y + 48.0),
+                [0.62, 0.70, 0.76, 0.82],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.044,
+            ));
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_weather_add_button_rect(dialog),
+            self.localize_bundle_markup_text("@add"),
+            Some("add"),
+            layer + 0.049,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_weather_close_rect(dialog),
+            self.localize_bundle_markup_text("@back"),
+            Some("left"),
+            layer + 0.050,
+        );
+        if self.pause_custom_rules_weather_add_dialog_open {
+            self.push_pause_weather_add_dialog(pass, dialog, rules);
+        }
+    }
+
+    fn push_pause_weather_add_dialog(
+        &self,
+        pass: &mut RenderPass,
+        parent: RenderRect,
+        rules: &Rules,
+    ) {
+        let layer = Layer::END_PIXELED + 0.252;
+        let dialog = Self::map_play_weather_add_dialog_rect(parent);
+        let candidates = self.map_play_weather_candidate_names(rules);
+        pass.push(RenderCommand::fill_rect(
+            parent,
+            [0.0, 0.0, 0.0, 0.38],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.99],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@add"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 26.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.004,
+        ));
+        if candidates.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                "@empty",
+                dialog.center(),
+                [0.62, 0.70, 0.76, 0.82],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.006,
+            ));
+        }
+        for (candidate_index, name) in candidates.into_iter().enumerate() {
+            self.push_settings_text_button(
+                pass,
+                Self::map_play_weather_candidate_rect(dialog, candidate_index),
+                name,
+                None,
+                layer + 0.010 + candidate_index as f32 * 0.001,
+            );
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_weather_add_close_rect(dialog),
+            self.localize_bundle_markup_text("@back"),
+            Some("left"),
+            layer + 0.050,
+        );
+    }
+
     fn push_pause_overlay_custom_rules_modal(&self, pass: &mut RenderPass, panel: RenderRect) {
         let dialog = Self::pause_overlay_custom_rules_modal_rect_for_panel(panel);
         let content = Self::pause_overlay_custom_rules_content_rect(dialog);
@@ -55736,9 +56274,21 @@ impl DesktopLauncher {
             Some("edit"),
             layer + 0.079,
         );
-        for (index, (label, kind)) in [
-            ("@bannedblocks", DesktopBannedContentKind::Blocks),
-            ("@bannedunits", DesktopBannedContentKind::Units),
+        for (index, (label, active)) in [
+            (
+                "@bannedblocks",
+                self.pause_custom_rules_banned_content_dialog
+                    == Some(DesktopBannedContentKind::Blocks),
+            ),
+            (
+                "@bannedunits",
+                self.pause_custom_rules_banned_content_dialog
+                    == Some(DesktopBannedContentKind::Units),
+            ),
+            (
+                "@rules.weather",
+                self.pause_custom_rules_weather_dialog_open,
+            ),
         ]
         .into_iter()
         .enumerate()
@@ -55750,7 +56300,7 @@ impl DesktopLauncher {
                 None,
                 layer + 0.0795 + index as f32 * 0.001,
             );
-            if self.pause_custom_rules_banned_content_dialog == Some(kind) {
+            if active {
                 pass.push(RenderCommand::stroke_rect(
                     Self::pause_overlay_custom_rules_child_button_rect(dialog, index),
                     [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.90],
@@ -55771,6 +56321,9 @@ impl DesktopLauncher {
         }
         if let Some(kind) = self.pause_custom_rules_banned_content_dialog {
             self.push_pause_banned_content_dialog(pass, dialog, kind, rules);
+        }
+        if self.pause_custom_rules_weather_dialog_open {
+            self.push_pause_weather_dialog(pass, dialog, rules);
         }
     }
 
@@ -77702,6 +78255,124 @@ displayName: "Alpha Pack"
             .rules
             .banned_units
             .contains(&unit_entry.name));
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_custom_rules_weather_child_dialog_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.game_state.rules.allow_edit_rules = true;
+        launcher.runtime.state.rules = launcher.game_state.rules.copy();
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CustomRules);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = launcher.pause_overlay_panel_for_current_state(viewport);
+        let dialog = DesktopLauncher::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let weather_center =
+            DesktopLauncher::pause_overlay_custom_rules_child_button_rect(dialog, 2).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                weather_center.x,
+                weather_center.y
+            ),
+            Some(super::DesktopPausedOverlayAction::OpenPauseWeather)
+        );
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::OpenPauseWeather);
+        assert!(launcher.pause_custom_rules_weather_dialog_open);
+
+        let weather_dialog = DesktopLauncher::map_play_weather_dialog_rect(dialog);
+        let add_center = DesktopLauncher::map_play_weather_add_button_rect(weather_dialog).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, add_center.x, add_center.y),
+            Some(super::DesktopPausedOverlayAction::OpenPauseWeatherAdd)
+        );
+        launcher
+            .dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::OpenPauseWeatherAdd);
+        assert!(launcher.pause_custom_rules_weather_add_dialog_open);
+
+        let candidate_name = launcher
+            .map_play_weather_candidate_names(launcher.pause_custom_rules_current_rules())
+            .into_iter()
+            .next()
+            .expect("vanilla weather list should provide a pause CustomRulesDialog candidate");
+        let add_dialog = DesktopLauncher::map_play_weather_add_dialog_rect(weather_dialog);
+        let candidate_center =
+            DesktopLauncher::map_play_weather_candidate_rect(add_dialog, 0).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                candidate_center.x,
+                candidate_center.y
+            ),
+            Some(super::DesktopPausedOverlayAction::AddPauseWeather(0))
+        );
+        launcher
+            .dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::AddPauseWeather(0));
+        assert!(!launcher.pause_custom_rules_weather_add_dialog_open);
+        assert_eq!(
+            launcher
+                .pause_custom_rules_edit
+                .as_ref()
+                .and_then(|rules| rules.weather.first())
+                .map(|entry| entry.weather.as_str()),
+            Some(candidate_name.as_str())
+        );
+        assert!(
+            launcher.game_state.rules.weather.is_empty(),
+            "Java CustomRulesDialog weather edits remain pending until the parent dialog closes"
+        );
+
+        let row = DesktopLauncher::map_play_weather_entry_rect_with_scroll(weather_dialog, 0, 0);
+        let always_center = DesktopLauncher::map_play_weather_entry_always_rect(row).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                always_center.x,
+                always_center.y
+            ),
+            Some(super::DesktopPausedOverlayAction::TogglePauseWeatherAlways(
+                0
+            ))
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::TogglePauseWeatherAlways(0),
+        );
+        assert!(launcher
+            .pause_custom_rules_edit
+            .as_ref()
+            .and_then(|rules| rules.weather.first())
+            .map(|entry| entry.always)
+            .unwrap_or(false));
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::Back);
+        assert!(!launcher.pause_custom_rules_weather_dialog_open);
+        assert_eq!(
+            launcher.pause_overlay_modal,
+            Some(super::DesktopPausedOverlayModal::CustomRules)
+        );
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CloseModal);
+        assert_eq!(
+            launcher
+                .game_state
+                .rules
+                .weather
+                .first()
+                .map(|entry| (entry.weather.as_str(), entry.always)),
+            Some((candidate_name.as_str(), true))
+        );
+        assert_eq!(
+            launcher
+                .runtime
+                .state
+                .rules
+                .weather
+                .first()
+                .map(|entry| (entry.weather.as_str(), entry.always)),
+            Some((candidate_name.as_str(), true))
+        );
     }
 
     #[test]

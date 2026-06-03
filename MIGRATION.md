@@ -17,6 +17,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 849. PausedDialog CustomRules weather 子流接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.81%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `CustomRulesDialog.weatherDialog()` 是独立子弹窗，支持天气列表、Add、Remove、Always、duration/frequency 数值调整；
+  - weather 子流修改 pending rules，关闭整个 CustomRulesDialog 后才提交；
+  - Back 栈应先关闭 add 子弹窗，再关闭 weather 子窗，再回到 CustomRules 主窗。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 pause weather 状态：dialog open、scroll offset、add dialog open；
+    - 新增 `DesktopPausedOverlayAction` 的 pause weather action 族；
+    - Pause CustomRules 主窗新增 Weather 入口按钮；
+    - 新增 pause weather add/remove/always/number 修改逻辑，全部写入 `pause_custom_rules_edit`；
+    - 接入 weather 子窗滚轮、hit-test、render、add 子窗和 Back 栈；
+    - 新增回归测试，锁定 add weather、toggle always、pending-only 修改、关闭主弹窗后同步到 game/runtime。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop paused_world_overlay_custom_rules`
+  - `cargo test -p mindustry-desktop map_play`
+  - `cargo test -p mindustry-desktop weather_dialog`
+  - `cargo test -p mindustry-desktop paused_world_overlay`
+- 仍未完成：
+  - pause 侧仍需补齐 team rules 子流；
+  - CustomRules 主 ScrollPane 仍需继续补 Java 风格滚动条/knob 视觉与拖拽；
+  - 关闭规则后向联机端广播 `Call.setRules(toEdit)` 的 Java 互通语义仍需继续接入；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 848. PausedDialog CustomRules banned blocks/units 子流接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
