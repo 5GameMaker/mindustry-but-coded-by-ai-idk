@@ -3994,6 +3994,11 @@ enum DesktopPausedOverlayAction {
     ConfirmQuit,
     TogglePauseCustomRule(DesktopCustomRulesToggle),
     AdjustPauseCustomRuleNumber(DesktopCustomRulesNumber, i32),
+    OpenPauseCustomRulesEdit,
+    ClosePauseCustomRulesEdit,
+    CopyPauseCustomRules,
+    LoadPauseCustomRules,
+    ResetPauseCustomRules,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18483,6 +18488,9 @@ pub struct DesktopLauncher {
     pub active_menu_route: Option<DesktopMenuRoute>,
     pause_overlay_modal: Option<DesktopPausedOverlayModal>,
     pause_custom_rules_edit: Option<Rules>,
+    pause_custom_rules_edit_dialog_open: bool,
+    last_pause_custom_rules_clipboard_text: Option<String>,
+    pause_custom_rules_error: Option<String>,
     last_pause_quit_result: Option<DesktopPauseQuitResult>,
     pub last_menu_dispatch: Option<DesktopMenuActionDispatch>,
     pub last_menu_route_shell_action: Option<DesktopMenuRouteShellAction>,
@@ -19697,6 +19705,9 @@ impl DesktopLauncher {
             active_menu_route: None,
             pause_overlay_modal: None,
             pause_custom_rules_edit: None,
+            pause_custom_rules_edit_dialog_open: false,
+            last_pause_custom_rules_clipboard_text: None,
+            pause_custom_rules_error: None,
             last_pause_quit_result: None,
             last_menu_dispatch: None,
             last_menu_route_shell_action: None,
@@ -31190,6 +31201,10 @@ impl DesktopLauncher {
         )
     }
 
+    fn pause_overlay_custom_rules_edit_button_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.right() - 160.0, dialog.y + 18.0, 132.0, 38.0)
+    }
+
     fn pause_overlay_custom_rules_toggle_rects(
         content: RenderRect,
     ) -> Vec<(DesktopCustomRulesToggle, RenderRect)> {
@@ -31271,6 +31286,28 @@ impl DesktopLauncher {
         if self.pause_overlay_modal.is_some() {
             if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules) {
                 let dialog = Self::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+                if self.pause_custom_rules_edit_dialog_open {
+                    let edit = Self::map_play_rules_edit_dialog_rect(dialog);
+                    for (button_index, action) in [
+                        DesktopPausedOverlayAction::CopyPauseCustomRules,
+                        DesktopPausedOverlayAction::LoadPauseCustomRules,
+                        DesktopPausedOverlayAction::ResetPauseCustomRules,
+                        DesktopPausedOverlayAction::ClosePauseCustomRulesEdit,
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        if Self::map_play_rules_edit_button_rect(edit, button_index)
+                            .contains_point(point)
+                        {
+                            return Some(action);
+                        }
+                    }
+                    return None;
+                }
+                if Self::pause_overlay_custom_rules_edit_button_rect(dialog).contains_point(point) {
+                    return Some(DesktopPausedOverlayAction::OpenPauseCustomRulesEdit);
+                }
                 if Self::pause_overlay_modal_close_rect(dialog).contains_point(point) {
                     return Some(DesktopPausedOverlayAction::CloseModal);
                 }
@@ -40682,6 +40719,44 @@ impl DesktopLauncher {
         self.runtime.state.sync_teams_with_rules();
     }
 
+    fn copy_pause_custom_rules_to_clipboard_with_platform<P: Platform>(
+        &mut self,
+        platform: &mut P,
+    ) -> Option<String> {
+        let json = Self::map_play_rules_clipboard_json(self.pause_custom_rules_current_rules());
+        platform.set_clipboard_text(&json);
+        self.last_pause_custom_rules_clipboard_text = Some(json.clone());
+        self.pause_custom_rules_error = None;
+        Some(json)
+    }
+
+    fn load_pause_custom_rules_from_clipboard_with_platform<P: Platform>(
+        &mut self,
+        platform: &mut P,
+    ) -> Result<(), String> {
+        let text = platform
+            .get_clipboard_text()
+            .or_else(|| self.last_pause_custom_rules_clipboard_text.clone())
+            .ok_or_else(|| "@rules.invaliddata".to_string())?;
+        let mut rules = self.pause_custom_rules_current_rules().copy();
+        match rules.apply_json_str(&text) {
+            Ok(()) => {
+                self.pause_custom_rules_edit = Some(rules);
+                self.pause_custom_rules_error = None;
+                Ok(())
+            }
+            Err(_) => {
+                self.pause_custom_rules_error = Some("@rules.invaliddata".to_string());
+                Err("@rules.invaliddata".to_string())
+            }
+        }
+    }
+
+    fn reset_pause_custom_rules_edit(&mut self) {
+        self.pause_custom_rules_edit = Some(self.game_state.rules.copy());
+        self.pause_custom_rules_error = None;
+    }
+
     fn close_pause_overlay_modal(&mut self) {
         if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::QuitConfirm) {
             self.last_pause_quit_result = Some(DesktopPauseQuitResult::Cancelled);
@@ -40691,6 +40766,8 @@ impl DesktopLauncher {
         } else {
             self.pause_custom_rules_edit = None;
         }
+        self.pause_custom_rules_edit_dialog_open = false;
+        self.pause_custom_rules_error = None;
         self.pause_overlay_modal = None;
     }
 
@@ -40813,6 +40890,14 @@ impl DesktopLauncher {
                     && self.pause_overlay_custom_rules_visible()
                     && number.enabled(self.pause_custom_rules_current_rules())
             }
+            DesktopPausedOverlayAction::OpenPauseCustomRulesEdit
+            | DesktopPausedOverlayAction::ClosePauseCustomRulesEdit
+            | DesktopPausedOverlayAction::CopyPauseCustomRules
+            | DesktopPausedOverlayAction::LoadPauseCustomRules
+            | DesktopPausedOverlayAction::ResetPauseCustomRules => {
+                self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
+                    && self.pause_overlay_custom_rules_visible()
+            }
             _ => self
                 .pause_overlay_button_specs()
                 .into_iter()
@@ -40843,6 +40928,8 @@ impl DesktopLauncher {
             DesktopPausedOverlayAction::CustomRules => {
                 self.pause_custom_rules_edit = Some(self.game_state.rules.copy());
                 self.pause_overlay_modal = Some(DesktopPausedOverlayModal::CustomRules);
+                self.pause_custom_rules_edit_dialog_open = false;
+                self.pause_custom_rules_error = None;
                 self.last_menu_guard_message = None;
             }
             DesktopPausedOverlayAction::TogglePauseCustomRule(toggle) => {
@@ -40850,6 +40937,26 @@ impl DesktopLauncher {
             }
             DesktopPausedOverlayAction::AdjustPauseCustomRuleNumber(number, direction) => {
                 number.adjust(self.ensure_pause_custom_rules_edit_rules(), direction);
+            }
+            DesktopPausedOverlayAction::OpenPauseCustomRulesEdit => {
+                self.pause_custom_rules_edit_dialog_open = true;
+                self.pause_custom_rules_error = None;
+            }
+            DesktopPausedOverlayAction::ClosePauseCustomRulesEdit => {
+                self.pause_custom_rules_edit_dialog_open = false;
+                self.pause_custom_rules_error = None;
+            }
+            DesktopPausedOverlayAction::CopyPauseCustomRules => {
+                let _ = self.copy_pause_custom_rules_to_clipboard_with_platform(platform);
+                self.pause_custom_rules_edit_dialog_open = true;
+            }
+            DesktopPausedOverlayAction::LoadPauseCustomRules => {
+                let _ = self.load_pause_custom_rules_from_clipboard_with_platform(platform);
+                self.pause_custom_rules_edit_dialog_open = true;
+            }
+            DesktopPausedOverlayAction::ResetPauseCustomRules => {
+                self.reset_pause_custom_rules_edit();
+                self.pause_custom_rules_edit_dialog_open = true;
             }
             DesktopPausedOverlayAction::Back => {
                 if self.pause_overlay_modal.is_some() {
@@ -53992,6 +54099,75 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_pause_custom_rules_edit_dialog(
+        &self,
+        pass: &mut RenderPass,
+        dialog_parent: RenderRect,
+    ) {
+        let layer = Layer::END_PIXELED + 0.220;
+        let dialog = Self::map_play_rules_edit_dialog_rect(dialog_parent);
+        pass.push(RenderCommand::fill_rect(
+            dialog_parent,
+            [0.0, 0.0, 0.0, 0.50],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.62, 0.82, 1.0, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@waves.edit"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 26.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.004,
+        ));
+        if let Some(error) = self.pause_custom_rules_error.as_ref() {
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text(error),
+                RenderPoint::new(dialog.center().x, dialog.y + 12.0),
+                [0.95, 0.58, 0.54, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.006,
+            ));
+        }
+        for (index, (label, icon)) in [
+            ("@waves.copy", Some("copy")),
+            ("@waves.load", Some("download")),
+            ("@settings.reset", Some("refresh")),
+            ("@back", Some("left")),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.push_settings_text_button(
+                pass,
+                Self::map_play_rules_edit_button_rect(dialog, index),
+                label,
+                icon,
+                layer + 0.020 + index as f32 * 0.001,
+            );
+        }
+    }
+
     fn push_pause_overlay_custom_rules_modal(&self, pass: &mut RenderPass, panel: RenderRect) {
         let dialog = Self::pause_overlay_custom_rules_modal_rect_for_panel(panel);
         let content = Self::pause_overlay_custom_rules_content_rect(dialog);
@@ -54131,11 +54307,21 @@ impl DesktopLauncher {
         self.push_pause_custom_rules_banned_policy_rows(pass, content, rules, layer + 0.058);
         self.push_settings_text_button(
             pass,
+            Self::pause_overlay_custom_rules_edit_button_rect(dialog),
+            "@edit",
+            Some("edit"),
+            layer + 0.079,
+        );
+        self.push_settings_text_button(
+            pass,
             Self::pause_overlay_modal_close_rect(dialog),
             "@back",
             Some("left"),
             layer + 0.080,
         );
+        if self.pause_custom_rules_edit_dialog_open {
+            self.push_pause_custom_rules_edit_dialog(pass, dialog);
+        }
     }
 
     fn push_pause_overlay_modal(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -75142,6 +75328,104 @@ repo: "Beta/Override"
         assert_eq!(launcher.game_state.rules.win_wave, 1);
         assert!(launcher.runtime.state.rules.infinite_resources);
         assert_eq!(launcher.runtime.state.rules.win_wave, 1);
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_custom_rules_edit_copy_load_reset_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.game_state.rules.allow_edit_rules = true;
+        launcher.game_state.rules.waves = true;
+        launcher.game_state.rules.infinite_resources = false;
+        launcher.game_state.rules.win_wave = 0;
+        launcher.runtime.state.rules = launcher.game_state.rules.copy();
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CustomRules);
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::OpenPauseCustomRulesEdit,
+        );
+        assert!(launcher.pause_custom_rules_edit_dialog_open);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = launcher.pause_overlay_panel_for_current_state(viewport);
+        let custom_dialog = DesktopLauncher::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let edit_dialog = DesktopLauncher::map_play_rules_edit_dialog_rect(custom_dialog);
+        let copy_center = DesktopLauncher::map_play_rules_edit_button_rect(edit_dialog, 0).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, copy_center.x, copy_center.y),
+            Some(super::DesktopPausedOverlayAction::CopyPauseCustomRules)
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@waves.edit").as_str()));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@waves.copy").as_str()));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@waves.load").as_str()));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@settings.reset")
+                .as_str()
+        ));
+
+        let mut platform = RecordingPlatform::default();
+        launcher
+            .pause_custom_rules_edit
+            .as_mut()
+            .unwrap()
+            .infinite_resources = true;
+        launcher.dispatch_pause_overlay_action_with_platform(
+            super::DesktopPausedOverlayAction::CopyPauseCustomRules,
+            &mut platform,
+        );
+        let copied = platform.clipboard_texts.last().cloned().unwrap();
+        assert!(copied.contains("\"infiniteResources\":true"));
+        assert_eq!(
+            launcher.last_pause_custom_rules_clipboard_text.as_deref(),
+            Some(copied.as_str())
+        );
+
+        let mut load_rules = launcher.game_state.rules.copy();
+        load_rules.infinite_resources = true;
+        load_rules.win_wave = 9;
+        platform.clipboard_read = Some(DesktopLauncher::map_play_rules_clipboard_json(&load_rules));
+        launcher
+            .pause_custom_rules_edit
+            .as_mut()
+            .unwrap()
+            .infinite_resources = false;
+        launcher.dispatch_pause_overlay_action_with_platform(
+            super::DesktopPausedOverlayAction::LoadPauseCustomRules,
+            &mut platform,
+        );
+        let edit = launcher.pause_custom_rules_edit.as_ref().unwrap();
+        assert!(edit.infinite_resources);
+        assert_eq!(edit.win_wave, 9);
+        assert_eq!(launcher.pause_custom_rules_error, None);
+
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::ResetPauseCustomRules,
+        );
+        let reset = launcher.pause_custom_rules_edit.as_ref().unwrap();
+        assert!(!reset.infinite_resources);
+        assert_eq!(reset.win_wave, 0);
+        assert!(launcher.pause_custom_rules_edit_dialog_open);
+
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::ClosePauseCustomRulesEdit,
+        );
+        assert!(!launcher.pause_custom_rules_edit_dialog_open);
     }
 
     #[test]

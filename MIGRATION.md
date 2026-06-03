@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 836. PausedDialog CustomRules `@edit` 子菜单
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.68%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `CustomRulesDialog` 构造器里会在 buttons 区新增 `@edit`；
+  - `@edit` 打开 `@waves.edit` 子弹窗；
+  - 子弹窗包含 `@waves.copy`、`@waves.load`、`@settings.reset`，copy/load 走规则 JSON 与剪贴板，reset 走传入的 resetter。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增暂停规则 `@edit` 按钮与 `@waves.edit` 子弹窗；
+    - 新增 `CopyPauseCustomRules / LoadPauseCustomRules / ResetPauseCustomRules / ClosePauseCustomRulesEdit` action；
+    - copy/load 复用现有规则 JSON 剪贴板格式，但作用于 `pause_custom_rules_edit` 编辑副本；
+    - reset 对齐 Java resetter：恢复为打开暂停规则弹窗前的当前 `game_state.rules.copy()`；
+    - 新增回归测试覆盖子弹窗渲染、按钮命中、copy/load/reset 都写入编辑副本。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop paused_world_overlay`
+- 仍未完成：
+  - 暂停菜单 `CustomRulesDialog` 还需继续补完整 Java 分类、搜索、天气、队伍、banned content 与滚动；
+  - `Call.setRules(toEdit)` 的真实联机广播仍需接入；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 835. PausedDialog `@customize` 规则编辑入口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
@@ -36,7 +59,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo fmt --all`
   - `cargo test -p mindustry-desktop paused_world_overlay`
 - 仍未完成：
-  - Rust 侧暂停菜单 `CustomRulesDialog` 仍是局部规则 UI，还没有完整接齐 Java `CustomRulesDialog` 的所有分类、搜索、天气、队伍、banned content、copy/load/reset 子流；
+  - Rust 侧暂停菜单 `CustomRulesDialog` 在 836 已补 copy/load/reset 子流，但仍是局部规则 UI，还没有完整接齐 Java `CustomRulesDialog` 的所有分类、搜索、天气、队伍、banned content 与滚动；
   - `Call.setRules(toEdit)` 对联机服务端/客户端的真实 packet 广播仍需继续接入；
   - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
 
