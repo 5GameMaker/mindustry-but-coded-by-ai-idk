@@ -17,6 +17,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 828. JoinDialog resize/refresh/社区组顺序对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.59%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `JoinDialog.java` 中 `shown(...)` 会执行 `setup(); refreshAll();`，`refreshAll()` 同时刷新 local、remote，并在 `communityservers=true` 时刷新 community；
+  - `onResize(...)` 在小屏或 `lastColumns != columns()` 时执行 `setup(); refreshAll();`；
+  - `refreshCommunity()` 先用 `servers.get((i + servers.size/2) % servers.size)` 旋转原始社区组顺序，再处理 hidden/search；
+  - `JoinDialog` 的 Add Server 输入框初始值来自 `Core.settings.getString("ip")`，而不是当前 `connectTarget`；
+  - `ServerGroup.key()` 在 name 和 addresses 都为空时返回 `server-`，不是额外的 `unknown` 兜底。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_last_route_columns`，在 Join route resize 时按 Java 的小屏/列数变化规则触发等价刷新；
+    - 新增 `refresh_join_all_like_java()`，统一 Join 进入、F5/Refresh 按钮的 local/remote/community 刷新链路；
+    - `OpenJoinAddServer` 改为读取 `ip` 设置值预填，并继续在输入变化/确认时写回同一 key；
+    - `visible_join_community_groups()` 改为先旋转原始社区组列表，再应用 hidden/search 过滤；
+    - `DesktopJoinCommunityGroup::key()` 的空组兜底改为 Java 等价的 `server-`；
+    - 新增回归测试覆盖 Add Server 预填、空 key、先旋转后过滤、resize 列数变化刷新，并调整 Join skeleton fixture 的 `ip` 设置。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_join_route_ --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 社区服务器远程 feed 的真实异步拉取/失败重试仍需继续接入；当前仍以本地 cache/feed JSON 过渡；
+  - settings.bin 真实持久化仍待接入，`ip`/`joininfo` 等仍主要通过 Rust settings override 过渡；
+  - 下一轮前端优先建议转 ModsDialog：隐藏状态文案、浏览器 Add/Reinstall 语义、installed badge/thumbnail、releases 列表和 View Content 内容来源。
+
 ## 827. JoinDialog 首次信息弹窗与本地化
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

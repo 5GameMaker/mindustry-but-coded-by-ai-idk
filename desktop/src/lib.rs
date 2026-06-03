@@ -417,10 +417,7 @@ impl DesktopJoinCommunityGroup {
 
     pub fn key(&self) -> String {
         let key = if self.name.trim().is_empty() {
-            self.addresses
-                .first()
-                .map(String::as_str)
-                .unwrap_or("unknown")
+            self.addresses.first().map(String::as_str).unwrap_or("")
         } else {
             self.name.as_str()
         };
@@ -18684,6 +18681,7 @@ pub struct DesktopLauncher {
     pub join_search: String,
     pub join_search_focused: bool,
     pub join_show_hidden: bool,
+    pub join_last_route_columns: Option<usize>,
     pub mods_directory_arg: Option<String>,
     pub mods_directory_error: Option<String>,
     pub last_mods_directory_merge_count: Option<usize>,
@@ -19893,6 +19891,7 @@ impl DesktopLauncher {
             join_search: String::new(),
             join_search_focused: false,
             join_show_hidden: false,
+            join_last_route_columns: None,
             mods_directory_arg,
             mods_directory_error: None,
             last_mods_directory_merge_count: None,
@@ -24311,8 +24310,8 @@ impl DesktopLauncher {
                 self.join_delete_dialog_index = None;
                 self.join_server_disclaimer_pending_target = None;
                 self.join_server_disclaimer_pending_version = None;
-                self.ensure_join_community_server_cache_loaded();
-                self.refresh_join_local_hosts();
+                self.join_last_route_columns = None;
+                self.refresh_join_all_like_java();
                 self.show_join_info_once_like_java();
             } else if route == DesktopMenuRoute::Schematics {
                 self.load_schematic_tags_from_settings();
@@ -31347,6 +31346,17 @@ impl DesktopLauncher {
             .insert(JOIN_INFO_SETTINGS_KEY.into(), "true".into());
     }
 
+    fn join_ip_setting_value(&self) -> String {
+        self.settings_overrides
+            .get(JOIN_IP_SETTINGS_KEY)
+            .or_else(|| {
+                self.settings_overrides
+                    .get(&Self::settings_storage_key("game", JOIN_IP_SETTINGS_KEY))
+            })
+            .cloned()
+            .unwrap_or_default()
+    }
+
     fn show_join_info_once_like_java(&mut self) {
         if self.host_steam_enabled() || self.join_info_seen_once() {
             return;
@@ -31886,14 +31896,52 @@ impl DesktopLauncher {
             .join_community_groups
             .iter()
             .enumerate()
-            .filter(|(_, group)| self.join_show_hidden || !self.join_community_group_hidden(group))
-            .filter(|(_, group)| group.matches_query(&self.join_search))
             .collect::<Vec<_>>();
         if groups.len() > 1 {
             let java_half_column_offset = groups.len() / 2;
             groups.rotate_left(java_half_column_offset);
         }
         groups
+            .into_iter()
+            .filter(|(_, group)| self.join_show_hidden || !self.join_community_group_hidden(group))
+            .filter(|(_, group)| group.matches_query(&self.join_search))
+            .collect()
+    }
+
+    fn refresh_join_community_servers_like_java(&mut self) {
+        if self.join_community_servers_enabled() {
+            self.ensure_join_community_server_cache_loaded();
+        }
+    }
+
+    fn refresh_join_all_like_java(&mut self) {
+        self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
+        self.refresh_join_local_hosts();
+        self.refresh_join_saved_servers();
+        self.refresh_join_community_servers_like_java();
+    }
+
+    fn join_route_columns_for_surface(&self, surface_size: DesktopSurfaceSize) -> usize {
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel = Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Join);
+        Self::join_route_server_card_columns_for_panel(panel)
+    }
+
+    fn apply_join_route_resize_like_java(&mut self, surface_size: DesktopSurfaceSize) {
+        if self.active_menu_route != Some(DesktopMenuRoute::Join) {
+            return;
+        }
+        let columns = self.join_route_columns_for_surface(surface_size);
+        let min_dimension_scaled =
+            surface_size.width.min(surface_size.height) as f32 / self.menu_ui_scale.max(0.001);
+        let needs_small_view_refresh = min_dimension_scaled * 0.9 < 500.0;
+        let columns_changed = self
+            .join_last_route_columns
+            .is_none_or(|last_columns| last_columns != columns);
+        if needs_small_view_refresh || columns_changed {
+            self.refresh_join_all_like_java();
+        }
+        self.join_last_route_columns = Some(columns);
     }
 
     fn join_community_group_connect_target(
@@ -38685,11 +38733,7 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::OpenJoinAddServer => {
                 self.join_add_dialog_open = true;
                 self.join_add_server_edit_index = None;
-                self.join_add_server_text = self
-                    .connect_target
-                    .as_ref()
-                    .map(desktop_connect_target_display_ip)
-                    .unwrap_or_default();
+                self.join_add_server_text = self.join_ip_setting_value();
                 self.settings_overrides.insert(
                     JOIN_IP_SETTINGS_KEY.into(),
                     self.join_add_server_text.clone(),
@@ -38788,10 +38832,7 @@ impl DesktopLauncher {
                 self.last_menu_guard_message = Some("JoinDialog.connect cancel".into());
             }
             DesktopMenuRouteShellAction::RefreshJoinServers => {
-                self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
-                self.ensure_join_community_server_cache_loaded();
-                self.refresh_join_local_hosts();
-                self.refresh_join_saved_servers();
+                self.refresh_join_all_like_java();
             }
             DesktopMenuRouteShellAction::MoveJoinServerCardUp(index) => {
                 if index > 0 && index < self.join_saved_servers.len() {
@@ -53911,6 +53952,9 @@ impl DesktopLauncher {
                 graphics_stats: None,
                 effect_stats: None,
             };
+        }
+        if let Some(size) = resized_to {
+            self.apply_join_route_resize_like_java(size);
         }
 
         if desktop_runtime_trace_enabled() {
@@ -89407,7 +89451,7 @@ repo: "Beta/Override"
             launcher.last_menu_route_shell_action,
             Some(super::DesktopMenuRouteShellAction::RefreshJoinServers)
         );
-        assert_eq!(launcher.join_refresh_requests, 1);
+        assert_eq!(launcher.join_refresh_requests, 2);
         launcher.join_saved_servers = saved_servers_before_refresh;
         launcher.join_saved_server_refresh_states = saved_refresh_states_before_refresh;
         launcher.apply_menu_input_events(
@@ -89422,8 +89466,11 @@ repo: "Beta/Override"
             Some(super::DesktopMenuRouteShellAction::RefreshJoinServers),
             "Java JoinDialog binds F5 to refreshAll()"
         );
-        assert_eq!(launcher.join_refresh_requests, 2);
+        assert_eq!(launcher.join_refresh_requests, 3);
 
+        launcher
+            .settings_overrides
+            .insert(super::JOIN_IP_SETTINGS_KEY.into(), "127.0.0.1".into());
         launcher.apply_menu_input_events(
             surface,
             &[
@@ -91230,6 +91277,115 @@ repo: "Beta/Override"
             vec!["C", "D", "A", "B"],
             "Java JoinDialog renders server groups as servers[(i + size/2) % size]"
         );
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_rotates_community_groups_before_filtering_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.join_community_groups = ["A", "B", "C", "D"]
+            .into_iter()
+            .map(|name| {
+                super::DesktopJoinCommunityGroup::new(
+                    name,
+                    vec![format!("{}.example:6567", name.to_ascii_lowercase())],
+                    false,
+                )
+            })
+            .collect();
+
+        assert!(launcher.set_join_community_group_hidden(2, true));
+        let visible = launcher
+            .visible_join_community_groups()
+            .into_iter()
+            .map(|(index, group)| (index, group.name.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            visible,
+            vec![(3, "D"), (0, "A"), (1, "B")],
+            "Java JoinDialog chooses servers[(i + size/2) % size] before applying hidden/search filters"
+        );
+
+        launcher.join_show_hidden = true;
+        launcher.join_search = "a.example".into();
+        let searched = launcher
+            .visible_join_community_groups()
+            .into_iter()
+            .map(|(index, group)| (index, group.name.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(searched, vec![(0, "A")]);
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_empty_community_group_key_matches_java() {
+        let group = super::DesktopJoinCommunityGroup::new("", Vec::new(), false);
+        assert_eq!(
+            group.key(),
+            "server-",
+            "Java ServerGroup.key() falls back to an empty suffix when both name and addresses are empty"
+        );
+        assert_eq!(group.hidden_setting_key(), "server--hidden");
+        assert_eq!(group.favorite_setting_key(), "server--favorite");
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_open_add_dialog_prefills_from_last_ip_setting_like_java() {
+        let mut launcher = DesktopLauncher::new(vec![
+            "mindustry-desktop".into(),
+            "--connect".into(),
+            "connect-target.example:6567".into(),
+        ]);
+        launcher.settings_overrides.insert(
+            super::JOIN_IP_SETTINGS_KEY.into(),
+            "last-ip.example:7000".into(),
+        );
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenJoinAddServer,
+        );
+
+        assert!(launcher.join_add_dialog_open);
+        assert_eq!(
+            launcher.join_add_server_text, "last-ip.example:7000",
+            "Java JoinDialog add field is initialized from Core.settings.getString(\"ip\"), not the current connect target"
+        );
+        assert_eq!(
+            launcher.settings_overrides.get(super::JOIN_IP_SETTINGS_KEY),
+            Some(&"last-ip.example:7000".to_string())
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_resize_refreshes_when_columns_change_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .settings_overrides
+            .insert(super::JOIN_INFO_SETTINGS_KEY.into(), "true".into());
+        launcher.dispatch_menu_action(MenuButtonRole::Join);
+        let initial_refreshes = launcher.join_refresh_requests;
+
+        let resized = DesktopSurfaceSize::new(1920, 900);
+        let expected_columns = launcher.join_route_columns_for_surface(resized);
+        launcher.join_last_route_columns = Some(expected_columns.saturating_sub(1).max(1));
+
+        let mut frame_loop =
+            DesktopFrameLoopState::new(Default::default(), DesktopFramePacing::uncapped());
+        let mut graphics_renderer = HeadlessDesktopGraphicsRenderer::default();
+        let mut effect_renderer = HeadlessDesktopEffectRenderer::default();
+        let result = launcher.step_desktop_frame_loop(
+            &mut frame_loop,
+            &[DesktopFrameLoopEvent::Resize(resized)],
+            &mut graphics_renderer,
+            &mut effect_renderer,
+        );
+
+        assert!(result.presented);
+        assert_eq!(result.resized_to, Some(resized));
+        assert_eq!(
+            launcher.join_refresh_requests,
+            initial_refreshes + 1,
+            "Java JoinDialog.onResize() calls setup()+refreshAll() when the column count changes"
+        );
+        assert_eq!(launcher.join_last_route_columns, Some(expected_columns));
     }
 
     #[test]
