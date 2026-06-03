@@ -3372,7 +3372,11 @@ impl<'a> DesktopNativeOpenGlApp<'a> {
     ) -> Self {
         let frame_loop = mindustry_desktop::DesktopFrameLoopState::new(
             native_config.surface.clone(),
-            mindustry_desktop::DesktopFramePacing::default(),
+            if native_config.vsync {
+                mindustry_desktop::DesktopFramePacing::uncapped()
+            } else {
+                mindustry_desktop::DesktopFramePacing::default()
+            },
         );
         Self {
             launcher,
@@ -3568,10 +3572,39 @@ mod tests {
 
         assert_eq!(app.frame_loop.surface, native_config.surface);
         assert_eq!(app.frame_loop.next_frame_index, 0);
+        assert_eq!(
+            app.frame_loop.pacing,
+            mindustry_desktop::DesktopFramePacing::uncapped(),
+            "vsync already paces swap_buffers; adding the 16ms frame cap on top can halve native FPS"
+        );
         assert!(app.window_id.is_none());
         assert!(app.graphics_renderer.is_none());
         assert!(app.runtime_init_error.is_none());
         assert!(app.pending_events.is_empty());
+    }
+
+    #[test]
+    fn native_opengl_app_keeps_frame_cap_when_vsync_disabled() {
+        let mut launcher = mindustry_desktop::DesktopLauncher::new(Vec::new());
+        let mut native_config = mindustry_desktop::DesktopNativeOpenGlRuntimeConfig::from_surface(
+            mindustry_desktop::DesktopSurfaceConfig {
+                title: "Native Test No VSync".into(),
+                size: mindustry_desktop::DesktopSurfaceSize::new(960, 540),
+                scale_factor: 1.0,
+                resizable: true,
+                maximized: false,
+                visible: false,
+            },
+        );
+        native_config.vsync = false;
+
+        let app = DesktopNativeOpenGlApp::new(&mut launcher, native_config);
+
+        assert_eq!(
+            app.frame_loop.pacing,
+            mindustry_desktop::DesktopFramePacing::default(),
+            "without vsync the software frame cap should still prevent a busy uncapped loop"
+        );
     }
 
     #[test]

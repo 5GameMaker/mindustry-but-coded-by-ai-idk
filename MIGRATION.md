@@ -17,6 +17,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 816. Native OpenGL vsync 双重限帧修复
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.47%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 问题判断：
+  - native OpenGL 默认 `vsync=true`，`swap_buffers` 已经由 `SwapInterval::Wait(1)` 节流；
+  - `DesktopNativeOpenGlApp::new(...)` 仍给 `DesktopFrameLoopState` 注入默认 16ms pacing，外层 `WaitUntil` 与 vsync 叠加后容易错过下一次垂直同步，表现为约 30FPS 或明显低帧率；
+  - Java/ArcDroid 原版不会在 vsync swap 之外再叠一层固定 16ms 睡眠。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - `DesktopNativeOpenGlApp::new(...)`：当 `native_config.vsync == true` 时使用 `DesktopFramePacing::uncapped()`，让 vsync 独立控制帧节奏；
+    - 当 `native_config.vsync == false` 时继续使用 `DesktopFramePacing::default()`，避免无 vsync 时 busy uncapped loop。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime native_opengl_app -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 需要继续实测 native 客户端主菜单帧率，并继续削减主菜单/背景/UI 的重复 mesh 上传与动态命令成本；
+  - 前端 UI 仍需继续按原版补齐主菜单、子菜单、Settings、Mods、Editor、GameOver 等完整表现。
+
 ## 815. GameOverDialog PVP winner 标题接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
