@@ -17,6 +17,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 823. Editor Shift 直进 playtest
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.54%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `MapEditorDialog.playtest()` 点击 `@editor.playtest` 后会先保存当前 map；
+  - 若 `Core.input.shift()` 为真，则跳过 `MapPlayDialog`，自动按 `survival.valid(map) ? survival : attack.valid(map) ? attack : sandbox` 选择模式并立即 `control.playMap(map, rules, true)`；
+  - 非 Shift 点击仍打开 `MapPlayDialog.show(map, true)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_play_editor_shift_playtest_mode(...)`，按 Java 的 survival → attack → sandbox 优先级选择模式，不走普通 `MapPlayDialog` 的 survival → sandbox → attack → pvp 顺序；
+    - 新增 `launch_editor_shift_playtest_for_index(...)`，复用现有 `PlaySelected` 主链路进入真实 runtime，而不是新建孤立 helper；
+    - `EditorPlaytest` 分发在 `menu_shift_pressed` 时直接 launch playtest，非 Shift 保持原弹窗路径；
+    - 新增回归覆盖非 Shift 打开 playtest dialog、Shift 直接进入 playing、attack-only map 选择 Attack、`playtesting_map` 写入 runtime/state。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_editor_route_shift_playtest_skips_map_play_dialog_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_editor_route --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - `MapEditorDialog.save()` 对编辑器 tile/rules/objectives 的完整保存链仍需继续迁移；当前 Shift 分支复用现有 Rust map descriptor/runtime 过渡状态；
+  - Settings Data 页真实 export/import/open-folder/crash-log 动作、MapPlayDialog 更完整自定义规则与更多 editor 子弹窗仍需继续迁移。
+
 ## 822. PausedDialog Steam 服务端邀请好友分支
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

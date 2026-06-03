@@ -33024,6 +33024,16 @@ impl DesktopLauncher {
             .unwrap_or(Gamemode::Survival)
     }
 
+    fn map_play_editor_shift_playtest_mode(map: &MapDescriptor) -> Gamemode {
+        if Gamemode::Survival.valid(map) {
+            Gamemode::Survival
+        } else if Gamemode::Attack.valid(map) {
+            Gamemode::Attack
+        } else {
+            Gamemode::Sandbox
+        }
+    }
+
     fn map_play_rules_for_mode(map: &MapDescriptor, mode: Gamemode) -> Rules {
         let mut rules = map.apply_rules(mode);
         rules.mode_name = Some(mode.wire_name().to_string());
@@ -34449,6 +34459,30 @@ impl DesktopLauncher {
         self.map_play_banned_content_dialog = None;
         self.map_play_weather_dialog_open = false;
         self.map_play_rules_error = None;
+        true
+    }
+
+    fn launch_editor_shift_playtest_for_index(&mut self, index: usize) -> bool {
+        let Some((mode, rules)) = self.map_list_cards.get(index).map(|map| {
+            let mode = Self::map_play_editor_shift_playtest_mode(map);
+            (mode, Self::map_play_rules_for_mode(map, mode))
+        }) else {
+            return false;
+        };
+        self.map_play_selected_mode = mode;
+        self.map_play_rules = Some(rules);
+        self.map_play_playtesting = true;
+        self.map_play_dialog_index = None;
+        self.editor_map_info_dialog_index = None;
+        self.map_play_mode_help_dialog_open = false;
+        self.map_play_customize_dialog_open = false;
+        self.map_play_rules_edit_dialog_open = false;
+        self.map_play_banned_content_dialog = None;
+        self.map_play_weather_dialog_open = false;
+        self.map_play_rules_error = None;
+        self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::MapCard(
+            DesktopMapCardAction::new(index, DesktopMapCardActionKind::PlaySelected),
+        ));
         true
     }
 
@@ -39018,7 +39052,11 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::EditorPlaytest => {
                 if let Some(index) = self.current_editor_map_index() {
-                    self.open_map_play_dialog_for_index(index, true, false);
+                    if self.menu_shift_pressed {
+                        self.launch_editor_shift_playtest_for_index(index);
+                    } else {
+                        self.open_map_play_dialog_for_index(index, true, false);
+                    }
                 }
             }
             DesktopMenuRouteShellAction::EditorWorkshop => {
@@ -75244,6 +75282,78 @@ repo: "Beta/Override"
         assert_eq!(
             launcher.last_menu_info_message.as_deref(),
             Some("MapEditorDialog.editInGame: Ingame Arena")
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_editor_route_shift_playtest_skips_map_play_dialog_like_java() {
+        fn attack_only_map(name: &str) -> MapDescriptor {
+            let mut tags = BTreeMap::new();
+            tags.insert("name".to_string(), name.to_string());
+            tags.insert("author".to_string(), "Mapper".to_string());
+            let mut map = MapDescriptor::new(
+                format!("maps/custom/{name}.msav"),
+                128,
+                128,
+                tags,
+                true,
+                1,
+                158,
+            );
+            map.spawns = 0;
+            map.teams = vec![1, 2];
+            map
+        }
+
+        let map = attack_only_map("Shift Attack");
+        let mut normal = DesktopLauncher::new(Vec::new());
+        normal.map_list_cards = vec![map.clone()];
+        normal.begin_edit_map(map.clone());
+        normal.menu_shift_pressed = false;
+        normal.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::EditorPlaytest);
+        assert_eq!(normal.map_play_dialog_index, Some(0));
+        assert!(normal.map_play_playtesting);
+        assert_eq!(
+            normal.active_menu_route,
+            Some(super::DesktopMenuRoute::Editor)
+        );
+        assert!(!normal.game_state.is_playing());
+
+        let mut shifted = DesktopLauncher::new(Vec::new());
+        shifted.map_list_cards = vec![map.clone()];
+        shifted.begin_edit_map(map);
+        shifted.menu_shift_pressed = true;
+        shifted
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::EditorPlaytest);
+        assert!(shifted.game_state.is_playing());
+        assert!(shifted.runtime.state.is_playing());
+        assert_eq!(shifted.active_menu_route, None);
+        assert_eq!(shifted.map_play_dialog_index, None);
+        assert!(!shifted.map_play_playtesting);
+        assert_eq!(shifted.map_play_selected_mode, Gamemode::Attack);
+        assert_eq!(
+            shifted.game_state.rules.mode_name.as_deref(),
+            Some(Gamemode::Attack.wire_name())
+        );
+        assert!(shifted.game_state.rules.attack_mode);
+        assert_eq!(
+            shifted
+                .game_state
+                .playtesting_map
+                .as_ref()
+                .map(MapDescriptor::plain_name)
+                .as_deref(),
+            Some("Shift Attack")
+        );
+        assert_eq!(
+            shifted
+                .runtime
+                .state
+                .playtesting_map
+                .as_ref()
+                .map(MapDescriptor::plain_name)
+                .as_deref(),
+            Some("Shift Attack")
         );
     }
 
