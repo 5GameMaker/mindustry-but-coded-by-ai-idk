@@ -9786,13 +9786,17 @@ impl DesktopGraphicsOpenGlBackendMeshBufferPlan {
 }
 
 impl DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan {
-    pub fn from_buffer_plan(plan: &DesktopGraphicsOpenGlBackendMeshBufferPlan) -> Self {
+    pub fn from_buffer_plan_and_batch(
+        plan: &DesktopGraphicsOpenGlBackendMeshBufferPlan,
+        batch: &DesktopGraphicsOpenGlBackendSpriteMeshBatch,
+    ) -> Self {
         let batch_index = plan.batch_index;
+        let key_stem = opengl_backend_sprite_mesh_batch_resource_key_stem(batch);
         Self {
             batch_index,
-            vertex_array_key: format!("sprite-batch:{batch_index}:vao"),
-            vertex_buffer_key: format!("sprite-batch:{batch_index}:vbo"),
-            index_buffer_key: format!("sprite-batch:{batch_index}:ibo"),
+            vertex_array_key: format!("{key_stem}:vao"),
+            vertex_buffer_key: format!("{key_stem}:vbo"),
+            index_buffer_key: format!("{key_stem}:ibo"),
             vertex_buffer_bytes: plan.vertex_buffer_bytes,
             index_buffer_bytes: plan.index_buffer_bytes,
             vertex_stride_bytes: plan.vertex_stride_bytes,
@@ -10728,13 +10732,50 @@ fn opengl_backend_mesh_buffer_plans_from_batches(
         .collect()
 }
 
-fn opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
+fn opengl_backend_sprite_mesh_resource_plans_from_batches(
+    batches: &[DesktopGraphicsOpenGlBackendSpriteMeshBatch],
     plans: &[DesktopGraphicsOpenGlBackendMeshBufferPlan],
 ) -> Vec<DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan> {
     plans
         .iter()
-        .map(DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan::from_buffer_plan)
+        .zip(batches.iter())
+        .map(|(plan, batch)| {
+            DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan::from_buffer_plan_and_batch(
+                plan, batch,
+            )
+        })
         .collect()
+}
+
+fn opengl_backend_optional_rect_key(rect: Option<RenderRect>) -> String {
+    match rect {
+        Some(rect) => format!(
+            "{:08x}:{:08x}:{:08x}:{:08x}",
+            rect.x.to_bits(),
+            rect.y.to_bits(),
+            rect.width.to_bits(),
+            rect.height.to_bits()
+        ),
+        None => "none".to_string(),
+    }
+}
+
+fn opengl_backend_sprite_mesh_batch_resource_key_stem(
+    batch: &DesktopGraphicsOpenGlBackendSpriteMeshBatch,
+) -> String {
+    format!(
+        "sprite-batch:target={:?}:shader={}:shader-generation={}:blend={:?}:clip={}:texture={}:texture-generation={}:page={}:sampler={:?}:layer={:08x}",
+        batch.target,
+        batch.shader_program.program_key,
+        batch.shader_program.generation,
+        batch.blend_state,
+        opengl_backend_optional_rect_key(batch.clip),
+        batch.texture_identity.key,
+        batch.texture_identity.generation,
+        batch.page_source_path,
+        batch.sampler,
+        batch.min_layer.to_bits()
+    )
 }
 
 fn opengl_backend_sprite_mesh_upload_plans_from_batches(
@@ -15407,10 +15448,10 @@ impl DesktopGraphicsOpenGlBackendAdapterExecutionState {
             &self.sprite_mesh_batches,
             &mut self.location_cache,
         );
-        self.sprite_mesh_resource_plans =
-            opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
-                &self.sprite_mesh_buffer_plans,
-            );
+        self.sprite_mesh_resource_plans = opengl_backend_sprite_mesh_resource_plans_from_batches(
+            &self.sprite_mesh_batches,
+            &self.sprite_mesh_buffer_plans,
+        );
         self.sprite_mesh_resource_table =
             DesktopGraphicsOpenGlBackendSpriteMeshResourceTable::from_plans(
                 &self.sprite_mesh_resource_plans,
@@ -16068,10 +16109,10 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
             &self.sprite_mesh_batches,
             &mut self.location_cache,
         );
-        self.sprite_mesh_resource_plans =
-            opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
-                &self.sprite_mesh_buffer_plans,
-            );
+        self.sprite_mesh_resource_plans = opengl_backend_sprite_mesh_resource_plans_from_batches(
+            &self.sprite_mesh_batches,
+            &self.sprite_mesh_buffer_plans,
+        );
         self.sprite_mesh_resource_table =
             DesktopGraphicsOpenGlBackendSpriteMeshResourceTable::from_plans(
                 &self.sprite_mesh_resource_plans,
@@ -61501,7 +61542,7 @@ mod tests {
         let buffer_plans =
             super::opengl_backend_mesh_buffer_plans_from_batches(&batches, &mut location_cache);
         let resource_plans =
-            super::opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(&buffer_plans);
+            super::opengl_backend_sprite_mesh_resource_plans_from_batches(&batches, &buffer_plans);
         let draw_call_plans =
             super::opengl_backend_sprite_draw_call_plans_from_batches(&batches, &resource_plans);
 
@@ -61573,7 +61614,7 @@ mod tests {
         let buffer_plans =
             super::opengl_backend_mesh_buffer_plans_from_batches(&batches, &mut location_cache);
         let resource_plans =
-            super::opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(&buffer_plans);
+            super::opengl_backend_sprite_mesh_resource_plans_from_batches(&batches, &buffer_plans);
         let draw_call_plans =
             super::opengl_backend_sprite_draw_call_plans_from_batches(&batches, &resource_plans);
 
@@ -62600,13 +62641,19 @@ mod tests {
             }
         );
         assert_eq!(executor.state.sprite_mesh_resource_plans.len(), 1);
+        let expected_mesh_key_stem = super::opengl_backend_sprite_mesh_batch_resource_key_stem(
+            &executor.state.sprite_mesh_batches[0],
+        );
+        let expected_vertex_array_key = format!("{expected_mesh_key_stem}:vao");
+        let expected_vertex_buffer_key = format!("{expected_mesh_key_stem}:vbo");
+        let expected_index_buffer_key = format!("{expected_mesh_key_stem}:ibo");
         assert_eq!(
             executor.state.sprite_mesh_resource_plans[0],
             super::DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan {
                 batch_index: 0,
-                vertex_array_key: "sprite-batch:0:vao".into(),
-                vertex_buffer_key: "sprite-batch:0:vbo".into(),
-                index_buffer_key: "sprite-batch:0:ibo".into(),
+                vertex_array_key: expected_vertex_array_key.clone(),
+                vertex_buffer_key: expected_vertex_buffer_key.clone(),
+                index_buffer_key: expected_index_buffer_key.clone(),
                 vertex_buffer_bytes: executor.state.sprite_mesh_buffer_plans[0].vertex_buffer_bytes,
                 index_buffer_bytes: executor.state.sprite_mesh_buffer_plans[0].index_buffer_bytes,
                 vertex_stride_bytes: executor.state.sprite_mesh_buffer_plans[0].vertex_stride_bytes,
@@ -62618,9 +62665,9 @@ mod tests {
             .sprite_mesh_resource_table
             .get_by_batch_index(0)
             .expect("sprite batch should have a mesh resource record");
-        assert_eq!(mesh_resource.vertex_array_key, "sprite-batch:0:vao");
-        assert_eq!(mesh_resource.vertex_buffer_key, "sprite-batch:0:vbo");
-        assert_eq!(mesh_resource.index_buffer_key, "sprite-batch:0:ibo");
+        assert_eq!(mesh_resource.vertex_array_key, expected_vertex_array_key);
+        assert_eq!(mesh_resource.vertex_buffer_key, expected_vertex_buffer_key);
+        assert_eq!(mesh_resource.index_buffer_key, expected_index_buffer_key);
         assert_eq!(mesh_resource.vertex_array_handle, None);
         assert_eq!(mesh_resource.vertex_buffer_handle, None);
         assert_eq!(mesh_resource.index_buffer_handle, None);
@@ -62631,9 +62678,12 @@ mod tests {
         assert_eq!(executor.state.sprite_mesh_upload_plans.len(), 1);
         let mesh_upload = &executor.state.sprite_mesh_upload_plans[0];
         assert_eq!(mesh_upload.batch_index, 0);
-        assert_eq!(mesh_upload.vertex_array_key, "sprite-batch:0:vao");
-        assert_eq!(mesh_upload.vertex_buffer_key, "sprite-batch:0:vbo");
-        assert_eq!(mesh_upload.index_buffer_key, "sprite-batch:0:ibo");
+        assert_eq!(mesh_upload.vertex_array_key, mesh_resource.vertex_array_key);
+        assert_eq!(
+            mesh_upload.vertex_buffer_key,
+            mesh_resource.vertex_buffer_key
+        );
+        assert_eq!(mesh_upload.index_buffer_key, mesh_resource.index_buffer_key);
         assert_eq!(mesh_upload.vertex_count, 4);
         assert_eq!(mesh_upload.index_count, 6);
         assert_eq!(
@@ -62664,7 +62714,7 @@ mod tests {
                 texture_identity: executor.state.sprite_mesh_batches[0]
                     .texture_identity
                     .clone(),
-                vertex_array_key: "sprite-batch:0:vao".into(),
+                vertex_array_key: mesh_resource.vertex_array_key.clone(),
                 index_count: 6,
                 index_offset: 0,
                 primitive_type:
@@ -62787,11 +62837,17 @@ mod tests {
             executor.drive_sprite_mesh_upload_sink(&mut mesh_upload_executor);
         assert_eq!(mesh_upload_executor_state.mesh_uploads_emitted, 1);
         assert_eq!(
-            mesh_upload_executor.cache.vertex_arrays["sprite-batch:0:vao"],
+            mesh_upload_executor.cache.vertex_arrays[mesh_resource.vertex_array_key.as_str()],
             1
         );
-        assert_eq!(mesh_upload_executor.cache.buffers["sprite-batch:0:vbo"], 2);
-        assert_eq!(mesh_upload_executor.cache.buffers["sprite-batch:0:ibo"], 3);
+        assert_eq!(
+            mesh_upload_executor.cache.buffers[mesh_resource.vertex_buffer_key.as_str()],
+            2
+        );
+        assert_eq!(
+            mesh_upload_executor.cache.buffers[mesh_resource.index_buffer_key.as_str()],
+            3
+        );
         assert_eq!(mesh_upload_executor.uploads[0].vertex_array_handle, 1);
         assert_eq!(mesh_upload_executor.uploads[0].vertex_buffer_handle, 2);
         assert_eq!(mesh_upload_executor.uploads[0].index_buffer_handle, 3);
@@ -62867,7 +62923,7 @@ mod tests {
                         .clone(),
                 },
                 super::DesktopGraphicsOpenGlBackendDrawCallAction::BindVertexArray {
-                    vertex_array_key: "sprite-batch:0:vao".into(),
+                    vertex_array_key: mesh_resource.vertex_array_key.clone(),
                 },
                 super::DesktopGraphicsOpenGlBackendDrawCallAction::DrawElements {
                     primitive_type:
@@ -62887,7 +62943,7 @@ mod tests {
             2
         );
         assert_eq!(
-            resolving_executor.cache.vertex_arrays["sprite-batch:0:vao"],
+            resolving_executor.cache.vertex_arrays[mesh_resource.vertex_array_key.as_str()],
             3
         );
         assert_eq!(
@@ -62906,7 +62962,7 @@ mod tests {
                 },
                 super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindVertexArray {
                     vertex_array_handle: 3,
-                    vertex_array_key: "sprite-batch:0:vao".into(),
+                    vertex_array_key: mesh_resource.vertex_array_key.clone(),
                 },
                 super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::DrawElements {
                     primitive_type:
@@ -70621,6 +70677,59 @@ repo: "Beta/Override"
             command,
             super::DesktopGraphicsOpenGlBackendDriverCommand::SpriteMeshUpload(_)
         )));
+    }
+
+    #[cfg(feature = "opengl-backend")]
+    #[test]
+    fn desktop_opengl_backend_renderer_reuses_static_sprite_mesh_when_batch_index_shifts() {
+        fn sprite_mesh_cache_shift_frame(include_dynamic_batch: bool) -> DesktopGraphicsFrame {
+            let viewport = RenderViewport::new(0.0, 0.0, 96.0, 96.0);
+            let camera = RenderCamera::new(RenderPoint::new(48.0, 48.0), viewport);
+            let mut render_frame =
+                RenderFramePlan::new(93, RenderSize::new(96.0, 96.0), camera, viewport);
+            let mut pass = RenderPass::new(RenderPassKind::Ui).with_target(RenderTarget::Screen);
+            if include_dynamic_batch {
+                pass.push(RenderCommand::fill_rect(
+                    RenderRect::new(4.0, 4.0, 16.0, 16.0),
+                    [0.7, 0.1, 0.1, 1.0],
+                    40.0,
+                ));
+            }
+            pass.push(RenderCommand::fill_rect(
+                RenderRect::new(32.0, 32.0, 24.0, 20.0),
+                [0.2, 0.4, 0.8, 1.0],
+                80.0,
+            ));
+            render_frame.push_pass(pass);
+            let mut bridge = RenderBridge::new();
+            bridge.set_render_frame(render_frame);
+            DesktopGraphicsFrame {
+                bundle: bridge.finish(),
+                floor_chunk_batches: Vec::new(),
+                minimap_texture_frame: None,
+                font_glyph_upload_plan: None,
+                texture_atlas: TextureAtlasPlan::new(),
+            }
+        }
+
+        let mut renderer = super::DesktopOpenGlBackendGraphicsRenderer::new(
+            super::DesktopGraphicsNullOpenGlBackendRuntime::default(),
+        );
+
+        renderer.render_graphics_frame(&sprite_mesh_cache_shift_frame(true));
+        let first_command_count = renderer.runtime.driver.commands.len();
+        assert!(renderer.last_driver_state.sprite_mesh_upload_commands > 0);
+        assert_eq!(renderer.submitted_sprite_mesh_upload_signatures.len(), 2);
+
+        renderer.render_graphics_frame(&sprite_mesh_cache_shift_frame(false));
+        let second_commands = &renderer.runtime.driver.commands[first_command_count..];
+
+        assert_eq!(renderer.last_driver_state.sprite_mesh_upload_commands, 0);
+        assert!(second_commands.iter().all(|command| !matches!(
+            command,
+            super::DesktopGraphicsOpenGlBackendDriverCommand::SpriteMeshUpload(_)
+        )));
+        assert!(renderer.last_driver_state.draw_commands > 0);
     }
 
     #[test]

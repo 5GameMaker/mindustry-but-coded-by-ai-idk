@@ -17,6 +17,40 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 796. OpenGL sprite mesh 资源 key 按 batch 状态稳定化
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **93.0%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容、性能收口与所有子菜单接近原版。
+- Java 对照：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java` 是 retained Scene/MenuFragment 结构，主菜单节点不应每帧整体重建；
+  - `core/src/mindustry/graphics/MenuRenderer.java` 在构造时 `generate()`/`cache()`，背景 floor/wall/shadow 缓存后每帧复用；
+  - `core/src/mindustry/ui/Fonts.java`/`ClientLauncher` 通过 atlas/font 预加载与合并避免运行时重复纹理/图集重建。
+- 背景：
+  - 上一轮 mesh 上传签名缓存后，菜单后续帧仍约 `sprite_mesh_upload_commands=26`；
+  - 子代理与本地排查确认旧资源 key 使用 `sprite-batch:{batch_index}:vao/vbo/ibo`，只要前置动态/可选 batch 插入或消失，后续静态 batch 序号漂移就会造成无谓重传；
+  - 这一步不改变 batch/layer/draw order，只稳定资源命名，为后续 retained UI/static layout cache 打基础。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan` 改为从 `MeshBufferPlan + SpriteMeshBatch` 生成资源 key；
+    - 新增 batch 状态稳定 key，包含 target、shader program key/generation、blend、clip、texture identity/generation、page source、sampler、layer；
+    - `opengl_backend_sprite_mesh_resource_plans_from_batches(...)` 保持资源计划与 batch 状态绑定，而不是绑定本帧 batch index；
+    - 保留 `batch_index` 字段用于 frame 内 draw order/resource table 查询，但不再用它命名 VAO/VBO/IBO；
+    - 更新 OpenGL 回归测试，避免继续把 `sprite-batch:0:vao` 当作正确行为；
+    - 新增 `desktop_opengl_backend_renderer_reuses_static_sprite_mesh_when_batch_index_shifts`，锁定“动态 batch 消失导致静态 batch index 漂移时，静态 mesh 不重传”。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_reuses_static_sprite_mesh_when_batch_index_shifts --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_does_not_reupload_static_sprite_mesh_each_frame --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_sprite_draw_call_plans_sort_batches_by_min_layer --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_batches_split_shared_texture_by_layer --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --release --features opengl-native-runtime`
+  - `MINDUSTRY_DESKTOP_TRACE_SUMMARY=1 ./target/release/mindustry-desktop.exe` 短跑核对：首次帧约 `texture_upload_commands=90`、`sprite_mesh_upload_commands=325`、`draw_commands=79`；后续菜单帧降到 `texture_upload_commands=0`、`sprite_mesh_upload_commands=0`、`draw_commands=79`、`gl_error=0x0000`。
+- 仍未完成：
+  - 后续仍需按 Java retained Scene 思路推进上层 `core/src/mindustry/graphics/menu_renderer.rs` 的静态布局缓存与动态状态叠加；
+  - `draw_commands=79` 仍偏高，需要继续减少无意义 state/draw 分裂，同时不能破坏 exact-layer 层级保险丝；
+  - 完整原版 UI/子菜单、世界渲染、客户端/服务端互通和完整可玩性仍需继续迁移。
+
 ## 795. OpenGL sprite mesh upload 跨帧签名缓存
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
