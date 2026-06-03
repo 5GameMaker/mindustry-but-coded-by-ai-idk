@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 837. PausedDialog CustomRules 搜索过滤
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.69%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `CustomRulesDialog.setup()` 顶部有 `@search` field；
+  - 输入会更新 `ruleSearch = text.trim().replaceAll(" +", " ").toLowerCase()` 并重建主表；
+  - cancel 按钮清空搜索并重建，过滤后只显示匹配规则/按钮。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增暂停规则搜索状态 `pause_custom_rules_search` / focused；
+    - 新增 `FocusPauseCustomRulesSearch` 与 `ClearPauseCustomRulesSearch` action；
+    - 暂停规则弹窗顶部渲染 search field、zoom 图标、清除按钮与光标；
+    - 文本输入、Backspace、Delete 会更新暂停规则搜索；
+    - toggle、number、banned policy 的渲染和命中都改为按暂停规则搜索词过滤；
+    - 新增回归测试覆盖点击搜索、输入 `pvp`、过滤非匹配规则、清除、退格与 Delete。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop paused_world_overlay`
+- 仍未完成：
+  - 暂停 `CustomRulesDialog` 还缺完整滚动、更多 Java 字段分类、天气、队伍、banned content 真实子流；
+  - `Call.setRules(toEdit)` 的真实联机广播仍需接入；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 836. PausedDialog CustomRules `@edit` 子菜单
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。

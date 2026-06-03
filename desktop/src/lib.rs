@@ -3999,6 +3999,8 @@ enum DesktopPausedOverlayAction {
     CopyPauseCustomRules,
     LoadPauseCustomRules,
     ResetPauseCustomRules,
+    FocusPauseCustomRulesSearch,
+    ClearPauseCustomRulesSearch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18489,6 +18491,8 @@ pub struct DesktopLauncher {
     pause_overlay_modal: Option<DesktopPausedOverlayModal>,
     pause_custom_rules_edit: Option<Rules>,
     pause_custom_rules_edit_dialog_open: bool,
+    pause_custom_rules_search: String,
+    pause_custom_rules_search_focused: bool,
     last_pause_custom_rules_clipboard_text: Option<String>,
     pause_custom_rules_error: Option<String>,
     last_pause_quit_result: Option<DesktopPauseQuitResult>,
@@ -19706,6 +19710,8 @@ impl DesktopLauncher {
             pause_overlay_modal: None,
             pause_custom_rules_edit: None,
             pause_custom_rules_edit_dialog_open: false,
+            pause_custom_rules_search: String::new(),
+            pause_custom_rules_search_focused: false,
             last_pause_custom_rules_clipboard_text: None,
             pause_custom_rules_error: None,
             last_pause_quit_result: None,
@@ -31197,7 +31203,16 @@ impl DesktopLauncher {
             dialog.x + 28.0,
             dialog.y + 74.0,
             dialog.width - 56.0,
-            dialog.height - 142.0,
+            dialog.height - 166.0,
+        )
+    }
+
+    fn pause_overlay_custom_rules_search_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 32.0,
+            dialog.y + dialog.height - 78.0,
+            dialog.width - 64.0,
+            30.0,
         )
     }
 
@@ -31206,16 +31221,25 @@ impl DesktopLauncher {
     }
 
     fn pause_overlay_custom_rules_toggle_rects(
+        &self,
         content: RenderRect,
     ) -> Vec<(DesktopCustomRulesToggle, RenderRect)> {
         let mut y = content.y + content.height - 20.0;
         let mut rects = Vec::new();
         for (_, toggles) in MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS {
+            let visible_toggles = toggles
+                .iter()
+                .copied()
+                .filter(|toggle| self.pause_custom_rule_label_matches(toggle.label_key()))
+                .collect::<Vec<_>>();
+            if visible_toggles.is_empty() {
+                continue;
+            }
             if y < content.y + 34.0 {
                 break;
             }
             y -= 36.0;
-            for toggle in toggles.iter().copied() {
+            for toggle in visible_toggles {
                 if y < content.y + 18.0 {
                     return rects;
                 }
@@ -31305,6 +31329,15 @@ impl DesktopLauncher {
                     }
                     return None;
                 }
+                let search = Self::pause_overlay_custom_rules_search_rect(dialog);
+                if search.contains_point(point) {
+                    if !self.pause_custom_rules_search.is_empty()
+                        && Self::map_play_customize_search_clear_rect(search).contains_point(point)
+                    {
+                        return Some(DesktopPausedOverlayAction::ClearPauseCustomRulesSearch);
+                    }
+                    return Some(DesktopPausedOverlayAction::FocusPauseCustomRulesSearch);
+                }
                 if Self::pause_overlay_custom_rules_edit_button_rect(dialog).contains_point(point) {
                     return Some(DesktopPausedOverlayAction::OpenPauseCustomRulesEdit);
                 }
@@ -31313,11 +31346,17 @@ impl DesktopLauncher {
                 }
                 let content = Self::pause_overlay_custom_rules_content_rect(dialog);
                 let rules = self.pause_custom_rules_current_rules();
-                for (index, number) in DesktopCustomRulesNumber::ALL.into_iter().enumerate() {
-                    if !number.enabled(rules) {
+                let mut visible_number_index = 0usize;
+                for number in DesktopCustomRulesNumber::ALL {
+                    if !self.pause_custom_rule_label_matches(number.label_key()) {
                         continue;
                     }
-                    let row = Self::map_play_customize_number_row_rect(content, index);
+                    if !number.enabled(rules) {
+                        visible_number_index += 1;
+                        continue;
+                    }
+                    let row =
+                        Self::map_play_customize_number_row_rect(content, visible_number_index);
                     if Self::map_play_customize_number_button_rect(row, false).contains_point(point)
                     {
                         return Some(DesktopPausedOverlayAction::AdjustPauseCustomRuleNumber(
@@ -31330,19 +31369,24 @@ impl DesktopLauncher {
                             number, 1,
                         ));
                     }
+                    visible_number_index += 1;
                 }
-                for (index, toggle) in MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES
-                    .iter()
-                    .copied()
-                    .enumerate()
-                {
-                    if Self::map_play_customize_banned_policy_row_rect(content, index)
-                        .contains_point(point)
+                let mut visible_policy_index = 0usize;
+                for toggle in MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES.iter().copied() {
+                    if !self.pause_custom_rule_label_matches(toggle.label_key()) {
+                        continue;
+                    }
+                    if Self::map_play_customize_banned_policy_row_rect(
+                        content,
+                        visible_policy_index,
+                    )
+                    .contains_point(point)
                     {
                         return Some(DesktopPausedOverlayAction::TogglePauseCustomRule(toggle));
                     }
+                    visible_policy_index += 1;
                 }
-                for (toggle, rect) in Self::pause_overlay_custom_rules_toggle_rects(content) {
+                for (toggle, rect) in self.pause_overlay_custom_rules_toggle_rects(content) {
                     if rect.contains_point(point) && toggle.enabled(rules) {
                         return Some(DesktopPausedOverlayAction::TogglePauseCustomRule(toggle));
                     }
@@ -34069,7 +34113,15 @@ impl DesktopLauncher {
     }
 
     fn map_play_custom_rule_label_matches(&self, label_key: &'static str) -> bool {
-        let query = schematic_search_normalize(self.map_play_custom_rules_search.trim());
+        self.custom_rule_label_matches_query(label_key, self.map_play_custom_rules_search.trim())
+    }
+
+    fn pause_custom_rule_label_matches(&self, label_key: &'static str) -> bool {
+        self.custom_rule_label_matches_query(label_key, self.pause_custom_rules_search.trim())
+    }
+
+    fn custom_rule_label_matches_query(&self, label_key: &'static str, query: &str) -> bool {
+        let query = schematic_search_normalize(query);
         if query.is_empty() {
             return true;
         }
@@ -40767,6 +40819,7 @@ impl DesktopLauncher {
             self.pause_custom_rules_edit = None;
         }
         self.pause_custom_rules_edit_dialog_open = false;
+        self.pause_custom_rules_search_focused = false;
         self.pause_custom_rules_error = None;
         self.pause_overlay_modal = None;
     }
@@ -40894,7 +40947,9 @@ impl DesktopLauncher {
             | DesktopPausedOverlayAction::ClosePauseCustomRulesEdit
             | DesktopPausedOverlayAction::CopyPauseCustomRules
             | DesktopPausedOverlayAction::LoadPauseCustomRules
-            | DesktopPausedOverlayAction::ResetPauseCustomRules => {
+            | DesktopPausedOverlayAction::ResetPauseCustomRules
+            | DesktopPausedOverlayAction::FocusPauseCustomRulesSearch
+            | DesktopPausedOverlayAction::ClearPauseCustomRulesSearch => {
                 self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
                     && self.pause_overlay_custom_rules_visible()
             }
@@ -40940,6 +40995,7 @@ impl DesktopLauncher {
             }
             DesktopPausedOverlayAction::OpenPauseCustomRulesEdit => {
                 self.pause_custom_rules_edit_dialog_open = true;
+                self.pause_custom_rules_search_focused = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseCustomRulesEdit => {
@@ -40957,6 +41013,15 @@ impl DesktopLauncher {
             DesktopPausedOverlayAction::ResetPauseCustomRules => {
                 self.reset_pause_custom_rules_edit();
                 self.pause_custom_rules_edit_dialog_open = true;
+            }
+            DesktopPausedOverlayAction::FocusPauseCustomRulesSearch => {
+                self.pause_custom_rules_search_focused = true;
+                self.pause_custom_rules_edit_dialog_open = false;
+            }
+            DesktopPausedOverlayAction::ClearPauseCustomRulesSearch => {
+                self.pause_custom_rules_search.clear();
+                self.pause_custom_rules_search_focused = true;
+                self.pause_custom_rules_edit_dialog_open = false;
             }
             DesktopPausedOverlayAction::Back => {
                 if self.pause_overlay_modal.is_some() {
@@ -45999,8 +46064,12 @@ impl DesktopLauncher {
         rules: &Rules,
         layer: f32,
     ) {
-        for (index, number) in DesktopCustomRulesNumber::ALL.into_iter().enumerate() {
-            let row = Self::map_play_customize_number_row_rect(content, index);
+        let mut visible_index = 0usize;
+        for number in DesktopCustomRulesNumber::ALL {
+            if !self.pause_custom_rule_label_matches(number.label_key()) {
+                continue;
+            }
+            let row = Self::map_play_customize_number_row_rect(content, visible_index);
             let enabled = number.enabled(rules);
             pass.push(RenderCommand::draw_sprite(
                 Self::settings_drawable_symbol("button"),
@@ -46011,7 +46080,7 @@ impl DesktopLauncher {
                     [1.0, 1.0, 1.0, 0.14]
                 },
                 0.0,
-                layer + index as f32 * 0.001,
+                layer + visible_index as f32 * 0.001,
             ));
             pass.push(RenderCommand::draw_text_styled(
                 self.localize_bundle_markup_text(number.label_key()),
@@ -46028,7 +46097,7 @@ impl DesktopLauncher {
                     .with_markup(true)
                     .with_wrap_width((row.width - 104.0).max(80.0))
                     .with_integer_position(true),
-                layer + 0.002 + index as f32 * 0.001,
+                layer + 0.002 + visible_index as f32 * 0.001,
             ));
             pass.push(RenderCommand::draw_text_styled(
                 number.value_text(rules),
@@ -46044,14 +46113,14 @@ impl DesktopLauncher {
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true)
                     .with_outline(true),
-                layer + 0.003 + index as f32 * 0.001,
+                layer + 0.003 + visible_index as f32 * 0.001,
             ));
             self.push_settings_text_button_enabled(
                 pass,
                 Self::map_play_customize_number_button_rect(row, false),
                 "-",
                 None,
-                layer + 0.004 + index as f32 * 0.001,
+                layer + 0.004 + visible_index as f32 * 0.001,
                 enabled,
             );
             self.push_settings_text_button_enabled(
@@ -46059,9 +46128,10 @@ impl DesktopLauncher {
                 Self::map_play_customize_number_button_rect(row, true),
                 "+",
                 None,
-                layer + 0.005 + index as f32 * 0.001,
+                layer + 0.005 + visible_index as f32 * 0.001,
                 enabled,
             );
+            visible_index += 1;
         }
     }
 
@@ -46072,12 +46142,12 @@ impl DesktopLauncher {
         rules: &Rules,
         layer: f32,
     ) {
-        for (index, toggle) in MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES
-            .iter()
-            .copied()
-            .enumerate()
-        {
-            let row = Self::map_play_customize_banned_policy_row_rect(content, index);
+        let mut visible_index = 0usize;
+        for toggle in MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES.iter().copied() {
+            if !self.pause_custom_rule_label_matches(toggle.label_key()) {
+                continue;
+            }
+            let row = Self::map_play_customize_banned_policy_row_rect(content, visible_index);
             let value = toggle.value(rules);
             pass.push(RenderCommand::draw_sprite(
                 Self::settings_drawable_symbol("button"),
@@ -46088,7 +46158,7 @@ impl DesktopLauncher {
                     [1.0, 1.0, 1.0, 0.15]
                 },
                 0.0,
-                layer + index as f32 * 0.001,
+                layer + visible_index as f32 * 0.001,
             ));
             pass.push(RenderCommand::draw_text_styled(
                 format!(
@@ -46109,8 +46179,9 @@ impl DesktopLauncher {
                     .with_markup(true)
                     .with_wrap_width((row.width - 16.0).max(80.0))
                     .with_integer_position(true),
-                layer + 0.002 + index as f32 * 0.001,
+                layer + 0.002 + visible_index as f32 * 0.001,
             ));
+            visible_index += 1;
         }
     }
 
@@ -49770,6 +49841,20 @@ impl DesktopLauncher {
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
+                        && self.pause_overlay_modal
+                            == Some(DesktopPausedOverlayModal::CustomRules)
+                        && self.pause_custom_rules_search_focused
+                        && !self.pause_custom_rules_edit_dialog_open
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.pause_custom_rules_search.pop();
+                    } else {
+                        self.pause_custom_rules_search.clear();
+                    }
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
                         && matches!(
                             self.active_menu_route,
                             Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
@@ -50236,6 +50321,19 @@ impl DesktopLauncher {
                             self.editor_new_map_name_text.push(ch);
                         }
                         self.editor_new_map_error = None;
+                    } else if self.pause_overlay_modal
+                        == Some(DesktopPausedOverlayModal::CustomRules)
+                        && self.pause_custom_rules_search_focused
+                        && !self.pause_custom_rules_edit_dialog_open
+                    {
+                        for ch in text.chars().filter(|ch| !ch.is_control()) {
+                            if self.pause_custom_rules_search.len()
+                                >= MAP_PLAY_CUSTOM_RULE_SEARCH_MAX_LENGTH
+                            {
+                                break;
+                            }
+                            self.pause_custom_rules_search.push(ch);
+                        }
                     } else if matches!(
                         self.active_menu_route,
                         Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
@@ -54217,6 +54315,74 @@ impl DesktopLauncher {
                 layer + 0.005,
             ));
         }
+        let search = Self::pause_overlay_custom_rules_search_rect(dialog);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol(
+                "grayt",
+                false,
+                self.pause_custom_rules_search_focused,
+            ),
+            search,
+            if self.pause_custom_rules_search_focused {
+                [1.0, 1.0, 1.0, 0.96]
+            } else {
+                [1.0, 1.0, 1.0, 0.84]
+            },
+            0.0,
+            layer + 0.0055,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("zoom", "zoom"),
+            RenderPoint::new(search.x + 20.0, search.center().y),
+            [0.72, 0.82, 0.9, 1.0],
+            13.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.0056,
+        ));
+        let search_text = if self.pause_custom_rules_search.is_empty() {
+            self.localize_bundle_markup_text_or("@search", "Search")
+        } else {
+            self.pause_custom_rules_search.clone()
+        };
+        pass.push(RenderCommand::draw_text_styled(
+            search_text,
+            RenderPoint::new(search.x + 40.0, search.center().y),
+            if self.pause_custom_rules_search.is_empty() {
+                [0.58, 0.66, 0.72, 0.82]
+            } else {
+                [0.92, 0.97, 1.0, 1.0]
+            },
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            layer + 0.0057,
+        ));
+        if self.pause_custom_rules_search_focused {
+            let cursor_x =
+                (search.x + 40.0 + self.pause_custom_rules_search.chars().count() as f32 * 6.0)
+                    .min(search.right() - 40.0);
+            pass.push(RenderCommand::fill_rect(
+                RenderRect::new(cursor_x, search.y + 7.0, 1.5, search.height - 14.0),
+                [0.86, 0.96, 1.0, 0.92],
+                layer + 0.0058,
+            ));
+        }
+        if !self.pause_custom_rules_search.is_empty() {
+            self.push_settings_text_button(
+                pass,
+                Self::map_play_customize_search_clear_rect(search),
+                "×",
+                None,
+                layer + 0.0059,
+            );
+        }
         pass.push(RenderCommand::draw_sprite(
             Self::settings_drawable_symbol("button"),
             content,
@@ -54234,6 +54400,14 @@ impl DesktopLauncher {
         let mut y = content.y + content.height - 20.0;
         let mut row_index = 0usize;
         'categories: for (title_key, toggles) in MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS {
+            let visible_toggles = toggles
+                .iter()
+                .copied()
+                .filter(|toggle| self.pause_custom_rule_label_matches(toggle.label_key()))
+                .collect::<Vec<_>>();
+            if visible_toggles.is_empty() {
+                continue;
+            }
             if y < content.y + 34.0 {
                 break;
             }
@@ -54257,7 +54431,7 @@ impl DesktopLauncher {
                 layer + 0.011 + row_index as f32 * 0.001,
             ));
             y -= 20.0;
-            for toggle in toggles.iter().copied() {
+            for toggle in visible_toggles {
                 if y < content.y + 18.0 {
                     break 'categories;
                 }
@@ -75426,6 +75600,110 @@ repo: "Beta/Override"
             super::DesktopPausedOverlayAction::ClosePauseCustomRulesEdit,
         );
         assert!(!launcher.pause_custom_rules_edit_dialog_open);
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_custom_rules_search_filters_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.game_state.rules.allow_edit_rules = true;
+        launcher.game_state.rules.waves = true;
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CustomRules);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = launcher.pause_overlay_panel_for_current_state(viewport);
+        let custom_dialog = DesktopLauncher::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let search = DesktopLauncher::pause_overlay_custom_rules_search_rect(custom_dialog);
+        let search_center = search.center();
+
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                search_center.x,
+                search_center.y
+            ),
+            Some(super::DesktopPausedOverlayAction::FocusPauseCustomRulesSearch)
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: search_center.x,
+                    y: search_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+                DesktopInputTickEvent::Text("pvp".into()),
+            ],
+        );
+        assert_eq!(launcher.pause_custom_rules_search, "pvp");
+        assert!(launcher.pause_custom_rules_search_focused);
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let pvp = launcher.localize_bundle_markup_text("@mode.pvp.name");
+        let waves = launcher.localize_bundle_markup_text("@rules.waves");
+        assert!(texts.iter().any(|text| text.contains(pvp.as_str())));
+        assert!(
+            !texts.iter().any(|text| text.contains(waves.as_str())),
+            "Java CustomRulesDialog search filters non-matching rule rows"
+        );
+
+        let clear_center = DesktopLauncher::map_play_customize_search_clear_rect(search).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, clear_center.x, clear_center.y),
+            Some(super::DesktopPausedOverlayAction::ClearPauseCustomRulesSearch)
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: clear_center.x,
+                    y: clear_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert!(launcher.pause_custom_rules_search.is_empty());
+        assert!(launcher.pause_custom_rules_search_focused);
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::Text("abc".into()),
+                DesktopInputTickEvent::Key {
+                    key_code: "Backspace".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.pause_custom_rules_search, "ab");
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "Delete".into(),
+                pressed: true,
+            }],
+        );
+        assert!(launcher.pause_custom_rules_search.is_empty());
     }
 
     #[test]
