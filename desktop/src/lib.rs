@@ -51882,6 +51882,16 @@ impl DesktopLauncher {
             })
     }
 
+    fn mods_route_mod_name_at_index(&self, index: usize) -> Option<&str> {
+        self.mods_route_mod_meta_at_index(index)
+            .and_then(|meta| meta.name.as_deref().filter(|name| !name.trim().is_empty()))
+            .or_else(|| {
+                self.last_mods_directory_mod_names
+                    .get(index)
+                    .map(String::as_str)
+            })
+    }
+
     fn mods_route_mod_summary_at_index(&self, index: usize) -> String {
         let mut summary_parts = Vec::new();
         if let Some(state_text) = self.mods_route_mod_state_text_at_index(index) {
@@ -51954,6 +51964,14 @@ impl DesktopLauncher {
         let description = description.trim();
         (!description.is_empty())
             .then(|| schematic_text_snippet(description, MODS_ROUTE_MOD_SHORT_DESCRIPTION_MAX_LEN))
+    }
+
+    fn mods_browser_selection_description_at_index(&self, index: usize) -> String {
+        self.mods_route_mod_meta_at_index(index)
+            .and_then(|meta| meta.description.as_deref())
+            .map(|description| description.replace('\r', " ").trim().to_string())
+            .filter(|description| !description.is_empty())
+            .unwrap_or_else(|| self.localize_bundle_markup_text("@none"))
     }
 
     fn mods_browser_empty_state_texts(&self) -> (String, String) {
@@ -53236,27 +53254,22 @@ impl DesktopLauncher {
         let Some(index) = self.mods_browser_selected_mod_index else {
             return;
         };
-        let Some(mod_name) = self.mods_route_mod_display_name_at_index(index) else {
+        let Some(mod_name) = self.mods_route_mod_name_at_index(index) else {
             return;
         };
         let browser = Self::mods_browser_dialog_rect_for_panel(panel);
         let dialog = Self::mods_browser_selection_dialog_rect_for_browser(browser);
         let meta = self.mods_route_mod_meta_at_index(index);
-        let description = meta
-            .and_then(|meta| meta.description.as_deref())
-            .map(|description| {
-                let description = description.replace('\r', " ").replace('\n', " ");
-                let description = description.trim();
-                if description.is_empty() {
-                    self.localize_bundle_markup_text("@none")
-                } else {
-                    schematic_text_snippet(description, 96)
-                }
-            })
-            .unwrap_or_else(|| self.localize_bundle_markup_text("@none"));
+        let description = self.mods_browser_selection_description_at_index(index);
         let author = meta
             .map(ModMetadata::author_or_unknown)
             .unwrap_or("@unknown");
+        let details = format!(
+            "{}\n\n[accent]{}[lightgray] {}",
+            description,
+            self.localize_bundle_markup_text("@editor.author"),
+            self.localize_bundle_markup_text(author)
+        );
         pass.push(RenderCommand::fill_rect(
             browser,
             [0.0, 0.0, 0.0, 0.40],
@@ -53287,34 +53300,17 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.1097,
         ));
-        let details = [
-            format!(
-                "{} {}",
-                self.localize_bundle_markup_text("@editor.description"),
-                description
-            ),
-            format!(
-                "{} {}",
-                self.localize_bundle_markup_text("@editor.author"),
-                self.localize_bundle_markup_text(author)
-            ),
-        ];
-        for (row, detail) in details.iter().enumerate() {
-            pass.push(RenderCommand::draw_text_styled(
-                detail.clone(),
-                RenderPoint::new(
-                    dialog.center().x,
-                    dialog.y + dialog.height - 112.0 - row as f32 * 24.0,
-                ),
-                [0.72, 0.80, 0.86, 1.0],
-                11.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Center)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
-                Layer::END_PIXELED + 0.1098 + row as f32 * 0.0001,
-            ));
-        }
+        pass.push(RenderCommand::draw_text_styled(
+            details,
+            RenderPoint::new(dialog.x + 34.0, dialog.y + dialog.height - 104.0),
+            [0.72, 0.80, 0.86, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.1098,
+        ));
         let specs = self.mods_browser_selection_button_specs(index);
         for (button_index, (_, label, icon)) in specs.iter().enumerate() {
             self.push_settings_text_button(
@@ -72392,7 +72388,7 @@ legacyCompatible: true
 name: beta
 displayName: "Beta Override"
 author: "Beta Author"
-description: "Beta browser entry for selection modal"
+description: "Beta browser entry for selection modal keeps this long full description visible after ninety six characters instead of trimming it."
 repo: "Beta/Override"
 "#,
         )];
@@ -72426,14 +72422,17 @@ repo: "Beta/Override"
                 _ => None,
             })
             .collect::<Vec<_>>();
+        assert!(texts.contains(&"beta"));
         assert!(texts.contains(&"Beta Override"));
         assert!(!texts.iter().any(|text| text.contains("Selected mod")));
-        assert!(texts
-            .iter()
-            .any(|text| text.contains("Description") && text.contains("Beta browser entry")));
+        assert!(texts.iter().any(|text| text.contains("Beta browser entry")
+            && text.contains("after ninety six characters")));
         assert!(texts
             .iter()
             .any(|text| text.contains("Author") && text.contains("Beta Author")));
+        assert!(launcher
+            .mods_browser_selection_description_at_index(0)
+            .contains("after ninety six characters"));
         assert!(texts.contains(&"Back"));
         assert!(texts.contains(
             &launcher
