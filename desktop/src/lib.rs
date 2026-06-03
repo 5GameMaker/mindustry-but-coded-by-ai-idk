@@ -3650,6 +3650,7 @@ pub enum DesktopMenuRouteShellAction {
     EditorExportFile,
     EditorExportImage,
     CloseEditorExportDialog,
+    EditorInGame,
     EditorPlaytest,
     ConfirmEditorImportOverwrite,
     CancelEditorImportOverwrite,
@@ -34072,6 +34073,51 @@ impl DesktopLauncher {
             .position(|map| map.file.trim() == editor_map_file)
     }
 
+    fn edit_current_map_in_game(&mut self) -> bool {
+        let Some(index) = self.current_editor_map_index() else {
+            return false;
+        };
+        let Some(map) = self.map_list_cards.get(index).cloned() else {
+            return false;
+        };
+        let mut rules = map.apply_rules(Gamemode::Editor);
+        rules.mode_name = Some(Gamemode::Editor.wire_name().to_string());
+        rules.editor = true;
+        rules.limit_map_area = false;
+        rules.sector = None;
+        rules.fog = false;
+
+        let report = self.runtime.seed_playable_smoke_world(&self.content_loader);
+        self.runtime
+            .set_network_context(GameRuntimeNetworkContext::offline());
+        self.runtime.state.map = map.clone();
+        self.runtime.state.rules = rules;
+        self.runtime.state.playtesting_map = None;
+        self.runtime.state.set(GameStateState::Playing);
+
+        self.game_state = self.runtime.state.clone();
+        self.game_state.playtesting_map = None;
+        self.player.team = TeamId(self.game_state.rules.default_team as u8);
+        self.active_menu_route = None;
+        self.editor_map_info_dialog_index = None;
+        self.map_play_dialog_index = None;
+        self.map_play_mode_help_dialog_open = false;
+        self.map_play_customize_dialog_open = false;
+        self.map_play_rules_edit_dialog_open = false;
+        self.map_play_banned_content_dialog = None;
+        self.map_play_weather_dialog_open = false;
+        self.map_play_rules = None;
+        self.map_play_rules_error = None;
+        self.map_play_playtesting = false;
+        self.clear_editor_export_dialog();
+        self.clear_editor_new_map_dialog();
+        self.clear_editor_import_map_dialog();
+        self.last_campaign_launch_report = Some(report);
+        self.last_menu_info_message =
+            Some(format!("MapEditorDialog.editInGame: {}", map.plain_name()));
+        true
+    }
+
     fn open_map_play_dialog_for_index(
         &mut self,
         index: usize,
@@ -36314,6 +36360,11 @@ impl DesktopLauncher {
             }
             if self.game_state.rules.editor
                 && Self::map_list_action_button_rect_for_panel(panel, 3).contains_point(point)
+            {
+                return Some(DesktopMenuRouteShellAction::EditorInGame);
+            }
+            if self.game_state.rules.editor
+                && Self::map_list_action_button_rect_for_panel(panel, 4).contains_point(point)
             {
                 return Some(DesktopMenuRouteShellAction::EditorPlaytest);
             }
@@ -38638,6 +38689,9 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::CloseEditorExportDialog => {
                 self.clear_editor_export_dialog();
+            }
+            DesktopMenuRouteShellAction::EditorInGame => {
+                let _ = self.edit_current_map_in_game();
             }
             DesktopMenuRouteShellAction::EditorPlaytest => {
                 if let Some(index) = self.current_editor_map_index() {
@@ -43319,9 +43373,16 @@ impl DesktopLauncher {
                 self.push_settings_text_button(
                     pass,
                     Self::map_list_action_button_rect_for_panel(panel, 3),
+                    self.localize_bundle_markup_text_or("@editor.ingame", "In Game"),
+                    Some("right"),
+                    Layer::END_PIXELED + 0.028,
+                );
+                self.push_settings_text_button(
+                    pass,
+                    Self::map_list_action_button_rect_for_panel(panel, 4),
                     self.localize_bundle_markup_text_or("@editor.playtest", "Playtest"),
                     Some("play"),
-                    Layer::END_PIXELED + 0.028,
+                    Layer::END_PIXELED + 0.029,
                 );
             }
         }
@@ -48843,6 +48904,7 @@ impl DesktopLauncher {
         );
         if self.game_state.rules.editor {
             lines.push("button: @editor.export Icon.upload".into());
+            lines.push("button: @editor.ingame Icon.right".into());
             lines.push("button: @editor.playtest Icon.play".into());
         }
         if self.editor_export_dialog_open {
@@ -73921,6 +73983,83 @@ repo: "Beta/Override"
         assert_eq!(
             launcher.last_menu_info_message.as_deref(),
             Some("MapEditorDialog.export Image: Export Arena")
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_editor_route_has_ingame_button_and_enters_play_state_like_java() {
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), "Ingame Arena".to_string());
+        let mut map = MapDescriptor::new(
+            "maps/custom/ingame-arena.msav",
+            128,
+            128,
+            tags,
+            true,
+            2,
+            158,
+        );
+        map.spawns = 1;
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.map_list_cards = vec![map.clone()];
+        launcher.begin_edit_map(map);
+
+        assert!(launcher
+            .editor_maps_route_lines()
+            .iter()
+            .any(|line| line.contains("@editor.ingame")));
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Editor,
+        );
+        let ingame_center =
+            DesktopLauncher::map_list_action_button_rect_for_panel(panel, 3).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                ingame_center.x,
+                ingame_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::EditorInGame)
+        );
+        let playtest_center =
+            DesktopLauncher::map_list_action_button_rect_for_panel(panel, 4).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                playtest_center.x,
+                playtest_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::EditorPlaytest)
+        );
+
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::EditorInGame);
+
+        assert!(launcher.game_state.is_playing());
+        assert!(launcher.runtime.state.is_playing());
+        assert_eq!(launcher.active_menu_route, None);
+        assert_eq!(launcher.game_state.map.plain_name(), "Ingame Arena");
+        assert_eq!(launcher.runtime.state.map.plain_name(), "Ingame Arena");
+        assert!(launcher.game_state.rules.editor);
+        assert!(launcher.runtime.state.rules.editor);
+        assert!(!launcher.game_state.rules.limit_map_area);
+        assert!(!launcher.game_state.rules.fog);
+        assert_eq!(
+            launcher.game_state.rules.mode_name.as_deref(),
+            Some(Gamemode::Editor.wire_name())
+        );
+        assert!(launcher.game_state.playtesting_map.is_none());
+        assert!(launcher.runtime.state.playtesting_map.is_none());
+        assert!(!launcher.map_play_playtesting);
+        assert_eq!(launcher.map_play_dialog_index, None);
+        assert!(launcher.last_campaign_launch_report.is_some());
+        assert_eq!(
+            launcher.last_menu_info_message.as_deref(),
+            Some("MapEditorDialog.editInGame: Ingame Arena")
         );
     }
 

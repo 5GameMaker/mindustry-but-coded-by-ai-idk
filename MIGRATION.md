@@ -17,6 +17,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 809. Editor `@editor.ingame` 前端入口接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.40%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `MapEditorDialog.java` 顶部按钮在 export 下方提供 `@editor.ingame` 与 `@editor.playtest`；
+  - `editInGame()` 会隐藏 editor menu，保留/应用 editor rules，将状态切到 `State.playing`，不设置 playtest 标记，并进入当前编辑地图的游戏态；
+  - 真实 Java 还会重置 player/team/entities、生成玩家单位、调整 camera；Rust 本轮只先接入前端动作和 runtime 状态主链路。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuRouteShellAction` 新增 `EditorInGame`；
+    - 新增 `edit_current_map_in_game()`，复用当前 runtime playable smoke world 入口后覆盖当前 editor map 与 editor rules，关闭 editor route，清空 playtest/map-play 状态并切到 `Playing`；
+    - editor route 顶部按钮新增 `@editor.ingame Icon.right`，`@editor.playtest` 顺延为 action index 4；
+    - `editor_maps_route_lines()` 增加 `@editor.ingame`；
+    - 新增 `desktop_launcher_editor_route_has_ingame_button_and_enters_play_state_like_java`，覆盖按钮命中、playtest 仍可命中、进入 playing、editor rules 保留、playtesting_map 为空。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_route_has_ingame_button_and_enters_play_state_like_java --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - Java `editInGame()` 的真实 editor tile/world 载入、player unit spawn、camera positioning、Groups/build/weather 清理仍需继续接入；
+  - editor workshop publish/view 与 GameOverDialog playtest 返回 editor UI 接线仍未完成。
+
 ## 808. ModsDialog releases 按钮顺序对齐 Java
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
