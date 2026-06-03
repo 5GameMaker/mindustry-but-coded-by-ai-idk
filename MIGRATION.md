@@ -17,6 +17,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 865. ModsDialog 本地文件导入选择结果落地
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **93.97%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 对照 Java `Mods.importMod(Fi file)` 和 `ModsDialog.java:191-202` 的 `mods.importMod(file); setup();`；
+    - 新增 `DesktopModsImportFileResult` 与 `DesktopLauncher::complete_mods_import_file_selection(...)`；
+    - 复用现有 `MultiFileChooserRequest` 的 `zip/jar` 过滤；
+    - 按 Java 规则生成导入目标：`file.nameWithoutExtension().replace(':', '_').replace(' ', '_')`，目标统一写到 `mods_dir/<finalName>.zip`，冲突时追加数字；
+    - 成功后复制源文件、追加 Mods 路由的 `mod_names / roots / metas / states`，启用该 mod 并标记 `requires_reload`，让已有 `consume_mods_route_reload_if_required()` 继续承担 Java `hidden/setup/reload` 等价链路；
+    - 失败时删除半成品并记录 `error / exception_key`，保留 Java `writable dex -> @error.moddex` 特判。
+- 已验证：
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_route_import_file_selection_copies_and_marks_reload_like_java -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop mods -- --nocapture`
+- 后续不可漏：
+  - 当前闭环先完成“选择结果落地 + route/reload 主链路接入”；要完全等价 Java `loadMod(dest, true, true)`，后续必须扩展 `ModResourceContainerPlan::discover_from_mods_directory(...)`，让 `zip/jar` archive-backed mod 进入真实 metadata/resource 扫描，而不是只识别目录。
+
 ## 864. ModsDialog GitHub import 输入框与 lastmod 回写
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
