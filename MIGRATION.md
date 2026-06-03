@@ -17,6 +17,20 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 859. MapPlay CustomRules environment 纯 toggle 接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **93.91%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 对照本地 Java `CustomRulesDialog.java` 的 environment 分组，补齐 map-play CustomRules 的 `pauseDisabled / damageExplosions / fire / fog / lighting` 纯 toggle；
+    - 将这些 toggle 接入现有 CustomRules 搜索、渲染、hit-test、dispatch 与 pending `map_play_rules` 修改链路；
+    - 保留既有 `limitMapArea`，避免只新增孤立 helper 或只在测试中可见。
+- 已验证：
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_map_play_custom_rules_environment_toggles_match_java -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop map_play -- --nocapture`
+- 下一步优先：继续对照本地 Java CustomRulesDialog 补 map-play environment 的 `solarMultiplier` 数值项，并审查是否还有 environment/additionalSetup 项未接入。
+
 ## 858. MapPlay CustomRules @configure/loadout 子弹窗接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
