@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 839. PausedDialog CustomRules 数值字段扩展
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.71%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `CustomRulesDialog.setupMain()` 在 waves/resourcesbuilding/unit/enemy/environment 中包含 `number(...)` / `numberi(...)` 数值项；
+  - `buildcostmultiplier` / `deconstructrefundmultiplier` 依赖 `!infiniteResources`；
+  - `enemycorebuildradius` 依赖 `!polygonCoreProtection`；
+  - `unitcap` 是整数并按 Java 范围限制。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 扩展 `DesktopCustomRulesNumber`，补入 build cost/speed/refund、block damage/health、unit cap、unit damage/crash/mine/build/cost、enemy core build radius、solar multiplier；
+    - 新增 pause 专用 `PAUSE_ALL` 数值列表，map play 保持原 compact `ALL`，避免地图自定义规则页布局回退；
+    - 暂停规则数值行按当前搜索可见项数量计算行位，避免 full list 搜索单项时跑出内容区；
+    - 补齐新增数值字段的 label、enabled、value_text、adjust 写入映射；
+    - 新增回归测试覆盖新增数值字段搜索渲染、按钮命中、禁用条件、关闭后写回 `game_state.rules` 与 `runtime.state.rules`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop paused_world_overlay`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore`
+- 仍未完成：
+  - 暂停 `CustomRulesDialog` 还缺完整滚动、天气、队伍、banned content 真实子流；
+  - `Call.setRules(toEdit)` 的真实联机广播仍需接入；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 838. PausedDialog CustomRules boolean 字段扩展
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。

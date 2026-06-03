@@ -999,6 +999,19 @@ pub enum DesktopCustomRulesNumber {
     WaveSpacing,
     InitialWaveSpacing,
     DropZoneRadius,
+    BuildCostMultiplier,
+    BuildSpeedMultiplier,
+    DeconstructRefundMultiplier,
+    BlockHealthMultiplier,
+    BlockDamageMultiplier,
+    UnitCap,
+    UnitDamageMultiplier,
+    UnitCrashDamageMultiplier,
+    UnitMineSpeedMultiplier,
+    UnitBuildSpeedMultiplier,
+    UnitCostMultiplier,
+    EnemyCoreBuildRadius,
+    SolarMultiplier,
 }
 
 impl DesktopCustomRulesNumber {
@@ -1008,6 +1021,25 @@ impl DesktopCustomRulesNumber {
         Self::InitialWaveSpacing,
         Self::DropZoneRadius,
     ];
+    const PAUSE_ALL: [Self; 17] = [
+        Self::WinWave,
+        Self::WaveSpacing,
+        Self::InitialWaveSpacing,
+        Self::DropZoneRadius,
+        Self::BuildCostMultiplier,
+        Self::BuildSpeedMultiplier,
+        Self::DeconstructRefundMultiplier,
+        Self::BlockHealthMultiplier,
+        Self::BlockDamageMultiplier,
+        Self::UnitCap,
+        Self::UnitDamageMultiplier,
+        Self::UnitCrashDamageMultiplier,
+        Self::UnitMineSpeedMultiplier,
+        Self::UnitBuildSpeedMultiplier,
+        Self::UnitCostMultiplier,
+        Self::EnemyCoreBuildRadius,
+        Self::SolarMultiplier,
+    ];
 
     fn label_key(self) -> &'static str {
         match self {
@@ -1015,6 +1047,19 @@ impl DesktopCustomRulesNumber {
             Self::WaveSpacing => "@rules.wavespacing",
             Self::InitialWaveSpacing => "@rules.initialwavespacing",
             Self::DropZoneRadius => "@rules.dropzoneradius",
+            Self::BuildCostMultiplier => "@rules.buildcostmultiplier",
+            Self::BuildSpeedMultiplier => "@rules.buildspeedmultiplier",
+            Self::DeconstructRefundMultiplier => "@rules.deconstructrefundmultiplier",
+            Self::BlockHealthMultiplier => "@rules.blockhealthmultiplier",
+            Self::BlockDamageMultiplier => "@rules.blockdamagemultiplier",
+            Self::UnitCap => "@rules.unitcap",
+            Self::UnitDamageMultiplier => "@rules.unitdamagemultiplier",
+            Self::UnitCrashDamageMultiplier => "@rules.unitcrashdamagemultiplier",
+            Self::UnitMineSpeedMultiplier => "@rules.unitminespeedmultiplier",
+            Self::UnitBuildSpeedMultiplier => "@rules.unitbuildspeedmultiplier",
+            Self::UnitCostMultiplier => "@rules.unitcostmultiplier",
+            Self::EnemyCoreBuildRadius => "@rules.enemycorebuildradius",
+            Self::SolarMultiplier => "@rules.solarmultiplier",
         }
     }
 
@@ -1022,6 +1067,20 @@ impl DesktopCustomRulesNumber {
         match self {
             Self::WaveSpacing | Self::InitialWaveSpacing => rules.waves && rules.wave_timer,
             Self::WinWave | Self::DropZoneRadius => rules.waves,
+            Self::BuildCostMultiplier | Self::DeconstructRefundMultiplier => {
+                !rules.infinite_resources
+            }
+            Self::EnemyCoreBuildRadius => !rules.polygon_core_protection,
+            Self::BuildSpeedMultiplier
+            | Self::BlockHealthMultiplier
+            | Self::BlockDamageMultiplier
+            | Self::UnitCap
+            | Self::UnitDamageMultiplier
+            | Self::UnitCrashDamageMultiplier
+            | Self::UnitMineSpeedMultiplier
+            | Self::UnitBuildSpeedMultiplier
+            | Self::UnitCostMultiplier
+            | Self::SolarMultiplier => true,
         }
     }
 
@@ -1035,6 +1094,33 @@ impl DesktopCustomRulesNumber {
             Self::DropZoneRadius => {
                 format_custom_rules_number(rules.drop_zone_radius / TILE_SIZE as f32)
             }
+            Self::BuildCostMultiplier => format_custom_rules_number(rules.build_cost_multiplier),
+            Self::BuildSpeedMultiplier => format_custom_rules_number(rules.build_speed_multiplier),
+            Self::DeconstructRefundMultiplier => {
+                format_custom_rules_number(rules.deconstruct_refund_multiplier)
+            }
+            Self::BlockHealthMultiplier => {
+                format_custom_rules_number(rules.block_health_multiplier)
+            }
+            Self::BlockDamageMultiplier => {
+                format_custom_rules_number(rules.block_damage_multiplier)
+            }
+            Self::UnitCap => rules.unit_cap.to_string(),
+            Self::UnitDamageMultiplier => format_custom_rules_number(rules.unit_damage_multiplier),
+            Self::UnitCrashDamageMultiplier => {
+                format_custom_rules_number(rules.unit_crash_damage_multiplier)
+            }
+            Self::UnitMineSpeedMultiplier => {
+                format_custom_rules_number(rules.unit_mine_speed_multiplier)
+            }
+            Self::UnitBuildSpeedMultiplier => {
+                format_custom_rules_number(rules.unit_build_speed_multiplier)
+            }
+            Self::UnitCostMultiplier => format_custom_rules_number(rules.unit_cost_multiplier),
+            Self::EnemyCoreBuildRadius => format_custom_rules_number(
+                (rules.enemy_core_build_radius / TILE_SIZE as f32).min(200.0),
+            ),
+            Self::SolarMultiplier => format_custom_rules_number(rules.solar_multiplier),
         }
     }
 
@@ -1059,6 +1145,58 @@ impl DesktopCustomRulesNumber {
             Self::DropZoneRadius => {
                 let tiles = (rules.drop_zone_radius / TILE_SIZE as f32 + direction as f32).max(0.0);
                 rules.drop_zone_radius = tiles * TILE_SIZE as f32;
+            }
+            Self::BuildCostMultiplier => {
+                rules.build_cost_multiplier =
+                    (rules.build_cost_multiplier + direction as f32 * 0.1).max(0.0);
+            }
+            Self::BuildSpeedMultiplier => {
+                rules.build_speed_multiplier =
+                    (rules.build_speed_multiplier + direction as f32 * 0.1).clamp(0.001, 50.0);
+            }
+            Self::DeconstructRefundMultiplier => {
+                rules.deconstruct_refund_multiplier =
+                    (rules.deconstruct_refund_multiplier + direction as f32 * 0.1).clamp(0.0, 1.0);
+            }
+            Self::BlockHealthMultiplier => {
+                rules.block_health_multiplier =
+                    (rules.block_health_multiplier + direction as f32 * 0.1).max(0.001);
+            }
+            Self::BlockDamageMultiplier => {
+                rules.block_damage_multiplier =
+                    (rules.block_damage_multiplier + direction as f32 * 0.1).max(0.001);
+            }
+            Self::UnitCap => {
+                rules.unit_cap = (rules.unit_cap + direction).clamp(-999, 999);
+            }
+            Self::UnitDamageMultiplier => {
+                rules.unit_damage_multiplier =
+                    (rules.unit_damage_multiplier + direction as f32 * 0.1).max(0.001);
+            }
+            Self::UnitCrashDamageMultiplier => {
+                rules.unit_crash_damage_multiplier =
+                    (rules.unit_crash_damage_multiplier + direction as f32 * 0.1).max(0.001);
+            }
+            Self::UnitMineSpeedMultiplier => {
+                rules.unit_mine_speed_multiplier =
+                    (rules.unit_mine_speed_multiplier + direction as f32 * 0.1).max(0.001);
+            }
+            Self::UnitBuildSpeedMultiplier => {
+                rules.unit_build_speed_multiplier =
+                    (rules.unit_build_speed_multiplier + direction as f32 * 0.1).clamp(0.0, 50.0);
+            }
+            Self::UnitCostMultiplier => {
+                rules.unit_cost_multiplier =
+                    (rules.unit_cost_multiplier + direction as f32 * 0.1).max(0.001);
+            }
+            Self::EnemyCoreBuildRadius => {
+                let tiles = (rules.enemy_core_build_radius / TILE_SIZE as f32 + direction as f32)
+                    .clamp(0.0, 200.0);
+                rules.enemy_core_build_radius = tiles * TILE_SIZE as f32;
+            }
+            Self::SolarMultiplier => {
+                rules.solar_multiplier =
+                    (rules.solar_multiplier + direction as f32 * 0.1).max(0.001);
             }
         }
     }
@@ -31512,17 +31650,20 @@ impl DesktopLauncher {
                 }
                 let content = Self::pause_overlay_custom_rules_content_rect(dialog);
                 let rules = self.pause_custom_rules_current_rules();
-                let mut visible_number_index = 0usize;
-                for number in DesktopCustomRulesNumber::ALL {
-                    if !self.pause_custom_rule_label_matches(number.label_key()) {
-                        continue;
-                    }
+                let visible_numbers = DesktopCustomRulesNumber::PAUSE_ALL
+                    .into_iter()
+                    .filter(|number| self.pause_custom_rule_label_matches(number.label_key()))
+                    .collect::<Vec<_>>();
+                let visible_number_count = visible_numbers.len();
+                for (visible_number_index, number) in visible_numbers.into_iter().enumerate() {
                     if !number.enabled(rules) {
-                        visible_number_index += 1;
                         continue;
                     }
-                    let row =
-                        Self::map_play_customize_number_row_rect(content, visible_number_index);
+                    let row = Self::pause_custom_rules_number_row_rect(
+                        content,
+                        visible_number_index,
+                        visible_number_count,
+                    );
                     if Self::map_play_customize_number_button_rect(row, false).contains_point(point)
                     {
                         return Some(DesktopPausedOverlayAction::AdjustPauseCustomRuleNumber(
@@ -31535,7 +31676,6 @@ impl DesktopLauncher {
                             number, 1,
                         ));
                     }
-                    visible_number_index += 1;
                 }
                 let mut visible_policy_index = 0usize;
                 for toggle in MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES.iter().copied() {
@@ -34248,10 +34388,30 @@ impl DesktopLauncher {
     }
 
     fn map_play_customize_number_row_rect(content: RenderRect, index: usize) -> RenderRect {
+        Self::custom_rules_number_row_rect_with_count(
+            content,
+            index,
+            DesktopCustomRulesNumber::ALL.len(),
+        )
+    }
+
+    fn pause_custom_rules_number_row_rect(
+        content: RenderRect,
+        index: usize,
+        count: usize,
+    ) -> RenderRect {
+        Self::custom_rules_number_row_rect_with_count(content, index, count.max(1))
+    }
+
+    fn custom_rules_number_row_rect_with_count(
+        content: RenderRect,
+        index: usize,
+        count: usize,
+    ) -> RenderRect {
         let width = (content.width - 40.0).clamp(260.0, 390.0);
         RenderRect::new(
             content.right() - width - 16.0,
-            content.y + 20.0 + (DesktopCustomRulesNumber::ALL.len() - 1 - index) as f32 * 27.0,
+            content.y + 20.0 + (count - 1 - index) as f32 * 27.0,
             width,
             23.0,
         )
@@ -46230,12 +46390,14 @@ impl DesktopLauncher {
         rules: &Rules,
         layer: f32,
     ) {
-        let mut visible_index = 0usize;
-        for number in DesktopCustomRulesNumber::ALL {
-            if !self.pause_custom_rule_label_matches(number.label_key()) {
-                continue;
-            }
-            let row = Self::map_play_customize_number_row_rect(content, visible_index);
+        let visible_numbers = DesktopCustomRulesNumber::PAUSE_ALL
+            .into_iter()
+            .filter(|number| self.pause_custom_rule_label_matches(number.label_key()))
+            .collect::<Vec<_>>();
+        let visible_count = visible_numbers.len();
+        for (visible_index, number) in visible_numbers.into_iter().enumerate() {
+            let row =
+                Self::pause_custom_rules_number_row_rect(content, visible_index, visible_count);
             let enabled = number.enabled(rules);
             pass.push(RenderCommand::draw_sprite(
                 Self::settings_drawable_symbol("button"),
@@ -46297,7 +46459,6 @@ impl DesktopLauncher {
                 layer + 0.005 + visible_index as f32 * 0.001,
                 enabled,
             );
-            visible_index += 1;
         }
     }
 
@@ -75945,6 +76106,105 @@ repo: "Beta/Override"
         assert!(launcher.runtime.state.rules.logic_unit_control);
         assert!(launcher.runtime.state.rules.logic_unit_build);
         assert!(launcher.runtime.state.rules.reactor_explosions);
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_custom_rules_extended_numbers_edit_rules() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.game_state.rules.allow_edit_rules = true;
+        launcher.game_state.rules.waves = true;
+        launcher.game_state.rules.infinite_resources = true;
+        launcher.game_state.rules.unit_cap = 10;
+        launcher.game_state.rules.build_cost_multiplier = 1.0;
+        launcher.game_state.rules.build_speed_multiplier = 1.0;
+        launcher.runtime.state.rules = launcher.game_state.rules.copy();
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CustomRules);
+        let unit_cap_label = launcher.localize_bundle_markup_text("@rules.unitcap");
+        launcher.pause_custom_rules_search = unit_cap_label.clone();
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = launcher.pause_overlay_panel_for_current_state(viewport);
+        let dialog = DesktopLauncher::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let content = DesktopLauncher::pause_overlay_custom_rules_content_rect(dialog);
+        let row = DesktopLauncher::pause_custom_rules_number_row_rect(content, 0, 1);
+        let increase = DesktopLauncher::map_play_customize_number_button_rect(row, true).center();
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts
+            .iter()
+            .any(|text| text.contains(unit_cap_label.as_str())));
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, increase.x, increase.y),
+            Some(
+                super::DesktopPausedOverlayAction::AdjustPauseCustomRuleNumber(
+                    super::DesktopCustomRulesNumber::UnitCap,
+                    1
+                )
+            )
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::AdjustPauseCustomRuleNumber(
+                super::DesktopCustomRulesNumber::UnitCap,
+                1,
+            ),
+        );
+        assert_eq!(
+            launcher.pause_custom_rules_edit.as_ref().unwrap().unit_cap,
+            11
+        );
+
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::AdjustPauseCustomRuleNumber(
+                super::DesktopCustomRulesNumber::BuildCostMultiplier,
+                1,
+            ),
+        );
+        assert_eq!(
+            launcher
+                .pause_custom_rules_edit
+                .as_ref()
+                .unwrap()
+                .build_cost_multiplier,
+            1.0,
+            "Java CustomRulesDialog disables buildcostmultiplier when infiniteResources is enabled"
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::AdjustPauseCustomRuleNumber(
+                super::DesktopCustomRulesNumber::BuildSpeedMultiplier,
+                1,
+            ),
+        );
+        assert!(
+            (launcher
+                .pause_custom_rules_edit
+                .as_ref()
+                .unwrap()
+                .build_speed_multiplier
+                - 1.1)
+                .abs()
+                < 0.001
+        );
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CloseModal);
+        assert_eq!(launcher.game_state.rules.unit_cap, 11);
+        assert_eq!(launcher.runtime.state.rules.unit_cap, 11);
+        assert!((launcher.game_state.rules.build_speed_multiplier - 1.1).abs() < 0.001);
+        assert!((launcher.runtime.state.rules.build_speed_multiplier - 1.1).abs() < 0.001);
     }
 
     #[test]
