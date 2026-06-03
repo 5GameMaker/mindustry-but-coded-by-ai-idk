@@ -17,6 +17,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 858. MapPlay CustomRules @configure/loadout 子弹窗接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **93.90%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 为 map-play CustomRules 补齐 `OpenLoadout / CloseLoadout / MaxLoadout / ResetLoadout / AdjustLoadoutItem(index, direction)`；
+    - 新增 `map_play_loadout_dialog_open / map_play_loadout_scroll_offset / map_play_loadout_draft`；
+    - 复用 pause loadout 几何与 item label/icon 渲染，新增 map-play draft 渲染、hit-test、滚轮、Back 栈、输入屏蔽与关闭提交；
+    - loadout draft 只写回 `map_play_rules.loadout`，直到 `PlaySelected` 才同步到 runtime/game_state，避免成为独立 UI 壳。
+- 已验证：
+  - `cargo fmt --all`
+  - `git diff --check`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_map_play_custom_rules_loadout_child_dialog_like_java -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_map_play_back_key_closes_nested_child_dialogs_like_java_stack -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop map_play -- --nocapture`
+- 下一步优先：map-play environment 剩余项，先补 `pauseDisabled / damageExplosions / fire / fog / lighting` 这 5 个纯 toggle，再单独补 `solarMultiplier` 数值项。
+
 ## 857. MapPlay CustomRules ambient light picker 接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
