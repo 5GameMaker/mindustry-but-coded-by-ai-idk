@@ -17,6 +17,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 854. CustomRules limitarea/map area 子流接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.86%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `CustomRulesDialog.setupMain()` 的 environment 分类中 `@rules.limitarea` 控制 `rules.limitMapArea`；
+  - `x/y/w/h` 四个整数输入框写 `rules.limitX/limitY/limitWidth/limitHeight`，范围 `0..10000`；
+  - Java 在 `state.isGame()` 时禁用 `limitarea` 与四个数值字段，因此 Rust pause/game 内 CustomRules 也必须只显示禁用态，不允许运行中改 map area。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopCustomRulesToggle` 新增 `LimitMapArea`，接入 `Rules.limit_map_area`；
+    - 新增 `DesktopLimitAreaNumber::{X,Y,Width,Height}`，接入 `limit_x/limit_y/limit_width/limit_height`；
+    - map-play CustomRules 新增 environment 组，搜索 `limit` 时可见并可编辑 `limitarea` 与 `x/y/w/h`；
+    - pause CustomRules environment 组显示 `limitarea` 与 `x/y/w/h`，但按 Java 游戏态禁用 hit-test/action；
+    - render 与 hit-test 共用 limit-area rect helper，避免按钮位置和命中位置漂移。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop limit_area`
+  - `cargo test -p mindustry-desktop paused_world_overlay_custom_rules`
+  - `cargo test -p mindustry-desktop map_play`
+  - `cargo test -p mindustry-desktop paused_world_overlay`
+- 仍未完成：
+  - Java 原版是文本输入框；Rust 当前仍沿用既有 CustomRules `+/-` 数值编辑风格，后续需要接入真实 text field 以完全还原；
+  - map-play CustomRules 仍缺 ScrollPane 化的完整规则内容布局，当前对较深规则依赖搜索过滤来稳定显示；
+  - `additionalSetup` 扩展挂点仍未迁移；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 853. PausedDialog CustomRules planet/anyenv 子流接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。

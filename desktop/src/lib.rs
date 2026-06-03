@@ -848,6 +848,7 @@ pub enum DesktopCustomRulesToggle {
     Fire,
     Fog,
     Lighting,
+    LimitMapArea,
 }
 
 impl DesktopCustomRulesToggle {
@@ -888,6 +889,7 @@ impl DesktopCustomRulesToggle {
             Self::Fire => "@rules.fire",
             Self::Fog => "@rules.fog",
             Self::Lighting => "@rules.lighting",
+            Self::LimitMapArea => "@rules.limitarea",
         }
     }
 
@@ -928,6 +930,7 @@ impl DesktopCustomRulesToggle {
             Self::Fire => rules.fire,
             Self::Fog => rules.fog,
             Self::Lighting => rules.lighting,
+            Self::LimitMapArea => rules.limit_map_area,
         }
     }
 
@@ -990,6 +993,51 @@ impl DesktopCustomRulesToggle {
             Self::Fire => rules.fire = !rules.fire,
             Self::Fog => rules.fog = !rules.fog,
             Self::Lighting => rules.lighting = !rules.lighting,
+            Self::LimitMapArea => rules.limit_map_area = !rules.limit_map_area,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopLimitAreaNumber {
+    X,
+    Y,
+    Width,
+    Height,
+}
+
+impl DesktopLimitAreaNumber {
+    const ALL: [Self; 4] = [Self::X, Self::Y, Self::Width, Self::Height];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::X => "x",
+            Self::Y => "y",
+            Self::Width => "w",
+            Self::Height => "h",
+        }
+    }
+
+    fn value(self, rules: &Rules) -> i32 {
+        match self {
+            Self::X => rules.limit_x,
+            Self::Y => rules.limit_y,
+            Self::Width => rules.limit_width,
+            Self::Height => rules.limit_height,
+        }
+    }
+
+    fn adjust(self, rules: &mut Rules, direction: i32) {
+        let direction = direction.signum();
+        if direction == 0 || !rules.limit_map_area {
+            return;
+        }
+        let value = (self.value(rules) + direction).clamp(0, 10_000);
+        match self {
+            Self::X => rules.limit_x = value,
+            Self::Y => rules.limit_y = value,
+            Self::Width => rules.limit_width = value,
+            Self::Height => rules.limit_height = value,
         }
     }
 }
@@ -1701,6 +1749,7 @@ const PAUSE_CUSTOM_RULE_ENVIRONMENT_TOGGLES: &[DesktopCustomRulesToggle] = &[
     DesktopCustomRulesToggle::Fire,
     DesktopCustomRulesToggle::Fog,
     DesktopCustomRulesToggle::Lighting,
+    DesktopCustomRulesToggle::LimitMapArea,
 ];
 const PAUSE_CUSTOM_RULE_TOGGLE_GROUPS: &[(&str, &[DesktopCustomRulesToggle])] = &[
     ("@rules.title.waves", PAUSE_CUSTOM_RULE_WAVE_TOGGLES),
@@ -1717,6 +1766,7 @@ const PAUSE_CUSTOM_RULE_TOGGLE_GROUPS: &[(&str, &[DesktopCustomRulesToggle])] = 
 ];
 const PAUSE_CUSTOM_RULE_SCROLL_ROW_HEIGHT: f32 = 27.0;
 const PAUSE_CUSTOM_RULE_TOGGLE_ROW_HEIGHT: f32 = 24.0;
+const CUSTOM_RULE_LIMIT_AREA_NUMBER_ROW_HEIGHT: f32 = 27.0;
 const PAUSE_CUSTOM_RULE_TOGGLE_GROUP_HEADER_HEIGHT: f32 = 46.0;
 const PAUSE_CUSTOM_RULE_LOADOUT_CAPACITY: i32 = 999_999;
 const MAP_PLAY_CUSTOM_RULE_WAVE_TOGGLES: &[DesktopCustomRulesToggle] = &[
@@ -1733,6 +1783,8 @@ const MAP_PLAY_CUSTOM_RULE_ENEMY_TOGGLES: &[DesktopCustomRulesToggle] = &[
     DesktopCustomRulesToggle::Pvp,
     DesktopCustomRulesToggle::CoreCapture,
 ];
+const MAP_PLAY_CUSTOM_RULE_ENVIRONMENT_TOGGLES: &[DesktopCustomRulesToggle] =
+    &[DesktopCustomRulesToggle::LimitMapArea];
 const MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS: &[(&str, &[DesktopCustomRulesToggle])] = &[
     ("@rules.title.waves", MAP_PLAY_CUSTOM_RULE_WAVE_TOGGLES),
     (
@@ -1740,6 +1792,10 @@ const MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS: &[(&str, &[DesktopCustomRulesToggle])]
         MAP_PLAY_CUSTOM_RULE_RESOURCE_TOGGLES,
     ),
     ("@rules.title.enemy", MAP_PLAY_CUSTOM_RULE_ENEMY_TOGGLES),
+    (
+        "@rules.title.environment",
+        MAP_PLAY_CUSTOM_RULE_ENVIRONMENT_TOGGLES,
+    ),
 ];
 const MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES: &[DesktopCustomRulesToggle] = &[
     DesktopCustomRulesToggle::HideBannedBlocks,
@@ -1758,6 +1814,7 @@ pub enum DesktopMapCardActionKind {
     ShowModeHelp,
     ToggleCustomRule(DesktopCustomRulesToggle),
     AdjustCustomRuleNumber(DesktopCustomRulesNumber, i32),
+    AdjustLimitAreaNumber(DesktopLimitAreaNumber, i32),
     FocusCustomRulesSearch,
     ClearCustomRulesSearch,
     OpenCustomRulesEdit,
@@ -31625,6 +31682,56 @@ impl DesktopLauncher {
         )
     }
 
+    fn custom_rules_limit_area_number_row_rect(toggle_row: RenderRect) -> RenderRect {
+        RenderRect::new(
+            toggle_row.x + 16.0,
+            toggle_row.y - CUSTOM_RULE_LIMIT_AREA_NUMBER_ROW_HEIGHT,
+            toggle_row.width - 16.0,
+            23.0,
+        )
+    }
+
+    fn custom_rules_limit_area_number_field_rect(row: RenderRect, index: usize) -> RenderRect {
+        let gap = 6.0;
+        let width = ((row.width - gap * 3.0) / 4.0).max(62.0);
+        RenderRect::new(
+            row.x + index as f32 * (width + gap),
+            row.y,
+            width,
+            row.height,
+        )
+    }
+
+    fn custom_rules_limit_area_number_button_rect(field: RenderRect, increase: bool) -> RenderRect {
+        let width = 18.0;
+        let gap = 3.0;
+        let x = if increase {
+            field.right() - width
+        } else {
+            field.right() - width * 2.0 - gap
+        };
+        RenderRect::new(x, field.y + 1.0, width, field.height - 2.0)
+    }
+
+    fn pause_custom_rule_toggle_enabled(toggle: DesktopCustomRulesToggle, rules: &Rules) -> bool {
+        toggle.enabled(rules) && toggle != DesktopCustomRulesToggle::LimitMapArea
+    }
+
+    fn limit_area_number_rows_visible_for_query(&self, pause: bool) -> bool {
+        let query = if pause {
+            self.pause_custom_rules_search.trim()
+        } else {
+            self.map_play_custom_rules_search.trim()
+        };
+        if query.is_empty() {
+            return true;
+        }
+        self.custom_rule_label_matches_query("@rules.limitarea", query)
+            || DesktopLimitAreaNumber::ALL
+                .into_iter()
+                .any(|number| schematic_search_normalize(number.label()).contains(query))
+    }
+
     fn pause_custom_rules_visible_number_count(&self) -> usize {
         DesktopCustomRulesNumber::PAUSE_ALL
             .into_iter()
@@ -31653,6 +31760,16 @@ impl DesktopLauncher {
             }
             height += PAUSE_CUSTOM_RULE_TOGGLE_GROUP_HEADER_HEIGHT
                 + visible_count as f32 * PAUSE_CUSTOM_RULE_TOGGLE_ROW_HEIGHT;
+            if toggles
+                .iter()
+                .copied()
+                .any(|toggle| toggle == DesktopCustomRulesToggle::LimitMapArea)
+                && self.pause_custom_rule_label_matches(
+                    DesktopCustomRulesToggle::LimitMapArea.label_key(),
+                )
+            {
+                height += CUSTOM_RULE_LIMIT_AREA_NUMBER_ROW_HEIGHT;
+            }
         }
         height
     }
@@ -31710,10 +31827,40 @@ impl DesktopLauncher {
                     RenderRect::new(content.x + 16.0, y - 12.0, content.width - 32.0, 22.0),
                 ));
                 y -= 24.0;
+                if toggle == DesktopCustomRulesToggle::LimitMapArea {
+                    y -= CUSTOM_RULE_LIMIT_AREA_NUMBER_ROW_HEIGHT;
+                }
             }
             y -= 10.0;
         }
         rects
+    }
+
+    fn pause_limit_area_number_rects(
+        &self,
+        content: RenderRect,
+    ) -> Vec<(DesktopLimitAreaNumber, RenderRect)> {
+        if !self.limit_area_number_rows_visible_for_query(true) {
+            return Vec::new();
+        }
+        let Some((_, toggle_row)) = self
+            .pause_overlay_custom_rules_toggle_rects(content)
+            .into_iter()
+            .find(|(toggle, _)| *toggle == DesktopCustomRulesToggle::LimitMapArea)
+        else {
+            return Vec::new();
+        };
+        let row = Self::custom_rules_limit_area_number_row_rect(toggle_row);
+        DesktopLimitAreaNumber::ALL
+            .into_iter()
+            .enumerate()
+            .map(|(index, number)| {
+                (
+                    number,
+                    Self::custom_rules_limit_area_number_field_rect(row, index),
+                )
+            })
+            .collect()
     }
 
     fn pause_overlay_modal_ok_rect(dialog: RenderRect) -> RenderRect {
@@ -32229,7 +32376,9 @@ impl DesktopLauncher {
                 }
                 for (toggle, rect) in self.pause_overlay_custom_rules_toggle_rects(scrolled_content)
                 {
-                    if rect.contains_point(point) && toggle.enabled(rules) {
+                    if rect.contains_point(point)
+                        && Self::pause_custom_rule_toggle_enabled(toggle, rules)
+                    {
                         return Some(DesktopPausedOverlayAction::TogglePauseCustomRule(toggle));
                     }
                 }
@@ -34917,10 +35066,40 @@ impl DesktopLauncher {
                     RenderRect::new(content.x + 16.0, y - 12.0, content.width - 32.0, 22.0),
                 ));
                 y -= 24.0;
+                if toggle == DesktopCustomRulesToggle::LimitMapArea {
+                    y -= CUSTOM_RULE_LIMIT_AREA_NUMBER_ROW_HEIGHT;
+                }
             }
             y -= 10.0;
         }
         rects
+    }
+
+    fn map_play_limit_area_number_rects(
+        &self,
+        content: RenderRect,
+    ) -> Vec<(DesktopLimitAreaNumber, RenderRect)> {
+        if !self.limit_area_number_rows_visible_for_query(false) {
+            return Vec::new();
+        }
+        let Some((_, toggle_row)) = self
+            .map_play_customize_toggle_rects(content)
+            .into_iter()
+            .find(|(toggle, _)| *toggle == DesktopCustomRulesToggle::LimitMapArea)
+        else {
+            return Vec::new();
+        };
+        let row = Self::custom_rules_limit_area_number_row_rect(toggle_row);
+        DesktopLimitAreaNumber::ALL
+            .into_iter()
+            .enumerate()
+            .map(|(field_index, number)| {
+                (
+                    number,
+                    Self::custom_rules_limit_area_number_field_rect(row, field_index),
+                )
+            })
+            .collect()
     }
 
     fn map_play_customize_number_row_rect(content: RenderRect, index: usize) -> RenderRect {
@@ -35741,6 +35920,24 @@ impl DesktopLauncher {
             self.map_play_rules = Some(rules);
             self.map_play_rules_error = None;
         }
+    }
+
+    fn adjust_map_play_limit_area_number(
+        &mut self,
+        index: usize,
+        number: DesktopLimitAreaNumber,
+        direction: i32,
+    ) {
+        let Some(map) = self.map_list_cards.get(index) else {
+            return;
+        };
+        let mut rules = self
+            .map_play_rules
+            .clone()
+            .unwrap_or_else(|| Self::map_play_rules_for_mode(map, self.map_play_selected_mode));
+        number.adjust(&mut rules, direction);
+        self.map_play_rules = Some(rules);
+        self.map_play_rules_error = None;
     }
 
     fn toggle_map_play_banned_content(
@@ -39011,6 +39208,26 @@ impl DesktopLauncher {
                             }
                             visible_policy_index += 1;
                         }
+                        if rules.limit_map_area {
+                            for (number, field) in self.map_play_limit_area_number_rects(content) {
+                                for (increase, direction) in [(false, -1), (true, 1)] {
+                                    if Self::custom_rules_limit_area_number_button_rect(
+                                        field, increase,
+                                    )
+                                    .contains_point(point)
+                                    {
+                                        return Some(DesktopMenuRouteShellAction::MapCard(
+                                            DesktopMapCardAction::new(
+                                                index,
+                                                DesktopMapCardActionKind::AdjustLimitAreaNumber(
+                                                    number, direction,
+                                                ),
+                                            ),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
                         for (toggle, rect) in self.map_play_customize_toggle_rects(content) {
                             if rect.contains_point(point) && toggle.enabled(&rules) {
                                 return Some(DesktopMenuRouteShellAction::MapCard(
@@ -41238,6 +41455,14 @@ impl DesktopLauncher {
                             self.map_play_banned_content_dialog = None;
                             self.map_play_weather_dialog_open = false;
                         }
+                        DesktopMapCardActionKind::AdjustLimitAreaNumber(number, direction) => {
+                            self.adjust_map_play_limit_area_number(action.index, number, direction);
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                            self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
+                            self.map_play_weather_dialog_open = false;
+                        }
                         DesktopMapCardActionKind::FocusCustomRulesSearch => {
                             self.map_play_customize_dialog_open = true;
                             self.map_play_custom_rules_search_focused = true;
@@ -42456,7 +42681,10 @@ impl DesktopLauncher {
             DesktopPausedOverlayAction::TogglePauseCustomRule(toggle) => {
                 self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
                     && self.pause_overlay_custom_rules_visible()
-                    && toggle.enabled(self.pause_custom_rules_current_rules())
+                    && Self::pause_custom_rule_toggle_enabled(
+                        toggle,
+                        self.pause_custom_rules_current_rules(),
+                    )
             }
             DesktopPausedOverlayAction::AdjustPauseCustomRuleNumber(number, _) => {
                 self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
@@ -47904,6 +48132,63 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_custom_rules_limit_area_number_fields(
+        &self,
+        pass: &mut RenderPass,
+        toggle_row: RenderRect,
+        rules: &Rules,
+        editable: bool,
+        layer: f32,
+    ) {
+        let row = Self::custom_rules_limit_area_number_row_rect(toggle_row);
+        let enabled = editable && rules.limit_map_area;
+        for (field_index, number) in DesktopLimitAreaNumber::ALL.into_iter().enumerate() {
+            let field = Self::custom_rules_limit_area_number_field_rect(row, field_index);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("button"),
+                field,
+                if enabled {
+                    [1.0, 1.0, 1.0, 0.30]
+                } else {
+                    [1.0, 1.0, 1.0, 0.12]
+                },
+                0.0,
+                layer + field_index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                format!("{}: {}", number.label(), number.value(rules)),
+                RenderPoint::new(field.x + 5.0, field.center().y),
+                if enabled {
+                    [0.82, 0.91, 0.98, 1.0]
+                } else {
+                    [0.54, 0.60, 0.66, 0.76]
+                },
+                8.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.001 + field_index as f32 * 0.001,
+            ));
+            self.push_settings_text_button_enabled(
+                pass,
+                Self::custom_rules_limit_area_number_button_rect(field, false),
+                "-",
+                None,
+                layer + 0.002 + field_index as f32 * 0.001,
+                enabled,
+            );
+            self.push_settings_text_button_enabled(
+                pass,
+                Self::custom_rules_limit_area_number_button_rect(field, true),
+                "+",
+                None,
+                layer + 0.003 + field_index as f32 * 0.001,
+                enabled,
+            );
+        }
+    }
+
     fn push_pause_custom_rules_number_rows(
         &self,
         pass: &mut RenderPass,
@@ -48217,6 +48502,16 @@ impl DesktopLauncher {
                     layer + 0.012 + row_index as f32 * 0.001,
                 ));
                 y -= 24.0;
+                if toggle == DesktopCustomRulesToggle::LimitMapArea {
+                    self.push_custom_rules_limit_area_number_fields(
+                        pass,
+                        row_rect,
+                        &rules,
+                        true,
+                        layer + 0.018 + row_index as f32 * 0.001,
+                    );
+                    y -= CUSTOM_RULE_LIMIT_AREA_NUMBER_ROW_HEIGHT;
+                }
                 row_index += 1;
             }
             y -= 10.0;
@@ -57593,7 +57888,7 @@ impl DesktopLauncher {
             ));
             y -= 20.0;
             for toggle in visible_toggles {
-                let enabled = toggle.enabled(rules);
+                let enabled = Self::pause_custom_rule_toggle_enabled(toggle, rules);
                 let value = toggle.value(rules);
                 let row_rect = RenderRect::new(
                     scrolled_content.x + 16.0,
@@ -57634,6 +57929,16 @@ impl DesktopLauncher {
                     layer + 0.012 + row_index as f32 * 0.001,
                 ));
                 y -= 24.0;
+                if toggle == DesktopCustomRulesToggle::LimitMapArea {
+                    self.push_custom_rules_limit_area_number_fields(
+                        pass,
+                        row_rect,
+                        rules,
+                        false,
+                        layer + 0.018 + row_index as f32 * 0.001,
+                    );
+                    y -= CUSTOM_RULE_LIMIT_AREA_NUMBER_ROW_HEIGHT;
+                }
                 row_index += 1;
             }
             y -= 10.0;
@@ -66103,6 +66408,7 @@ mod tests {
     #[test]
     fn desktop_launcher_routes_minimap_overlay_plan_into_minimap_render_pass() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
         launcher.game_state.world.resize(16, 16);
         launcher.texture_atlas = TextureAtlasPlan::from_virtual_source_paths([
             "sprites/dagger.png",
@@ -80366,6 +80672,77 @@ displayName: "Alpha Pack"
     }
 
     #[test]
+    fn desktop_launcher_paused_world_overlay_custom_rules_limit_area_disabled_like_java_game_state()
+    {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.game_state.rules.allow_edit_rules = true;
+        launcher.game_state.rules.limit_map_area = false;
+        launcher.game_state.rules.limit_x = 3;
+        launcher.game_state.rules.limit_y = 4;
+        launcher.game_state.rules.limit_width = 5;
+        launcher.game_state.rules.limit_height = 6;
+        launcher.runtime.state.rules = launcher.game_state.rules.copy();
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CustomRules);
+        launcher.pause_custom_rules_search = "limit".into();
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = launcher.pause_overlay_panel_for_current_state(viewport);
+        let dialog = DesktopLauncher::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let content = DesktopLauncher::pause_overlay_custom_rules_content_rect(dialog);
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"limit"));
+        assert!(texts.contains(&"□ Limit Map Area"));
+        assert!(texts.iter().any(|text| text.contains("x: 3")));
+
+        let limit_toggle = launcher
+            .pause_overlay_custom_rules_toggle_rects(content)
+            .into_iter()
+            .find(|(toggle, _)| *toggle == super::DesktopCustomRulesToggle::LimitMapArea)
+            .map(|(_, rect)| rect.center())
+            .expect("pause limitarea row should be visible under search");
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, limit_toggle.x, limit_toggle.y),
+            None,
+            "Java disables limitarea while state.isGame()"
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::TogglePauseCustomRule(
+                super::DesktopCustomRulesToggle::LimitMapArea,
+            ),
+        );
+        assert_eq!(
+            launcher
+                .pause_custom_rules_edit
+                .as_ref()
+                .map(|rules| rules.limit_map_area),
+            Some(false)
+        );
+        assert_eq!(
+            launcher
+                .pause_limit_area_number_rects(content)
+                .iter()
+                .map(|(number, _)| *number)
+                .collect::<Vec<_>>(),
+            super::DesktopLimitAreaNumber::ALL
+        );
+    }
+
+    #[test]
     fn desktop_launcher_paused_world_overlay_custom_rules_extended_checks_edit_rules() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.game_state.world.resize(16, 16);
@@ -84867,6 +85244,126 @@ displayName: "Alpha Pack"
                 )
             )),
             "Weather hit testing should use the same scrolled card rects as rendering"
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_map_play_custom_rules_limit_area_edits_like_java() {
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), "Limit Area".to_string());
+        let mut map =
+            MapDescriptor::new("maps/custom/limit-area.msav", 180, 180, tags, true, 1, 157);
+        map.spawns = 1;
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.map_list_cards = vec![map];
+        launcher.dispatch_menu_action(MenuButtonRole::CustomGame);
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenPlay),
+        ));
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::Customize),
+        ));
+
+        let mut rules = DesktopLauncher::map_play_rules_for_mode(
+            &launcher.map_list_cards[0],
+            launcher.map_play_selected_mode,
+        );
+        rules.limit_map_area = false;
+        rules.limit_x = 7;
+        rules.limit_y = 8;
+        rules.limit_width = 9;
+        rules.limit_height = 10;
+        launcher.map_play_rules = Some(rules);
+        launcher.map_play_custom_rules_search = "limit".into();
+
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::CustomGame,
+        );
+        let dialog = DesktopLauncher::map_card_dialog_rect_for_panel(panel);
+        let child = DesktopLauncher::map_play_child_dialog_rect(dialog);
+        let content = DesktopLauncher::map_play_customize_content_rect(child);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("limit area custom rules should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"limit"));
+        assert!(texts.contains(&"□ Limit Map Area"));
+        assert!(texts.iter().any(|text| text.contains("x: 7")));
+
+        let limit_toggle = launcher
+            .map_play_customize_toggle_rects(content)
+            .into_iter()
+            .find(|(toggle, _)| *toggle == super::DesktopCustomRulesToggle::LimitMapArea)
+            .map(|(_, rect)| rect.center())
+            .expect("filtered limitarea row should be visible");
+        let toggle_action =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::ToggleCustomRule(
+                    super::DesktopCustomRulesToggle::LimitMapArea,
+                ),
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                limit_toggle.x,
+                limit_toggle.y
+            ),
+            Some(toggle_action)
+        );
+        launcher.dispatch_menu_route_shell_action(toggle_action);
+        assert_eq!(
+            launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| rules.limit_map_area),
+            Some(true)
+        );
+
+        let x_field = launcher
+            .map_play_limit_area_number_rects(content)
+            .into_iter()
+            .find(|(number, _)| *number == super::DesktopLimitAreaNumber::X)
+            .map(|(_, rect)| rect)
+            .expect("limitarea x field should be visible");
+        let x_plus =
+            DesktopLauncher::custom_rules_limit_area_number_button_rect(x_field, true).center();
+        let increase_x =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::AdjustLimitAreaNumber(
+                    super::DesktopLimitAreaNumber::X,
+                    1,
+                ),
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, x_plus.x, x_plus.y),
+            Some(increase_x)
+        );
+        launcher.dispatch_menu_route_shell_action(increase_x);
+        assert_eq!(
+            launcher.map_play_rules.as_ref().map(|rules| (
+                rules.limit_x,
+                rules.limit_y,
+                rules.limit_width,
+                rules.limit_height
+            )),
+            Some((8, 8, 9, 10))
         );
     }
 
