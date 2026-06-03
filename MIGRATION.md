@@ -17,6 +17,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 797. MenuRenderer UI layout cache 对齐 Java retained 菜单结构
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **93.1%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容、性能收口与所有子菜单接近原版。
+- Java 对照：
+  - `MenuFragment.build(...)` 将主菜单挂入 Scene/WidgetGroup，desktop/mobile layout 只在构建、resize 或 submenu 结构变化时重排；
+  - `buttons(...)`/`Actions.alpha(...)` 通过按钮状态和动作更新 hover/pressed/selected/submenu alpha，不应因为 alpha 动画每帧重建整棵按钮表；
+  - `UI.update()` 每帧执行 `Core.scene.act()`/`Core.scene.draw()`，属于 retained-mode UI 更新/绘制。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增 `MenuUiLayoutCacheKey` 与 `MenuUiLayoutCache`；
+    - `MenuRendererState` 新增 `ui_layout_cache` 和 `ui_layout_cache_rebuilds`；
+    - `render_plan(...)` 改为通过 `cached_ui_plan(...)` 复用静态按钮 layout，再叠加当前 `submenu_alpha`、`active_root`、hover/pressed 初始态；
+    - layout key 覆盖 viewport、scene margins、mobile/workshop/ios、submenu 可见性与 layout root、custom buttons；`delta`、`submenu_alpha` 动画值、hover/pressed 不进入 layout rebuild 条件；
+    - 保留 `ui_plan(&self, ...)` 的无缓存路径，用于只读 hit-test/外部计算，不强制改所有调用链。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_renderer_state_reuses_ui_layout_cache_when_only_submenu_alpha_changes --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_ui_plan_desktop_matches_upstream_main_and_submenu_geometry --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_renderer_state_fades_out_and_in_current_desktop_submenu_like_java_actions --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_ui_plan_hovered_buttons_emit_java_flat_over_drawable --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_ui_plan_pressed_buttons_emit_java_flat_down_drawable --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --release --features opengl-native-runtime`
+  - `MINDUSTRY_DESKTOP_TRACE_SUMMARY=1 ./target/release/mindustry-desktop.exe` 短跑核对：后续帧仍保持 `texture_upload_commands=0`、`sprite_mesh_upload_commands=0`、`draw_commands=79`、`gl_error=0x0000`。
+- 仍未完成：
+  - 还需要继续把 `MenuUiPlan::to_render_commands()` 的静态 render command 子序列缓存下来，进一步减少每帧 command/String/Vec churn；
+  - 真实 Java Scene/Table retained tree 尚未完整迁移，当前仍是 renderer plan 层的缓存边界；
+  - 所有子菜单的 UI 细节、输入状态、字体/图标 atlas 合并、联机兼容和完整可玩性仍需继续推进。
+
 ## 796. OpenGL sprite mesh 资源 key 按 batch 状态稳定化
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

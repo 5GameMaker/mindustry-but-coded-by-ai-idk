@@ -962,6 +962,26 @@ pub struct MenuUiPlan {
     pub buttons: Vec<MenuButtonPlan>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct MenuUiLayoutCacheKey {
+    graphics_width: f32,
+    graphics_height: f32,
+    scene_margin_top: f32,
+    scene_margin_bottom: f32,
+    mobile: bool,
+    desktop_workshop_enabled: bool,
+    mobile_ios: bool,
+    submenu_visible: bool,
+    submenu_layout_root: Option<MenuButtonRole>,
+    custom_buttons: Vec<MenuCustomButton>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct MenuUiLayoutCache {
+    key: MenuUiLayoutCacheKey,
+    plan: MenuUiPlan,
+}
+
 impl MenuUiPlan {
     pub fn with_hovered_role(mut self, hovered_role: Option<MenuButtonRole>) -> Self {
         for button in &mut self.buttons {
@@ -1753,6 +1773,8 @@ pub struct MenuRendererState {
     submenu_animation_from_alpha: f32,
     submenu_animation_elapsed: f32,
     pub custom_buttons: Vec<MenuCustomButton>,
+    ui_layout_cache: Option<MenuUiLayoutCache>,
+    pub ui_layout_cache_rebuilds: usize,
 }
 
 impl MenuRendererState {
@@ -1776,6 +1798,8 @@ impl MenuRendererState {
             submenu_animation_from_alpha: 0.0,
             submenu_animation_elapsed: 0.0,
             custom_buttons: Vec::new(),
+            ui_layout_cache: None,
+            ui_layout_cache_rebuilds: 0,
         }
     }
 
@@ -1818,6 +1842,8 @@ impl MenuRendererState {
             height: input.graphics_height,
         });
 
+        let ui = self.cached_ui_plan(input);
+
         MenuFramePlan {
             camera_x,
             camera_y,
@@ -1827,18 +1853,7 @@ impl MenuRendererState {
             tile_size: self.config.tile_size,
             world: self.world.clone(),
             commands,
-            ui: menu_ui_plan(
-                input,
-                self.config.mobile,
-                self.selected_root,
-                self.active_root,
-                self.submenu_root,
-                self.submenu_alpha,
-                self.submenu_target_alpha,
-                self.config.desktop_workshop_enabled,
-                self.config.mobile_ios,
-                &self.custom_buttons,
-            ),
+            ui,
         }
     }
 
@@ -1898,6 +1913,71 @@ impl MenuRendererState {
             self.config.mobile_ios,
             &self.custom_buttons,
         )
+    }
+
+    fn ui_layout_cache_key(&self, input: MenuFrameInput) -> MenuUiLayoutCacheKey {
+        let submenu_visible =
+            self.submenu_alpha > f32::EPSILON || self.submenu_target_alpha > f32::EPSILON;
+        let submenu_layout_root = if !self.config.mobile && submenu_visible {
+            Some(self.submenu_root.unwrap_or(self.selected_root))
+        } else {
+            None
+        };
+        MenuUiLayoutCacheKey {
+            graphics_width: input.graphics_width,
+            graphics_height: input.graphics_height,
+            scene_margin_top: input.scene_margin_top,
+            scene_margin_bottom: input.scene_margin_bottom,
+            mobile: self.config.mobile,
+            desktop_workshop_enabled: self.config.desktop_workshop_enabled,
+            mobile_ios: self.config.mobile_ios,
+            submenu_visible,
+            submenu_layout_root,
+            custom_buttons: self.custom_buttons.clone(),
+        }
+    }
+
+    fn cached_ui_plan(&mut self, input: MenuFrameInput) -> MenuUiPlan {
+        let key = self.ui_layout_cache_key(input);
+        let should_rebuild = self
+            .ui_layout_cache
+            .as_ref()
+            .map_or(true, |cache| cache.key != key);
+        if should_rebuild {
+            let layout_submenu_alpha = if key.submenu_visible { 1.0 } else { 0.0 };
+            let layout_submenu_target_alpha = layout_submenu_alpha;
+            let plan = menu_ui_plan(
+                input,
+                self.config.mobile,
+                self.selected_root,
+                None,
+                key.submenu_layout_root,
+                layout_submenu_alpha,
+                layout_submenu_target_alpha,
+                self.config.desktop_workshop_enabled,
+                self.config.mobile_ios,
+                &self.custom_buttons,
+            );
+            self.ui_layout_cache = Some(MenuUiLayoutCache {
+                key: key.clone(),
+                plan,
+            });
+            self.ui_layout_cache_rebuilds += 1;
+        }
+
+        let mut plan = self
+            .ui_layout_cache
+            .as_ref()
+            .expect("menu UI layout cache should be populated before use")
+            .plan
+            .clone();
+        plan.submenu_alpha = self.submenu_alpha.clamp(0.0, 1.0);
+        for button in &mut plan.buttons {
+            button.selected = self.active_root == Some(button.role);
+            button.hovered = false;
+            button.pressed = false;
+        }
+        plan
     }
 
     pub fn hit_test_ui(&self, input: MenuFrameInput, x: f32, y: f32) -> Option<MenuButtonRole> {
@@ -3820,6 +3900,70 @@ mod tests {
             .buttons
             .iter()
             .any(|button| button.role == MenuButtonRole::Campaign));
+    }
+
+    #[test]
+    fn menu_renderer_state_reuses_ui_layout_cache_when_only_submenu_alpha_changes() {
+        fn static_button_layout(
+            plan: &MenuUiPlan,
+        ) -> Vec<(MenuButtonRole, String, Option<String>, RenderRect, bool)> {
+            plan.buttons
+                .iter()
+                .map(|button| {
+                    (
+                        button.role,
+                        button.label.clone(),
+                        button.icon_name.clone(),
+                        button.rect,
+                        button.submenu,
+                    )
+                })
+                .collect()
+        }
+
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+        let input = |delta| MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
+            scl4: 4.0,
+            delta,
+        };
+
+        assert!(state.select_desktop_root(MenuButtonRole::Play));
+        let opened = state.render_plan(input(0.0));
+        assert_eq!(state.ui_layout_cache_rebuilds, 1);
+        assert_eq!(opened.ui.submenu_alpha, 0.0);
+        assert!(opened
+            .ui
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Campaign));
+
+        let fading = state.render_plan(input(MENU_SUBMENU_FADE_IN_SECONDS * 0.5));
+        assert_eq!(
+            state.ui_layout_cache_rebuilds, 1,
+            "Java MenuFragment keeps the submenu table structure while Actions.alpha changes"
+        );
+        assert!((fading.ui.submenu_alpha - 0.5).abs() < 0.0001);
+        assert_eq!(
+            static_button_layout(&opened.ui),
+            static_button_layout(&fading.ui)
+        );
+
+        let hovered = fading
+            .ui
+            .clone()
+            .with_hovered_role(Some(MenuButtonRole::Campaign));
+        assert_eq!(
+            static_button_layout(&fading.ui),
+            static_button_layout(&hovered)
+        );
+        assert!(hovered
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Campaign && button.hovered));
     }
 
     #[test]
