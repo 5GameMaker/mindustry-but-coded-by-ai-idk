@@ -74174,14 +74174,18 @@ repo: "Beta/Override"
                 )
             })
             .expect("menu pass should include Java MenuRenderer floor/background spans");
+        let localized_play_text = launcher.localize_bundle_markup_text("@play");
         let first_button_index = commands
             .iter()
-            .position(|command| {
-                matches!(
-                    command,
-                    RenderCommand::DrawText { text, .. }
-                        if text.eq_ignore_ascii_case("play") || text == "开始游戏"
-                )
+            .position(|command| match command {
+                RenderCommand::DrawText { text, .. } => {
+                    text.as_str() == localized_play_text.as_str()
+                        || text.as_str() == MenuButtonRole::Play.label()
+                        || text.eq_ignore_ascii_case("play")
+                        || text == "开始游戏"
+                }
+                RenderCommand::DrawSprite { symbol, .. } => symbol == "menu-label-zh-play",
+                _ => false,
             })
             .expect("menu pass should still render menu buttons");
 

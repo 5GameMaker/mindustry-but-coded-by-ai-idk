@@ -1173,7 +1173,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo check -p mindustry-desktop --features opengl-native-runtime`
   - `git diff --check`
 - 注意：
-  - `desktop_launcher_menu_frame_draws_java_world_background_before_buttons` 当前在本地找不到 `Play/开始游戏` 文本而失败，和本轮 synthetic cache 改动无直接关联；后续需要单独审查菜单文本/Java world pass 测试稳定性。
+  - `desktop_launcher_menu_frame_draws_java_world_background_before_buttons` 已修正为同时识别本地化 `@play` 文本、`MenuButtonRole::Play.label()` 与 `menu-label-zh-play` sprite，避免真实菜单 label sprite 路径被误判为未渲染按钮。
 - 仍未完成：
   - 需要继续把更多菜单/UI 文本布局、按钮列表和 atlas batching 做缓存/批处理；
   - Mods Browser 仍需继续对齐 Java 的远端 listing、选择弹窗与真实 release 列表；
