@@ -17,6 +17,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 866. Mods archive-backed discovery 接入 zip/jar
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **93.98%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `core/src/mindustry/modsys/mod.rs`
+    - 对照 Java `Mods.load()` 的候选过滤：本地 mods 目录现在除普通目录外，也会发现 `.zip/.jar`；
+    - 新增轻量 `ModArchiveEntry` 与 zip central directory parser，支持 stored/deflate 条目，统一容器内路径为 `/`；
+    - 对 archive entry 列表实现 Java `resolveRoot(...)` 的“单顶层目录自动展开”语义；
+    - 新增 `ModResourceDirectoryPlan::from_archive_file(...)`，从 archive 内读取 `mod/plugin` metadata、构造 `FileTree`、扫描 `sprites/**` 与 `sprites-override/**`，并接入现有 `ModResourcePlan::from_file_paths(...)`；
+    - `ModResourceContainerPlan::discover_from_mods_directory(...)` 增加 archive 分支，导入闭环里的 `.zip/.jar` 不再只是列表占位，而会进入 metadata/resource discovery 主链路。
+  - `desktop/src/lib.rs`
+    - 新增桌面贯通测试，验证 `merge_mods_directory_arg_into_texture_atlas()` 能发现 archive-backed mod 并读取 zip 内 metadata。
+- 已验证：
+  - `RUSTFLAGS='-C debuginfo=0' cargo check -j 1 -p mindustry-core --lib`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_archive_discovery_reads_zip_metadata_like_java_mods_load -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop mods -- --nocapture`
+- 验证限制：
+  - `mindustry-core` lib-test 编译阶段触发历史性 OOM/栈崩，未作为本轮阻塞；生产 core lib check 与 desktop 主链路测试均通过。
+- 后续不可漏：
+  - archive 内 PNG 目前仍经相对路径进入 sprite plan，尺寸/真实纹理读取会按现有 fallback 处理；后续应补 `png_dimensions_from_bytes` 或 archive-backed texture source，使 zip/jar 内 sprite 能完整按原图尺寸进入 atlas。
+
 ## 865. ModsDialog 本地文件导入选择结果落地
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。

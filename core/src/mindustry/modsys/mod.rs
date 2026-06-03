@@ -9,8 +9,10 @@ use crate::mindustry::graphics::{
     png_dimensions_from_path, MultiPackerPlan, PageType, RegionRequest, TextureAtlasRegionSource,
     TextureScale,
 };
+use flate2::read::DeflateDecoder;
 use std::{
-    fs, io,
+    fs,
+    io::{self, Read},
     path::{Path, PathBuf},
 };
 
@@ -129,6 +131,236 @@ impl ModMetadata {
             .as_deref()
             .is_some_and(|steam_id| !steam_id.trim().is_empty())
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ModArchiveEntry {
+    name: String,
+    data: Vec<u8>,
+    directory: bool,
+}
+
+fn is_mod_archive_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("zip") || extension.eq_ignore_ascii_case("jar")
+        })
+}
+
+fn archive_mod_name_from_path(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("archive-mod")
+        .replace([':', ' '], "_")
+}
+
+fn mod_zip_u16(bytes: &[u8], offset: usize) -> io::Result<u16> {
+    let chunk = bytes
+        .get(offset..offset + 2)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "truncated zip u16"))?;
+    Ok(u16::from_le_bytes([chunk[0], chunk[1]]))
+}
+
+fn mod_zip_u32(bytes: &[u8], offset: usize) -> io::Result<u32> {
+    let chunk = bytes
+        .get(offset..offset + 4)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "truncated zip u32"))?;
+    Ok(u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+}
+
+fn find_mod_zip_eocd(bytes: &[u8]) -> Option<usize> {
+    if bytes.len() < 22 {
+        return None;
+    }
+    let min = bytes.len().saturating_sub(65_535 + 22);
+    (min..=bytes.len() - 22)
+        .rev()
+        .find(|&index| bytes.get(index..index + 4) == Some(&[0x50, 0x4b, 0x05, 0x06]))
+}
+
+fn decode_mod_zip_entry(method: u16, data: &[u8], uncompressed_size: usize) -> io::Result<Vec<u8>> {
+    match method {
+        0 => Ok(data.to_vec()),
+        8 => {
+            let mut decoder = DeflateDecoder::new(data);
+            let mut out = Vec::with_capacity(uncompressed_size);
+            decoder.read_to_end(&mut out)?;
+            Ok(out)
+        }
+        method => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported zip method {method}"),
+        )),
+    }
+}
+
+fn read_mod_archive_entries(path: impl AsRef<Path>) -> io::Result<Vec<ModArchiveEntry>> {
+    let bytes = fs::read(path)?;
+    let eocd = find_mod_zip_eocd(&bytes)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing zip end record"))?;
+    let count = mod_zip_u16(&bytes, eocd + 10)? as usize;
+    let central_offset = mod_zip_u32(&bytes, eocd + 16)? as usize;
+    let mut entries = Vec::new();
+    let mut pos = central_offset;
+
+    for _ in 0..count {
+        if mod_zip_u32(&bytes, pos)? != 0x0201_4b50 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid zip central directory",
+            ));
+        }
+        let method = mod_zip_u16(&bytes, pos + 10)?;
+        let compressed_size = mod_zip_u32(&bytes, pos + 20)? as usize;
+        let uncompressed_size = mod_zip_u32(&bytes, pos + 24)? as usize;
+        let name_len = mod_zip_u16(&bytes, pos + 28)? as usize;
+        let extra_len = mod_zip_u16(&bytes, pos + 30)? as usize;
+        let comment_len = mod_zip_u16(&bytes, pos + 32)? as usize;
+        let local_offset = mod_zip_u32(&bytes, pos + 42)? as usize;
+        let name_start = pos + 46;
+        let name_end = name_start + name_len;
+        let name = std::str::from_utf8(
+            bytes
+                .get(name_start..name_end)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "truncated zip name"))?,
+        )
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "zip name is not utf8"))?;
+        let normalized_name = normalize_mod_resource_path(name.to_string());
+
+        if mod_zip_u32(&bytes, local_offset)? != 0x0403_4b50 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid zip local header",
+            ));
+        }
+        let local_name_len = mod_zip_u16(&bytes, local_offset + 26)? as usize;
+        let local_extra_len = mod_zip_u16(&bytes, local_offset + 28)? as usize;
+        let data_start = local_offset + 30 + local_name_len + local_extra_len;
+        let data_end = data_start + compressed_size;
+        let compressed = bytes
+            .get(data_start..data_end)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "truncated zip data"))?;
+        let directory = normalized_name.ends_with('/');
+        let data = if directory {
+            Vec::new()
+        } else {
+            decode_mod_zip_entry(method, compressed, uncompressed_size)?
+        };
+        entries.push(ModArchiveEntry {
+            name: normalized_name,
+            data,
+            directory,
+        });
+        pos = name_end + extra_len + comment_len;
+    }
+
+    Ok(entries)
+}
+
+fn mod_archive_root_prefix(entries: &[ModArchiveEntry]) -> String {
+    let mut top_level = Vec::<String>::new();
+    for entry in entries {
+        let name = entry.name.trim_matches('/');
+        if name.is_empty() || name == ".DS_Store" {
+            continue;
+        }
+        let Some(first) = name.split('/').next().filter(|segment| !segment.is_empty()) else {
+            continue;
+        };
+        if !top_level.iter().any(|known| known == first) {
+            top_level.push(first.to_string());
+        }
+    }
+
+    if top_level.len() == 1 {
+        let prefix = format!("{}/", top_level[0]);
+        if entries.iter().any(|entry| entry.name.starts_with(&prefix)) {
+            return prefix;
+        }
+    }
+
+    String::new()
+}
+
+fn mod_archive_relative_name<'a>(entry: &'a ModArchiveEntry, prefix: &str) -> Option<&'a str> {
+    let relative = entry
+        .name
+        .strip_prefix(prefix)
+        .unwrap_or(entry.name.as_str());
+    (!relative.is_empty()).then_some(relative)
+}
+
+fn mod_archive_top_level_folder(name: &str) -> Option<std::ffi::OsString> {
+    name.split('/')
+        .next()
+        .filter(|segment| !segment.is_empty())
+        .map(std::ffi::OsString::from)
+}
+
+fn mod_metadata_from_archive_entries(
+    fallback_name: &str,
+    entries: &[ModArchiveEntry],
+) -> io::Result<ModMetadata> {
+    let prefix = mod_archive_root_prefix(entries);
+    for file_name in ["mod.hjson", "mod.json", "plugin.hjson", "plugin.json"] {
+        let full_name = format!("{prefix}{file_name}");
+        if let Some(entry) = entries
+            .iter()
+            .find(|entry| !entry.directory && entry.name == full_name)
+        {
+            let source = String::from_utf8_lossy(&entry.data);
+            return Ok(ModMetadata::from_source_text(
+                fallback_name,
+                Some(file_name),
+                source.as_ref(),
+            ));
+        }
+    }
+
+    Ok(ModMetadata {
+        name: Some(fallback_name.to_string()),
+        ..ModMetadata::default()
+    })
+}
+
+fn mod_file_tree_from_archive_entries(entries: &[ModArchiveEntry]) -> FileTree {
+    let prefix = mod_archive_root_prefix(entries);
+    let mut tree = FileTree::new();
+    for entry in entries.iter().filter(|entry| !entry.directory) {
+        let Some(relative) = mod_archive_relative_name(entry, &prefix) else {
+            continue;
+        };
+        let Some(top) = mod_archive_top_level_folder(relative) else {
+            continue;
+        };
+        if is_special_top_level_folder(top.as_os_str()) {
+            continue;
+        }
+        let path = normalize_mod_resource_path(relative.to_string());
+        tree.add_file(path.clone(), AssetFile::new(path, true));
+    }
+    tree
+}
+
+fn scan_mod_sprite_paths_from_archive_entries(entries: &[ModArchiveEntry]) -> Vec<String> {
+    let prefix = mod_archive_root_prefix(entries);
+    let mut paths = entries
+        .iter()
+        .filter(|entry| !entry.directory)
+        .filter_map(|entry| mod_archive_relative_name(entry, &prefix))
+        .map(|relative| normalize_mod_resource_path(relative.to_string()))
+        .filter(|relative| {
+            relative.to_ascii_lowercase().ends_with(".png")
+                && relative
+                    .split('/')
+                    .any(|segment| matches!(segment, "sprites" | "sprites-override"))
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -565,6 +797,29 @@ impl ModResourceDirectoryPlan {
             resource_plan,
         })
     }
+
+    pub fn from_archive_file(
+        mod_name: impl Into<String>,
+        headless: bool,
+        archive: impl AsRef<Path>,
+    ) -> io::Result<Self> {
+        let mod_name = mod_name.into();
+        let archive = archive.as_ref();
+        let entries = read_mod_archive_entries(archive)?;
+        let meta = mod_metadata_from_archive_entries(&mod_name, &entries)?;
+        let file_tree = mod_file_tree_from_archive_entries(&entries);
+        let sprite_paths = scan_mod_sprite_paths_from_archive_entries(&entries);
+        let resource_plan =
+            ModResourcePlan::from_file_paths(mod_name.clone(), headless, sprite_paths);
+
+        Ok(Self {
+            mod_name,
+            root: archive.to_path_buf(),
+            meta,
+            file_tree,
+            resource_plan,
+        })
+    }
 }
 
 /// `data/mods` 容器级纯数据 discovery 结果。
@@ -595,6 +850,13 @@ impl ModResourceContainerPlan {
         for entry in entries {
             let path = entry.path();
             let folder = entry.file_name();
+            if path.is_file() && is_mod_archive_file(&path) {
+                let mod_name = archive_mod_name_from_path(&path);
+                mods.push(ModResourceDirectoryPlan::from_archive_file(
+                    mod_name, headless, path,
+                )?);
+                continue;
+            }
             if !path.is_dir() || is_skipped_mod_container_entry(&folder) {
                 continue;
             }
@@ -1481,6 +1743,76 @@ mod tests {
             .join("outer")
     }
 
+    fn test_zip_push_u16(out: &mut Vec<u8>, value: u16) {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn test_zip_push_u32(out: &mut Vec<u8>, value: u32) {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn stored_zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut central = Vec::<(String, u32, u32, u32, bool)>::new();
+        for (name, data) in entries {
+            let offset = out.len() as u32;
+            let directory = name.ends_with('/');
+            let crc = if directory { 0 } else { crc32fast::hash(data) };
+            test_zip_push_u32(&mut out, 0x0403_4b50);
+            test_zip_push_u16(&mut out, 20);
+            test_zip_push_u16(&mut out, 0);
+            test_zip_push_u16(&mut out, 0);
+            test_zip_push_u16(&mut out, 0);
+            test_zip_push_u16(&mut out, 0);
+            test_zip_push_u32(&mut out, crc);
+            test_zip_push_u32(&mut out, data.len() as u32);
+            test_zip_push_u32(&mut out, data.len() as u32);
+            test_zip_push_u16(&mut out, name.len() as u16);
+            test_zip_push_u16(&mut out, 0);
+            out.extend_from_slice(name.as_bytes());
+            out.extend_from_slice(data);
+            central.push((
+                (*name).to_string(),
+                crc,
+                data.len() as u32,
+                offset,
+                directory,
+            ));
+        }
+
+        let central_offset = out.len() as u32;
+        for (name, crc, size, offset, directory) in &central {
+            test_zip_push_u32(&mut out, 0x0201_4b50);
+            test_zip_push_u16(&mut out, 20);
+            test_zip_push_u16(&mut out, 20);
+            test_zip_push_u16(&mut out, 0);
+            test_zip_push_u16(&mut out, 0);
+            test_zip_push_u16(&mut out, 0);
+            test_zip_push_u16(&mut out, 0);
+            test_zip_push_u32(&mut out, *crc);
+            test_zip_push_u32(&mut out, *size);
+            test_zip_push_u32(&mut out, *size);
+            test_zip_push_u16(&mut out, name.len() as u16);
+            test_zip_push_u16(&mut out, 0);
+            test_zip_push_u16(&mut out, 0);
+            test_zip_push_u16(&mut out, 0);
+            test_zip_push_u16(&mut out, 0);
+            test_zip_push_u32(&mut out, if *directory { 0x0010_0000 } else { 0 });
+            test_zip_push_u32(&mut out, *offset);
+            out.extend_from_slice(name.as_bytes());
+        }
+        let central_size = out.len() as u32 - central_offset;
+        test_zip_push_u32(&mut out, 0x0605_4b50);
+        test_zip_push_u16(&mut out, 0);
+        test_zip_push_u16(&mut out, 0);
+        test_zip_push_u16(&mut out, central.len() as u16);
+        test_zip_push_u16(&mut out, central.len() as u16);
+        test_zip_push_u32(&mut out, central_size);
+        test_zip_push_u32(&mut out, central_offset);
+        test_zip_push_u16(&mut out, 0);
+        out
+    }
+
     #[test]
     fn mod_resource_plan_to_texture_atlas_pipeline_reads_real_png_dimensions() {
         let path = temp_png_path("mod-resource-plan");
@@ -1770,6 +2102,112 @@ steamID: "1234567890"
         );
 
         assert_eq!(container.mods.len(), 2);
+        let _ = std::fs::remove_dir_all(&outer_root);
+    }
+
+    #[test]
+    fn mod_resource_directory_plan_reads_archive_backed_mod_like_java_zipfi() {
+        let outer_root = temp_mod_root("mod-archive-plan");
+        std::fs::create_dir_all(&outer_root).unwrap();
+        let archive = outer_root.join("Archive Mod.zip");
+        let router_png = minimal_png_bytes(16, 16);
+        let icon_png = minimal_png_bytes(32, 32);
+        let bytes = stored_zip_bytes(&[
+            (
+                "example-pack/mod.hjson",
+                br#"
+name: archive-inner
+displayName: "Archive Pack"
+author: "Zip Tester"
+repo: "Anon/archive"
+"#,
+            ),
+            ("example-pack/assets/data.txt", b"data"),
+            ("example-pack/bundles/messages.properties", b"hello=world"),
+            ("example-pack/sprites/blocks/router.png", &router_png),
+            ("example-pack/sprites-override/ui/icon.png", &icon_png),
+        ]);
+        std::fs::write(&archive, bytes).unwrap();
+
+        let plan = ModResourceDirectoryPlan::from_archive_file("Archive Mod", false, &archive)
+            .expect("archive-backed mod should be discoverable");
+        assert_eq!(plan.mod_name, "Archive Mod");
+        assert_eq!(plan.root, archive);
+        assert_eq!(plan.meta.name.as_deref(), Some("archive-inner"));
+        assert_eq!(plan.meta.display_name.as_deref(), Some("Archive Pack"));
+        assert_eq!(plan.meta.author.as_deref(), Some("Zip Tester"));
+        assert_eq!(plan.meta.repo.as_deref(), Some("Anon/archive"));
+        assert_eq!(plan.meta.source_path.as_deref(), Some("mod.hjson"));
+        assert_eq!(plan.file_tree.file_count(), 1);
+        assert_eq!(
+            plan.file_tree.resolve("assets/data.txt"),
+            AssetFile::new("assets/data.txt", true)
+        );
+        assert_eq!(
+            plan.file_tree.get("bundles/messages.properties"),
+            AssetFile::missing("bundles/messages.properties")
+        );
+        assert_eq!(
+            plan.resource_plan.sprite_requests(),
+            vec![
+                SpritePackRequest {
+                    source_path: "sprites/blocks/router.png".into(),
+                    atlas_name: "Archive Mod-router".into(),
+                    page_hint: "sprites".into(),
+                    r#override: false,
+                    texture_scale: TextureScale::default(),
+                },
+                SpritePackRequest {
+                    source_path: "sprites-override/ui/icon.png".into(),
+                    atlas_name: "icon".into(),
+                    page_hint: "sprites-override".into(),
+                    r#override: true,
+                    texture_scale: TextureScale::default(),
+                },
+            ]
+        );
+
+        let _ = std::fs::remove_dir_all(&outer_root);
+    }
+
+    #[test]
+    fn mod_resource_container_plan_discovers_zip_and_jar_entries_like_java_mods_load() {
+        let outer_root = temp_mod_root("mod-container-archives");
+        std::fs::create_dir_all(&outer_root).unwrap();
+        std::fs::write(
+            outer_root.join("gamma.zip"),
+            stored_zip_bytes(&[("mod.hjson", b"name: gamma\ndisplayName: Gamma Zip\n")]),
+        )
+        .unwrap();
+        std::fs::write(
+            outer_root.join("delta.jar"),
+            stored_zip_bytes(&[(
+                "plugin.json",
+                br#"{ name: "delta", displayName: "Delta Jar" }"#,
+            )]),
+        )
+        .unwrap();
+        std::fs::write(outer_root.join("README.txt"), b"ignore").unwrap();
+
+        let container =
+            ModResourceContainerPlan::discover_from_mods_directory(&outer_root, false).unwrap();
+        assert_eq!(
+            container
+                .mods
+                .iter()
+                .map(|plan| plan.mod_name.clone())
+                .collect::<Vec<_>>(),
+            vec!["delta".to_string(), "gamma".to_string()]
+        );
+        assert_eq!(
+            container.mods[0].meta.display_name.as_deref(),
+            Some("Delta Jar")
+        );
+        assert_eq!(
+            container.mods[1].meta.display_name.as_deref(),
+            Some("Gamma Zip")
+        );
+
         let _ = std::fs::remove_dir_all(&outer_root);
     }
 
