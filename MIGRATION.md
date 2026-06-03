@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 793. Mods Browser 卡片动作收敛到 selection 弹窗
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **92.7%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容、性能收口与所有子菜单接近原版。
+- Java 对照：
+  - `ModsDialog.rebuildBrowser()` 中 browser listing 是整卡 `button(...)`，卡片内只展示 icon/name/installed/stars/version 兼容提示；
+  - `Add/Reinstall`、`Open GitHub`、`View Releases` 均位于点击卡片后的 `BaseDialog sel`，不是卡片 inline action。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 删除 Mods Browser 卡片上的 inline action 按钮渲染；
+    - 删除 inline action 的 hit-test，卡片命中统一派发 `OpenModsBrowserSelection(index)`；
+    - browser card 底部文案改为 description/repo/state 这类信息文本，不再混入 `Add/Reinstall` 动作标签；
+    - selection modal 标题改为纯 mod 名，正文只保留 description 与 author，不再额外绘制 repo 行；
+    - 更新 Mods Browser 回归测试，验证卡片只打开 selection，Add/Reinstall/View Releases 从 selection 按钮触发。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop mods_browser --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop mods_route --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - selection modal 的 portrait 两行按钮布局仍需继续贴近 Java `Core.graphics.isPortrait()` 分支；
+  - browser listing 仍未接远端 `modJsonURLs`/stars/lastUpdated 数据；
+  - releases 仍未完成真实 GitHub API fetching、empty/error、多 release 下载链路。
+
 ## 792. Mods Browser Java 风格选择弹窗
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
