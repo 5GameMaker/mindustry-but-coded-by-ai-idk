@@ -3158,6 +3158,14 @@ pub struct DesktopSettingsDataArchiveResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopSettingsCrashExportResult {
+    pub file: String,
+    pub crash_files: usize,
+    pub included_last_log: bool,
+    pub bytes: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct DesktopSettingsDataArchiveEntry {
     name: String,
     data: Option<Vec<u8>>,
@@ -18597,6 +18605,7 @@ pub struct DesktopLauncher {
     pub last_settings_open_data_folder_result: Option<bool>,
     pub last_settings_data_export_result: Option<DesktopSettingsDataArchiveResult>,
     pub last_settings_data_import_result: Option<DesktopSettingsDataArchiveResult>,
+    pub last_settings_crash_export_result: Option<DesktopSettingsCrashExportResult>,
     pub last_settings_hovered_control: Option<DesktopSettingsControlId>,
     pub last_settings_pressed_control: Option<DesktopSettingsControlId>,
     pub settings_scroll_drag_state: Option<DesktopSettingsScrollDragState>,
@@ -19809,6 +19818,7 @@ impl DesktopLauncher {
             last_settings_open_data_folder_result: None,
             last_settings_data_export_result: None,
             last_settings_data_import_result: None,
+            last_settings_crash_export_result: None,
             last_settings_hovered_control: None,
             last_settings_pressed_control: None,
             settings_scroll_drag_state: None,
@@ -26075,6 +26085,87 @@ impl DesktopLauncher {
         self.load_settings_locale_from_settings();
         let result = desktop_settings_data_zip_result(source.display().to_string(), &entries);
         self.last_settings_data_import_result = Some(result.clone());
+        Ok(result)
+    }
+
+    fn normalize_settings_crash_export_destination(destination: impl AsRef<Path>) -> PathBuf {
+        let destination = destination.as_ref();
+        if destination
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("txt"))
+        {
+            destination.to_path_buf()
+        } else {
+            let mut normalized = destination.to_path_buf();
+            normalized.set_extension("txt");
+            normalized
+        }
+    }
+
+    fn settings_crash_logs_text(&self) -> io::Result<(String, usize, bool)> {
+        let data_dir = PathBuf::from(&self.client.context.paths.data_dir);
+        let crashes_dir = data_dir.join("crashes");
+        let mut text = String::new();
+        let mut crash_files = 0usize;
+
+        if crashes_dir.is_dir() {
+            let mut entries = fs::read_dir(&crashes_dir)?
+                .map(|entry| entry.map(|entry| entry.path()))
+                .collect::<io::Result<Vec<_>>>()?;
+            entries.sort_by(|left, right| {
+                left.file_name()
+                    .map(|name| name.to_string_lossy().to_ascii_lowercase())
+                    .cmp(
+                        &right
+                            .file_name()
+                            .map(|name| name.to_string_lossy().to_ascii_lowercase()),
+                    )
+            });
+            for path in entries {
+                if !path.is_file() {
+                    continue;
+                }
+                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                let contents = fs::read(&path)?;
+                text.push_str(name);
+                text.push_str("\n\n");
+                text.push_str(&String::from_utf8_lossy(&contents));
+                text.push('\n');
+                crash_files += 1;
+            }
+        }
+
+        let last_log = data_dir.join("last_log.txt");
+        let included_last_log = last_log.is_file();
+        if included_last_log {
+            let contents = fs::read(&last_log)?;
+            text.push_str("\nlast log:\n");
+            text.push_str(&String::from_utf8_lossy(&contents));
+        }
+
+        Ok((text, crash_files, included_last_log))
+    }
+
+    pub fn export_settings_crash_logs_to(
+        &mut self,
+        destination: impl AsRef<Path>,
+    ) -> io::Result<DesktopSettingsCrashExportResult> {
+        let destination = Self::normalize_settings_crash_export_destination(destination);
+        let (text, crash_files, included_last_log) = self.settings_crash_logs_text()?;
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&destination, text.as_bytes())?;
+        let result = DesktopSettingsCrashExportResult {
+            file: destination.display().to_string(),
+            crash_files,
+            included_last_log,
+            bytes: text.len(),
+        };
+        self.last_settings_crash_export_result = Some(result.clone());
         Ok(result)
     }
 
@@ -87808,6 +87899,44 @@ repo: "Beta/Override"
         assert!(saves.join("old.msav").exists());
         assert!(!saves.join("new.msav").exists());
         assert_eq!(launcher.last_settings_data_import_result, None);
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_settings_crash_export_writes_logs_like_java() {
+        let root = temp_desktop_path("settings-crash-export");
+        let crashes = root.join("crashes");
+        std::fs::create_dir_all(&crashes).expect("crashes fixture dir should be writable");
+        std::fs::write(crashes.join("crash-b.txt"), b"crash B")
+            .expect("crash-b fixture should write");
+        std::fs::write(crashes.join("crash-a.txt"), b"crash A")
+            .expect("crash-a fixture should write");
+        std::fs::write(root.join("last_log.txt"), b"last log text")
+            .expect("last log fixture should write");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.data_dir = root.display().to_string();
+        let destination_without_extension = root.join("crashes-export");
+        let result = launcher
+            .export_settings_crash_logs_to(&destination_without_extension)
+            .expect("settings crash export should write txt");
+        let destination = root.join("crashes-export.txt");
+        let text = std::fs::read_to_string(&destination).expect("crash export txt should exist");
+
+        assert_eq!(result.file, destination.display().to_string());
+        assert_eq!(result.crash_files, 2);
+        assert!(result.included_last_log);
+        assert_eq!(result.bytes, text.len());
+        assert_eq!(
+            launcher.last_settings_crash_export_result,
+            Some(result.clone())
+        );
+        assert_eq!(
+            text,
+            "crash-a.txt\n\ncrash A\ncrash-b.txt\n\ncrash B\n\nlast log:\nlast log text",
+            "Java SettingsMenuDialog.getLogs() writes each crash filename/content, then appends last_log.txt"
+        );
 
         std::fs::remove_dir_all(root).ok();
     }

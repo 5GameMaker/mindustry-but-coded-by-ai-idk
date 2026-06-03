@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 833. Settings Data 崩溃日志导出 helper
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.65%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `SettingsMenuDialog.getLogs()` 会遍历 `settings.getDataDirectory().child("crashes").list()`，按 `文件名 + 两个换行 + 文件内容 + 一个换行` 拼接；
+  - 如果 `last_log.txt` 存在，再追加 `\nlast log:\n` 与其内容；
+  - 桌面侧 `@crash.export` 最终应写出 `.txt`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopSettingsCrashExportResult`；
+    - `DesktopLauncher` 新增 `last_settings_crash_export_result`；
+    - 新增 `settings_crash_logs_text()`，按 Java 聚合 `crashes/*` 与 `last_log.txt`；
+    - 新增 `export_settings_crash_logs_to(...)`，自动补 `.txt` 扩展名、创建父目录、写出日志文本并记录 result；
+    - 新增 `desktop_launcher_settings_crash_export_writes_logs_like_java` 测试。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings_crash_export`
+  - `cargo test -p mindustry-desktop settings_data`
+  - `cargo test -p mindustry-desktop settings_export`
+  - `cargo test -p mindustry-desktop settings_import`
+- 仍未完成：
+  - `ExportCrashLogs` 的 chooser request 已有，但选择结果回调→`export_settings_crash_logs_to(...)` 的平台接线仍需继续补；
+  - `ExportData` / `ImportData` 的 chooser 结果回调→真实 zip helper 接线仍需继续补；
+  - Java iOS `shareFile(...)` 分支与桌面后端真实 `open_folder` 行为仍需继续接具体平台实现。
+
 ## 832. ModsDialog Release ID 元数据闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
