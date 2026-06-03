@@ -30145,7 +30145,7 @@ impl DesktopLauncher {
 
     fn game_over_dialog_rect_for_viewport(viewport: RenderViewport) -> RenderRect {
         let width = (viewport.width * 0.46).clamp(320.0, 520.0);
-        let height = 188.0;
+        let height = 360.0;
         RenderRect::new(
             viewport.x + viewport.width * 0.5 - width * 0.5,
             viewport.y + viewport.height * 0.5 - height * 0.5,
@@ -30156,6 +30156,66 @@ impl DesktopLauncher {
 
     fn game_over_menu_button_rect(dialog: RenderRect) -> RenderRect {
         RenderRect::new(dialog.center().x - 70.0, dialog.y + 28.0, 140.0, 60.0)
+    }
+
+    fn game_over_stats_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 26.0,
+            dialog.y + 96.0,
+            dialog.width - 52.0,
+            (dialog.height - 142.0).max(42.0),
+        )
+    }
+
+    fn game_over_stat_label_text(&self, key: &'static str) -> String {
+        let localized = self.localize_bundle_markup_text(key);
+        if localized != key {
+            return localized;
+        }
+        match key {
+            "stats.wave" => "Wave",
+            "stats.unitsCreated" => "Units Created",
+            "stats.enemiesDestroyed" => "Enemies Destroyed",
+            "stats.built" => "Built",
+            "stats.destroyed" => "Destroyed",
+            "stats.deconstructed" => "Deconstructed",
+            _ => key,
+        }
+        .to_string()
+    }
+
+    fn game_over_stat_rows(&self) -> Vec<(String, i32)> {
+        let stats = &self.game_state.stats;
+        let mut rows = Vec::new();
+        if self.game_state.rules.waves {
+            rows.push((
+                self.game_over_stat_label_text("stats.wave"),
+                stats.waves_lasted,
+            ));
+        }
+        rows.extend([
+            (
+                self.game_over_stat_label_text("stats.unitsCreated"),
+                stats.units_created,
+            ),
+            (
+                self.game_over_stat_label_text("stats.enemiesDestroyed"),
+                stats.enemy_units_destroyed,
+            ),
+            (
+                self.game_over_stat_label_text("stats.built"),
+                stats.buildings_built,
+            ),
+            (
+                self.game_over_stat_label_text("stats.destroyed"),
+                stats.buildings_destroyed,
+            ),
+            (
+                self.game_over_stat_label_text("stats.deconstructed"),
+                stats.buildings_deconstructed,
+            ),
+        ]);
+        rows
     }
 
     fn pause_overlay_net_active(&self) -> bool {
@@ -52445,12 +52505,47 @@ impl DesktopLauncher {
                     .with_outline(true),
                 Layer::END_PIXELED + 0.143,
             ));
+            let stats_rect = Self::game_over_stats_rect(dialog);
+            pass.push(RenderCommand::draw_sprite(
+                "whiteui",
+                stats_rect,
+                [0.0, 0.0, 0.0, 0.34],
+                0.0,
+                Layer::END_PIXELED + 0.144,
+            ));
+            for (index, (label, value)) in self.game_over_stat_rows().into_iter().enumerate() {
+                let row_y = stats_rect.y + stats_rect.height - 18.0 - index as f32 * 28.0;
+                pass.push(RenderCommand::draw_text_styled(
+                    label,
+                    RenderPoint::new(stats_rect.x + 14.0, row_y),
+                    [0.86, 0.92, 0.98, 1.0],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.145 + index as f32 * 0.0001,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    value.to_string(),
+                    RenderPoint::new(stats_rect.right() - 14.0, row_y),
+                    [1.0, 0.82, 0.42, 1.0],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::End)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.1455 + index as f32 * 0.0001,
+                ));
+            }
             self.push_settings_text_button(
                 &mut pass,
                 Self::game_over_menu_button_rect(dialog),
                 self.localize_bundle_markup_text("@menu"),
                 Some("left"),
-                Layer::END_PIXELED + 0.145,
+                Layer::END_PIXELED + 0.150,
             );
             return Some(pass);
         }
@@ -72605,6 +72700,13 @@ repo: "Beta/Override"
         launcher.runtime.state.set(GameStateState::Playing);
         launcher.game_state.game_over = true;
         launcher.runtime.state.game_over = true;
+        launcher.game_state.rules.waves = true;
+        launcher.game_state.stats.waves_lasted = 12;
+        launcher.game_state.stats.units_created = 34;
+        launcher.game_state.stats.enemy_units_destroyed = 56;
+        launcher.game_state.stats.buildings_built = 78;
+        launcher.game_state.stats.buildings_destroyed = 9;
+        launcher.game_state.stats.buildings_deconstructed = 10;
 
         let surface = DesktopSurfaceSize::new(1280, 720);
         let viewport = launcher.default_render_viewport_for_surface(surface);
@@ -72624,6 +72726,25 @@ repo: "Beta/Override"
             let lower = text.to_ascii_lowercase();
             lower.contains("menu") || text.contains('菜')
         }));
+        for expected in [
+            "Wave",
+            "12",
+            "Units Created",
+            "34",
+            "Enemies Destroyed",
+            "56",
+            "Built",
+            "78",
+            "Destroyed",
+            "9",
+            "Deconstructed",
+            "10",
+        ] {
+            assert!(
+                texts.contains(&expected),
+                "GameOverDialog stats should include {expected}; texts={texts:?}"
+            );
+        }
 
         let dialog = DesktopLauncher::game_over_dialog_rect_for_viewport(viewport);
         let menu = DesktopLauncher::game_over_menu_button_rect(dialog).center();

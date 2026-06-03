@@ -17,6 +17,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 812. GameOverDialog stats pane 前端迁移
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.43%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `GameOverDialog.rebuild()` 在标题后构建 stats pane；
+  - Java 顺序：`stats.wave`（仅 rules.waves）、`stats.unitsCreated`、`stats.enemiesDestroyed`、`stats.built`、`stats.destroyed`、`stats.deconstructed`；
+  - Rust 当前已有 `GameStats` 同名语义字段，本轮接入前端展示。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `game_over_dialog_rect_for_viewport(...)` 增大高度以容纳 stats pane；
+    - 新增 `game_over_stats_rect(...)`；
+    - 新增 `game_over_stat_label_text(...)`，bundle key 缺失时使用英文 fallback；
+    - 新增 `game_over_stat_rows(...)`，按 Java 顺序读取 `game_state.stats`；
+    - `pause_overlay_render_pass(...)` 的 GameOverDialog 分支绘制 stats 背板、label/value 行；
+    - 扩展 `desktop_launcher_game_over_menu_returns_to_editor_during_playtest`，覆盖 stats label/value 与原 playtest 返回 editor 行为。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_game_over_menu_returns_to_editor_during_playtest --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - Java `FLabel` 动画、highscore、playtime、campaign sector lost/continue/disconnect、pvp winner coloredName 与 difficulty guide 仍需继续迁移。
+
 ## 811. GameOverDialog playtest 返回编辑器接线
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
