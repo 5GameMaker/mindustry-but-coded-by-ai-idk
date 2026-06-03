@@ -9105,11 +9105,18 @@ pub struct DesktopGraphicsOpenGlBackendSpriteMeshResourceTable {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendSpriteMeshUploadScope {
+    FullMesh,
+    VertexBufferOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan {
     pub batch_index: usize,
     pub vertex_array_key: String,
     pub vertex_buffer_key: String,
     pub index_buffer_key: String,
+    pub upload_scope: DesktopGraphicsOpenGlBackendSpriteMeshUploadScope,
     pub vertex_count: usize,
     pub index_count: usize,
     pub vertex_stride_bytes: usize,
@@ -9127,6 +9134,7 @@ pub struct DesktopGraphicsOpenGlBackendResolvedSpriteMeshUpload {
     pub vertex_buffer_handle: u32,
     pub index_buffer_key: String,
     pub index_buffer_handle: u32,
+    pub upload_scope: DesktopGraphicsOpenGlBackendSpriteMeshUploadScope,
     pub vertex_count: usize,
     pub index_count: usize,
     pub vertex_stride_bytes: usize,
@@ -9157,6 +9165,16 @@ impl From<&DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan>
             vertex_bytes: upload.vertex_bytes.clone(),
             index_bytes: upload.index_bytes.clone(),
         }
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteMeshUploadSignature {
+    pub fn same_static_layout_and_indices(&self, other: &Self) -> bool {
+        self.vertex_count == other.vertex_count
+            && self.index_count == other.index_count
+            && self.vertex_stride_bytes == other.vertex_stride_bytes
+            && self.vertex_attributes == other.vertex_attributes
+            && self.index_bytes == other.index_bytes
     }
 }
 
@@ -9879,6 +9897,7 @@ impl DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan {
             vertex_array_key: resource_plan.vertex_array_key.clone(),
             vertex_buffer_key: resource_plan.vertex_buffer_key.clone(),
             index_buffer_key: resource_plan.index_buffer_key.clone(),
+            upload_scope: DesktopGraphicsOpenGlBackendSpriteMeshUploadScope::FullMesh,
             vertex_count: buffer_plan.vertex_count,
             index_count: buffer_plan.index_count,
             vertex_stride_bytes: buffer_plan.vertex_stride_bytes,
@@ -9893,6 +9912,21 @@ impl DesktopGraphicsOpenGlBackendResolvedSpriteMeshUpload {
     pub fn to_opengl_sprite_mesh_upload_commands(
         &self,
     ) -> Vec<DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand> {
+        if self.upload_scope == DesktopGraphicsOpenGlBackendSpriteMeshUploadScope::VertexBufferOnly
+        {
+            return vec![
+                DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BindBuffer {
+                    target: DESKTOP_GRAPHICS_OPENGL_ARRAY_BUFFER,
+                    buffer_handle: self.vertex_buffer_handle,
+                },
+                DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BufferData {
+                    target: DESKTOP_GRAPHICS_OPENGL_ARRAY_BUFFER,
+                    usage: DESKTOP_GRAPHICS_OPENGL_DYNAMIC_DRAW,
+                    bytes: self.vertex_bytes.clone(),
+                },
+            ];
+        }
+
         let mut commands = vec![
             DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BindVertexArray {
                 vertex_array_handle: self.vertex_array_handle,
@@ -14590,6 +14624,7 @@ impl DesktopGraphicsOpenGlBackendSpriteMeshUploadSink
             vertex_buffer_handle,
             index_buffer_key: upload.index_buffer_key,
             index_buffer_handle,
+            upload_scope: upload.upload_scope,
             vertex_count: upload.vertex_count,
             index_count: upload.index_count,
             vertex_stride_bytes: upload.vertex_stride_bytes,
@@ -14898,6 +14933,7 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
             vertex_buffer_handle,
             index_buffer_key: upload.index_buffer_key,
             index_buffer_handle,
+            upload_scope: upload.upload_scope,
             vertex_count: upload.vertex_count,
             index_count: upload.index_count,
             vertex_stride_bytes: upload.vertex_stride_bytes,
@@ -17917,11 +17953,20 @@ impl<R> DesktopOpenGlBackendGraphicsRenderer<R> {
         &self,
         state: &mut DesktopGraphicsOpenGlBackendExecutorState,
     ) {
-        state.sprite_mesh_upload_plans.retain(|upload| {
-            let signature = DesktopGraphicsOpenGlBackendSpriteMeshUploadSignature::from(upload);
+        state.sprite_mesh_upload_plans.retain_mut(|upload| {
+            let signature = DesktopGraphicsOpenGlBackendSpriteMeshUploadSignature::from(&*upload);
             self.submitted_sprite_mesh_upload_signatures
                 .get(&upload.vertex_array_key)
-                .map_or(true, |submitted| *submitted != signature)
+                .map_or(true, |submitted| {
+                    if *submitted == signature {
+                        return false;
+                    }
+                    if submitted.same_static_layout_and_indices(&signature) {
+                        upload.upload_scope =
+                            DesktopGraphicsOpenGlBackendSpriteMeshUploadScope::VertexBufferOnly;
+                    }
+                    true
+                })
         });
     }
 
@@ -65358,6 +65403,7 @@ mod tests {
             vertex_array_key: "sprite-batch:0:vao".into(),
             vertex_buffer_key: "sprite-batch:0:vbo".into(),
             index_buffer_key: "sprite-batch:0:ibo".into(),
+            upload_scope: super::DesktopGraphicsOpenGlBackendSpriteMeshUploadScope::FullMesh,
             vertex_count: 1,
             index_count: 1,
             vertex_stride_bytes: 8,
@@ -70677,6 +70723,85 @@ repo: "Beta/Override"
         assert!(second_commands.iter().all(|command| !matches!(
             command,
             super::DesktopGraphicsOpenGlBackendDriverCommand::SpriteMeshUpload(_)
+        )));
+    }
+
+    #[cfg(feature = "opengl-backend")]
+    #[test]
+    fn desktop_opengl_backend_renderer_uploads_only_vertex_buffer_when_sprite_mesh_vertices_change()
+    {
+        fn dynamic_rect_frame(x: f32) -> DesktopGraphicsFrame {
+            let viewport = RenderViewport::new(0.0, 0.0, 96.0, 96.0);
+            let camera = RenderCamera::new(RenderPoint::new(48.0, 48.0), viewport);
+            let mut render_frame =
+                RenderFramePlan::new(94, RenderSize::new(96.0, 96.0), camera, viewport);
+            let mut pass = RenderPass::new(RenderPassKind::Ui).with_target(RenderTarget::Screen);
+            pass.push(RenderCommand::fill_rect(
+                RenderRect::new(x, 12.0, 32.0, 18.0),
+                [0.2, 0.3, 0.4, 1.0],
+                Layer::END_PIXELED,
+            ));
+            render_frame.push_pass(pass);
+            let mut bridge = RenderBridge::new();
+            bridge.set_render_frame(render_frame);
+            DesktopGraphicsFrame {
+                bundle: bridge.finish(),
+                floor_chunk_batches: Vec::new(),
+                minimap_texture_frame: None,
+                font_glyph_upload_plan: None,
+                texture_atlas: TextureAtlasPlan::new(),
+            }
+        }
+
+        let mut renderer = super::DesktopOpenGlBackendGraphicsRenderer::new(
+            super::DesktopGraphicsNullOpenGlBackendRuntime::default(),
+        );
+
+        renderer.render_graphics_frame(&dynamic_rect_frame(12.0));
+        let first_command_count = renderer.runtime.driver.commands.len();
+        assert!(renderer.last_driver_state.sprite_mesh_upload_commands > 2);
+
+        renderer.render_graphics_frame(&dynamic_rect_frame(16.0));
+        let second_sprite_mesh_upload_commands = renderer.runtime.driver.commands
+            [first_command_count..]
+            .iter()
+            .filter_map(|command| match command {
+                super::DesktopGraphicsOpenGlBackendDriverCommand::SpriteMeshUpload(command) => {
+                    Some(command)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(renderer.last_driver_state.sprite_mesh_upload_commands, 2);
+        assert!(matches!(
+            second_sprite_mesh_upload_commands[0],
+            super::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BindBuffer {
+                target: super::DESKTOP_GRAPHICS_OPENGL_ARRAY_BUFFER,
+                ..
+            }
+        ));
+        assert!(matches!(
+            second_sprite_mesh_upload_commands[1],
+            super::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BufferData {
+                target: super::DESKTOP_GRAPHICS_OPENGL_ARRAY_BUFFER,
+                usage: super::DESKTOP_GRAPHICS_OPENGL_DYNAMIC_DRAW,
+                bytes,
+            } if !bytes.is_empty()
+        ));
+        assert!(second_sprite_mesh_upload_commands.iter().all(|command| !matches!(
+            command,
+            super::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BindVertexArray { .. }
+                | super::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::EnableVertexAttributeArray { .. }
+                | super::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::VertexAttributePointer { .. }
+                | super::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BindBuffer {
+                    target: super::DESKTOP_GRAPHICS_OPENGL_ELEMENT_ARRAY_BUFFER,
+                    ..
+                }
+                | super::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BufferData {
+                    target: super::DESKTOP_GRAPHICS_OPENGL_ELEMENT_ARRAY_BUFFER,
+                    ..
+                }
         )));
     }
 

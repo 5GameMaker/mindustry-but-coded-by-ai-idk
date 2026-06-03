@@ -17,6 +17,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 799. OpenGL sprite mesh 顶点缓冲增量上传
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.3%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容、性能收口与所有子菜单接近原版。
+- Java 对照与约束：
+  - `MenuRenderer.drawFlyers()` / `flyers(...)` 的位置、旋转、阴影仍由 `time` 驱动，不能为了降低上传而冻结或删除 flyers；
+  - 原版 retained UI/mesh 语义允许在布局和索引稳定时只更新动态顶点数据，本轮优化只落在 OpenGL 上传层，不改变 render command、layer、batch draw order 或视觉语义；
+  - 继续保持 exact layer batching，不把 hover/pressed/selected/submenu alpha 缓存死。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteMeshUploadScope::{FullMesh, VertexBufferOnly}`，并把 scope 从 upload plan 透传到 resolved upload；
+    - `DesktopGraphicsOpenGlBackendSpriteMeshUploadSignature` 新增 `same_static_layout_and_indices(...)`，只比较 vertex/index count、stride、attribute layout 与 index bytes；
+    - `retain_pending_sprite_mesh_uploads(...)` 改为三态处理：完全相同则跳过；布局/索引相同但 `vertex_bytes` 不同时降级为 `VertexBufferOnly`；布局或索引变化时保持 `FullMesh`；
+    - `to_opengl_sprite_mesh_upload_commands(...)` 在 `VertexBufferOnly` 下只发 `BindBuffer(ARRAY_BUFFER)` 与 `BufferData(ARRAY_BUFFER)`，避免重复 VAO、IBO 与 vertex attribute setup；
+    - 新增 `desktop_opengl_backend_renderer_uploads_only_vertex_buffer_when_sprite_mesh_vertices_change`，锁定“同一 sprite mesh 只移动顶点、索引/属性不变”时第二帧只发 2 条 VBO 上传命令。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_uploads_only_vertex_buffer_when_sprite_mesh_vertices_change --lib --features opengl-backend -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_does_not_reupload_static_sprite_mesh_each_frame --lib --features opengl-backend -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_reuses_static_sprite_mesh_when_batch_index_shifts --lib --features opengl-backend -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --release --features opengl-native-runtime`
+  - `MINDUSTRY_DESKTOP_TRACE_SUMMARY=1 ./target/release/mindustry-desktop.exe` 短跑核对：首次帧约 `texture_upload_commands=90`、`sprite_mesh_upload_commands=325`、`draw_commands=79`；后续无交互菜单帧为 `texture_upload_commands=0`、`sprite_mesh_upload_commands=0`、`draw_commands=79`、`gl_error=0x0000`。
+- 仍未完成：
+  - 真实 hover/pressed/submenu 动画与动态背景/flyer 路径仍需继续按原版 UI 语义审查，不允许用冻结/删除动态元素换性能；
+  - 仍需继续还原所有子菜单、字体/图标/样式细节、输入命中、完整客户端流程与 Java↔Rust 联机兼容；
+  - `draw_commands` 与 state churn 仍需继续下降，但必须保持原版视觉层级和交互一致性。
+
 ## 798. MenuUiPlan render command 缓存与 desktop 视觉刷新接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
