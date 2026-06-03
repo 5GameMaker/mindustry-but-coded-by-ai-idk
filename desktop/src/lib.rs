@@ -205,6 +205,7 @@ const JOIN_RECONNECT_MAX_PING_ATTEMPTS: usize = 1;
 const JOIN_RECONNECT_MAX_PING_ATTEMPTS: usize = 30;
 const JOIN_SERVERS_SETTINGS_KEY: &str = "servers";
 const JOIN_IP_SETTINGS_KEY: &str = "ip";
+const JOIN_INFO_SETTINGS_KEY: &str = "joininfo";
 const JOIN_SERVER_DISCLAIMER_SETTINGS_KEY: &str = "server-disclaimer";
 const LOAD_SLOT_CARD_HEIGHT: f32 = 220.0;
 const LOAD_SLOT_CARD_GAP: f32 = 10.0;
@@ -24312,6 +24313,7 @@ impl DesktopLauncher {
                 self.join_server_disclaimer_pending_version = None;
                 self.ensure_join_community_server_cache_loaded();
                 self.refresh_join_local_hosts();
+                self.show_join_info_once_like_java();
             } else if route == DesktopMenuRoute::Schematics {
                 self.load_schematic_tags_from_settings();
                 self.schematic_search.clear();
@@ -31332,6 +31334,25 @@ impl DesktopLauncher {
 
     fn join_route_info_button_available_for_platform(&self) -> bool {
         !self.host_steam_enabled()
+    }
+
+    fn join_info_seen_once(&self) -> bool {
+        self.settings_overrides
+            .get(JOIN_INFO_SETTINGS_KEY)
+            .is_some_and(|value| matches!(value.as_str(), "true" | "1" | "yes" | "on"))
+    }
+
+    fn mark_join_info_seen_once(&mut self) {
+        self.settings_overrides
+            .insert(JOIN_INFO_SETTINGS_KEY.into(), "true".into());
+    }
+
+    fn show_join_info_once_like_java(&mut self) {
+        if self.host_steam_enabled() || self.join_info_seen_once() {
+            return;
+        }
+        self.join_info_dialog_open = true;
+        self.mark_join_info_seen_once();
     }
 
     fn join_route_info_button_enabled_for_viewport(&self, viewport: RenderViewport) -> bool {
@@ -38737,6 +38758,7 @@ impl DesktopLauncher {
                     return;
                 }
                 self.join_info_dialog_open = true;
+                self.mark_join_info_seen_once();
                 self.join_add_dialog_open = false;
                 self.join_add_server_focused = false;
                 self.join_delete_dialog_index = None;
@@ -41260,7 +41282,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.102,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@join.info",
+            self.localize_bundle_markup_text("@info.title"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
             [0.94, 0.98, 1.0, 1.0],
             14.0,
@@ -41272,7 +41294,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.103,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@join.info",
+            self.localize_bundle_markup_text("@join.info"),
             RenderPoint::new(dialog.x + 28.0, dialog.center().y + 12.0),
             [0.78, 0.86, 0.94, 1.0],
             11.0,
@@ -41280,6 +41302,7 @@ impl DesktopLauncher {
             RenderTextStyle::new(RenderTextAlign::Start)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_wrap_width(dialog.width - 56.0)
+                .with_markup(true)
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.104,
         ));
@@ -89146,6 +89169,9 @@ repo: "Beta/Override"
         ]);
         launcher.settings_locale = "en".into();
         launcher.player_locale = "en".into();
+        launcher
+            .settings_overrides
+            .insert(super::JOIN_INFO_SETTINGS_KEY.into(), "true".into());
         launcher.dispatch_menu_action(MenuButtonRole::Join);
         assert_eq!(
             launcher.active_menu_route,
@@ -89735,6 +89761,74 @@ repo: "Beta/Override"
             })
             .collect::<Vec<_>>();
         assert!(!mobile_texts.contains(&"?"));
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_shows_join_info_once_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
+
+        launcher.dispatch_menu_action(MenuButtonRole::Join);
+
+        assert!(launcher.join_info_dialog_open);
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(super::JOIN_INFO_SETTINGS_KEY),
+            Some(&"true".to_string()),
+            "Java JoinDialog.shown uses Core.settings.getBoolOnce(\"joininfo\", ui.showInfo)"
+        );
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(lines.contains(&"dialog: @join.info".to_string()));
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("join info once frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"Info"));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("server IP") && text.contains("local network")));
+
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseJoinInfo);
+        assert!(!launcher.join_info_dialog_open);
+        launcher.show_join_info_once_like_java();
+        assert!(
+            !launcher.join_info_dialog_open,
+            "joininfo getBoolOnce should prevent repeated automatic popups"
+        );
+
+        let mut steam_launcher = DesktopLauncher::new(Vec::new());
+        steam_launcher.set_setting_override("platform", "steam", "true");
+        steam_launcher.dispatch_menu_action(MenuButtonRole::Join);
+        assert!(!steam_launcher.join_info_dialog_open);
+        assert_eq!(
+            steam_launcher
+                .settings_overrides
+                .get(super::JOIN_INFO_SETTINGS_KEY),
+            None
+        );
+
+        let mut mobile_launcher = DesktopLauncher::new(Vec::new());
+        mobile_launcher.menu_renderer_state.config.mobile = true;
+        mobile_launcher.dispatch_menu_action(MenuButtonRole::Join);
+        assert!(
+            mobile_launcher.join_info_dialog_open,
+            "Java JoinDialog posts joininfo for every non-Steam client even though the mobile info button is hidden"
+        );
     }
 
     #[test]

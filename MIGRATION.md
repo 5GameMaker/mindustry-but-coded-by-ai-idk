@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 827. JoinDialog 首次信息弹窗与本地化
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.58%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `JoinDialog.java` 构造中 `shown(...)` 会在非 Steam 下调用 `Core.settings.getBoolOnce("joininfo", () -> ui.showInfo("@join.info"))`；
+  - Steam 下不自动弹出该说明；mobile 下 info 按钮隐藏，但 Java 的 `shown` 分支仍对非 Steam 客户端执行 `joininfo` once；
+  - `ui.showInfo("@join.info")` 应显示本地化正文，而不是把 `@join.info` key 原样画出来。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `JOIN_INFO_SETTINGS_KEY = "joininfo"`；
+    - Join 路由进入时执行 `show_join_info_once_like_java()`，非 Steam 且未看过时自动打开 info 弹窗并写入 settings override；
+    - 手动打开 info 按钮也标记 `joininfo=true`，避免之后重复自动弹出；
+    - `push_join_info_dialog(...)` 标题改为本地化 `@info.title`，正文改为本地化 `@join.info` 并启用 markup；
+    - 新增回归测试覆盖首次自动弹窗、once 持久化、Steam 不弹、mobile 非 Steam 仍自动弹以及主 Join skeleton 在 `joininfo=true` 后不被弹窗遮挡。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_join_route_shows_join_info_once_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_join_route --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 后续继续审 Join 的 resize/列数变化触发 `setup()+refreshAll()`、更完整的真实 ping/社区 feed 生命周期，以及 Mods/Editor 等高可见子菜单还原；
+  - settings.bin 的真实持久化仍需继续接入，当前 `joininfo` 写入的是 Rust 过渡 settings override。
+
 ## 826. 对齐 Java fpscap 帧率节奏
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
