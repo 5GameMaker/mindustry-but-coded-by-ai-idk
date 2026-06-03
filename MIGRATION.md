@@ -17,6 +17,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 863. HostDialog beta/alpha Steam public lobby 保护
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **93.95%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 对照 Java `HostDialog.runHost()` 中 `steampublichost` 的 beta/alpha 保护；
+    - Host 成功后若 `steampublichost=true` 且版本 modifier 含 `beta/alpha`，自动改回 `steampublichost=false` 并同步 `host_friends_only=true`；
+    - 新增 `DesktopMenuPlatformAction::UpdateSteamLobby` 记录 Java `platform.updateLobby()` 语义；
+    - 复用 `last_menu_info_message` 显示 `@public.beta`，并用 `betapublic` 按 Java `Core.settings.getBoolOnce(...)` 语义只提示一次。
+- 已验证：
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_host_route_disables_steam_public_host_on_beta_like_java -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop host -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop platform -- --nocapture`
+- 下一步优先：继续 ModsDialog 的 GitHub import 文本输入/lastmod 回写，或本地 file import 完成闭环。
+
 ## 862. ModsDialog View Content 图标 tooltip 对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
