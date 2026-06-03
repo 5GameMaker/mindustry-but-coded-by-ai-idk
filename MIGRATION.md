@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 810. Editor workshop publish/view 前端入口接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.41%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `MapEditorDialog.java` 在 `steam` 可用时追加 `@editor.publish.workshop` 按钮；
+  - 若 editor tags 有 `steamid` 且命中 built-in 非 custom map，走 `platform.viewListingID(...)`；
+  - 否则先 `save()`，已有 `steamid` 走 `platform.viewListing(map)`；
+  - 无 description 报 `@editor.nodescription`，无有效 spawn/mode 报 `@map.nospawn`，否则 `platform.publish(map)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopEditorWorkshopActionKind` / `DesktopEditorWorkshopAction`；
+    - `DesktopMenuRouteShellAction` 新增 `EditorWorkshop`；
+    - `DesktopLauncher` 新增 `editor_workshop_error` 与 `last_editor_workshop_action`；
+    - 新增 `editor_workshop_available()`、`editor_workshop_button_label_key()`、`dispatch_editor_workshop_with_platform(...)`；
+    - editor route 在 `desktop_workshop_enabled` 时新增 workshop 按钮，当前 map 有 `steamid/workshop` 时显示 `@view.workshop`，否则显示 `@editor.publish.workshop`；
+    - 当前最小实现：有 `steamid` 调 `platform.view_listing_id(id)`；否则校验 description/spawns 后调 `platform.publish(map_name)`；
+    - `RecordingPlatform` 增加 publish 记录；
+    - 新增 `desktop_launcher_editor_route_publishes_or_views_workshop_like_java` 覆盖 publish、view listing id、nodescription、nospawn。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_route_publishes_or_views_workshop_like_java --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - Java `save()` 生成真实 map、`viewListing(map)` 对 map object 的分支、`Gamemode.all` 全模式 valid 校验、Steam player author 判断和按钮文本动态细节仍需继续迁移；
+  - 当前 editor workshop 按钮先接在 Rust 固定 action rail 的 index 5，后续仍需按 Java Table 分行/宽按钮布局还原。
+
 ## 809. Editor `@editor.ingame` 前端入口接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

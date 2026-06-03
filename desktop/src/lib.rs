@@ -3652,6 +3652,7 @@ pub enum DesktopMenuRouteShellAction {
     CloseEditorExportDialog,
     EditorInGame,
     EditorPlaytest,
+    EditorWorkshop,
     ConfirmEditorImportOverwrite,
     CancelEditorImportOverwrite,
     OpenTechTreeSelect,
@@ -3759,6 +3760,22 @@ enum DesktopPauseQuitResult {
 enum DesktopEditorExportKind {
     MapFile,
     Image,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DesktopEditorWorkshopActionKind {
+    ViewListingId,
+    Publish,
+    ErrorNoDescription,
+    ErrorNoSpawn,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DesktopEditorWorkshopAction {
+    kind: DesktopEditorWorkshopActionKind,
+    map_name: String,
+    steam_id: Option<String>,
+    error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18241,6 +18258,8 @@ pub struct DesktopLauncher {
     pub editor_export_dialog_open: bool,
     pub last_editor_export_request: Option<FileChooserRequest>,
     editor_last_export_kind: Option<DesktopEditorExportKind>,
+    editor_workshop_error: Option<String>,
+    last_editor_workshop_action: Option<DesktopEditorWorkshopAction>,
     pub tech_tree_selected_root: Option<String>,
     pub tech_tree_select_dialog_open: bool,
     pub tech_tree_selected_node: Option<TechNodeId>,
@@ -19440,6 +19459,8 @@ impl DesktopLauncher {
             editor_export_dialog_open: false,
             last_editor_export_request: None,
             editor_last_export_kind: None,
+            editor_workshop_error: None,
+            last_editor_workshop_action: None,
             tech_tree_selected_root: None,
             tech_tree_select_dialog_open: false,
             tech_tree_selected_node: None,
@@ -34052,6 +34073,8 @@ impl DesktopLauncher {
         self.map_play_playtesting = false;
         self.clear_editor_new_map_dialog();
         self.clear_editor_import_map_dialog();
+        self.editor_workshop_error = None;
+        self.last_editor_workshop_action = None;
         self.last_menu_info_message = Some(format!("beginEditMap: {}", map.plain_name()));
         true
     }
@@ -34116,6 +34139,70 @@ impl DesktopLauncher {
         self.last_menu_info_message =
             Some(format!("MapEditorDialog.editInGame: {}", map.plain_name()));
         true
+    }
+
+    fn editor_workshop_available(&self) -> bool {
+        self.menu_renderer_state.config.desktop_workshop_enabled
+    }
+
+    fn editor_workshop_button_label_key(&self) -> &'static str {
+        if self.game_state.map.steam_id().is_some() || self.game_state.map.workshop {
+            "@view.workshop"
+        } else {
+            "@editor.publish.workshop"
+        }
+    }
+
+    fn dispatch_editor_workshop_with_platform<P: Platform>(
+        &mut self,
+        platform: &mut P,
+    ) -> Option<DesktopEditorWorkshopAction> {
+        if !self.editor_workshop_available() {
+            return None;
+        }
+        let map = self.game_state.map.clone();
+        let map_name = map.plain_name();
+        let action =
+            if let Some(steam_id) = map.steam_id().map(str::trim).filter(|id| !id.is_empty()) {
+                platform.view_listing_id(steam_id);
+                DesktopEditorWorkshopAction {
+                    kind: DesktopEditorWorkshopActionKind::ViewListingId,
+                    map_name,
+                    steam_id: Some(steam_id.to_string()),
+                    error: None,
+                }
+            } else if map
+                .tags
+                .get("description")
+                .map(|description| description.trim().len())
+                .unwrap_or(0)
+                < 4
+            {
+                DesktopEditorWorkshopAction {
+                    kind: DesktopEditorWorkshopActionKind::ErrorNoDescription,
+                    map_name,
+                    steam_id: None,
+                    error: Some("@editor.nodescription".to_string()),
+                }
+            } else if map.spawns <= 0 {
+                DesktopEditorWorkshopAction {
+                    kind: DesktopEditorWorkshopActionKind::ErrorNoSpawn,
+                    map_name,
+                    steam_id: None,
+                    error: Some("@map.nospawn".to_string()),
+                }
+            } else {
+                platform.publish(&map_name);
+                DesktopEditorWorkshopAction {
+                    kind: DesktopEditorWorkshopActionKind::Publish,
+                    map_name,
+                    steam_id: None,
+                    error: None,
+                }
+            };
+        self.editor_workshop_error = action.error.clone();
+        self.last_editor_workshop_action = Some(action.clone());
+        Some(action)
     }
 
     fn open_map_play_dialog_for_index(
@@ -36367,6 +36454,12 @@ impl DesktopLauncher {
                 && Self::map_list_action_button_rect_for_panel(panel, 4).contains_point(point)
             {
                 return Some(DesktopMenuRouteShellAction::EditorPlaytest);
+            }
+            if self.game_state.rules.editor
+                && self.editor_workshop_available()
+                && Self::map_list_action_button_rect_for_panel(panel, 5).contains_point(point)
+            {
+                return Some(DesktopMenuRouteShellAction::EditorWorkshop);
             }
         }
         if let Some(index) = self.map_list_card_index_at_point(panel, route, point) {
@@ -38697,6 +38790,10 @@ impl DesktopLauncher {
                 if let Some(index) = self.current_editor_map_index() {
                     self.open_map_play_dialog_for_index(index, true, false);
                 }
+            }
+            DesktopMenuRouteShellAction::EditorWorkshop => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_editor_workshop_with_platform(&mut platform);
             }
             DesktopMenuRouteShellAction::ConfirmEditorImportOverwrite => {
                 let _ = self.confirm_editor_import_overwrite();
@@ -43384,6 +43481,18 @@ impl DesktopLauncher {
                     Some("play"),
                     Layer::END_PIXELED + 0.029,
                 );
+                if self.editor_workshop_available() {
+                    self.push_settings_text_button(
+                        pass,
+                        Self::map_list_action_button_rect_for_panel(panel, 5),
+                        self.localize_bundle_markup_text_or(
+                            self.editor_workshop_button_label_key(),
+                            "Workshop",
+                        ),
+                        Some("link"),
+                        Layer::END_PIXELED + 0.030,
+                    );
+                }
             }
         }
 
@@ -48906,6 +49015,15 @@ impl DesktopLauncher {
             lines.push("button: @editor.export Icon.upload".into());
             lines.push("button: @editor.ingame Icon.right".into());
             lines.push("button: @editor.playtest Icon.play".into());
+            if self.editor_workshop_available() {
+                lines.push(format!(
+                    "button: {} Icon.link",
+                    self.editor_workshop_button_label_key()
+                ));
+            }
+        }
+        if let Some(error) = self.editor_workshop_error.as_deref() {
+            lines.push(format!("dialog: MapEditorDialog.workshop error={error}"));
         }
         if self.editor_export_dialog_open {
             lines.push("dialog: @editor.export createDialog".into());
@@ -54748,6 +54866,7 @@ mod tests {
         opened_uris: Vec<String>,
         viewed_listing_ids: Vec<String>,
         viewed_listings: Vec<String>,
+        published: Vec<String>,
         clipboard_texts: Vec<String>,
         clipboard_read: Option<String>,
     }
@@ -54764,6 +54883,10 @@ mod tests {
 
         fn view_listing_id(&mut self, map_id: &str) {
             self.viewed_listing_ids.push(map_id.to_string());
+        }
+
+        fn publish(&mut self, publishable_name: &str) {
+            self.published.push(publishable_name.to_string());
         }
 
         fn set_clipboard_text(&mut self, text: &str) {
@@ -74060,6 +74183,146 @@ repo: "Beta/Override"
         assert_eq!(
             launcher.last_menu_info_message.as_deref(),
             Some("MapEditorDialog.editInGame: Ingame Arena")
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_editor_route_publishes_or_views_workshop_like_java() {
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), "Publish Arena".to_string());
+        tags.insert("description".to_string(), "Ready for workshop".to_string());
+        let mut map = MapDescriptor::new(
+            "maps/custom/publish-arena.msav",
+            128,
+            128,
+            tags,
+            true,
+            2,
+            158,
+        );
+        map.spawns = 1;
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_renderer_state.config = launcher
+            .menu_renderer_state
+            .config
+            .with_desktop_workshop_enabled(true);
+        launcher.map_list_cards = vec![map.clone()];
+        launcher.begin_edit_map(map);
+
+        assert!(launcher
+            .editor_maps_route_lines()
+            .iter()
+            .any(|line| line.contains("@editor.publish.workshop")));
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Editor,
+        );
+        let workshop_center =
+            DesktopLauncher::map_list_action_button_rect_for_panel(panel, 5).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                workshop_center.x,
+                workshop_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::EditorWorkshop)
+        );
+
+        let mut platform = RecordingPlatform::default();
+        let publish = launcher
+            .dispatch_editor_workshop_with_platform(&mut platform)
+            .expect("valid editor map should publish");
+        assert_eq!(
+            publish.kind,
+            super::DesktopEditorWorkshopActionKind::Publish
+        );
+        assert_eq!(platform.published, vec!["Publish Arena".to_string()]);
+        assert_eq!(launcher.editor_workshop_error, None);
+
+        let mut steam_tags = BTreeMap::new();
+        steam_tags.insert("name".to_string(), "Steam Arena".to_string());
+        steam_tags.insert("description".to_string(), "Already published".to_string());
+        steam_tags.insert("steamid".to_string(), "123456789".to_string());
+        let mut steam_map = MapDescriptor::new(
+            "maps/custom/steam-arena.msav",
+            128,
+            128,
+            steam_tags,
+            true,
+            2,
+            158,
+        );
+        steam_map.spawns = 1;
+        let mut steam_launcher = DesktopLauncher::new(Vec::new());
+        steam_launcher.menu_renderer_state.config = steam_launcher
+            .menu_renderer_state
+            .config
+            .with_desktop_workshop_enabled(true);
+        steam_launcher.map_list_cards = vec![steam_map.clone()];
+        steam_launcher.begin_edit_map(steam_map);
+        assert!(steam_launcher
+            .editor_maps_route_lines()
+            .iter()
+            .any(|line| line.contains("@view.workshop")));
+        let view = steam_launcher
+            .dispatch_editor_workshop_with_platform(&mut platform)
+            .expect("steamid map should view listing id");
+        assert_eq!(
+            view.kind,
+            super::DesktopEditorWorkshopActionKind::ViewListingId
+        );
+        assert_eq!(view.steam_id.as_deref(), Some("123456789"));
+        assert_eq!(platform.viewed_listing_ids, vec!["123456789".to_string()]);
+
+        let mut invalid_tags = BTreeMap::new();
+        invalid_tags.insert("name".to_string(), "Invalid Arena".to_string());
+        let mut invalid_map = MapDescriptor::new(
+            "maps/custom/invalid-arena.msav",
+            128,
+            128,
+            invalid_tags,
+            true,
+            2,
+            158,
+        );
+        invalid_map.spawns = 1;
+        let mut invalid_launcher = DesktopLauncher::new(Vec::new());
+        invalid_launcher.menu_renderer_state.config = invalid_launcher
+            .menu_renderer_state
+            .config
+            .with_desktop_workshop_enabled(true);
+        invalid_launcher.map_list_cards = vec![invalid_map.clone()];
+        invalid_launcher.begin_edit_map(invalid_map);
+        let no_description = invalid_launcher
+            .dispatch_editor_workshop_with_platform(&mut RecordingPlatform::default())
+            .expect("invalid editor map should report no description");
+        assert_eq!(
+            no_description.kind,
+            super::DesktopEditorWorkshopActionKind::ErrorNoDescription
+        );
+        assert_eq!(
+            invalid_launcher.editor_workshop_error.as_deref(),
+            Some("@editor.nodescription")
+        );
+
+        invalid_launcher.game_state.map.tags.insert(
+            "description".to_string(),
+            "Has description but no spawn".to_string(),
+        );
+        invalid_launcher.game_state.map.spawns = 0;
+        let no_spawn = invalid_launcher
+            .dispatch_editor_workshop_with_platform(&mut RecordingPlatform::default())
+            .expect("invalid editor map should report no spawn");
+        assert_eq!(
+            no_spawn.kind,
+            super::DesktopEditorWorkshopActionKind::ErrorNoSpawn
+        );
+        assert_eq!(
+            invalid_launcher.editor_workshop_error.as_deref(),
+            Some("@map.nospawn")
         );
     }
 
