@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 802. PausedDialog.checkPlaytest 恢复编辑器链路
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.33%**，仍未达到完整可玩；继续优先前端/UI、编辑器/地图相关子菜单、黑屏/启动兼容、性能收口与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `PausedDialog.checkPlaytest()` 在 `state.playtestingMap != null` 时不走普通退出保存：先 `logic.reset()`，再 `ui.editor.resumeAfterPlaytest(testing)`；
+  - `PausedDialog.runExitSave()` 与 `GameOverDialog` 的菜单返回都先尝试 `checkPlaytest()`，命中后必须恢复编辑器，而不是回主菜单；
+  - `MapEditorDialog.resumeAfterPlaytest(map)` 直接按 `map.file` 重新 `beginEditMap(...)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 将 `begin_edit_map_from_index(...)` 拆出 descriptor 级 `begin_edit_map(...)`，更接近 Java `beginEditMap(map.file)`，并在进入 editor 时清理 `game_state/runtime.state.playtesting_map`；
+    - 新增 `playtesting_map_for_resume()` 与 `check_playtest_and_resume_editor()`，优先消费 `game_state.playtesting_map`，缺省再看 `runtime.state.playtesting_map`；
+    - `execute_pause_overlay_quit()` 现在先走 `check_playtest_and_resume_editor()`，playtest 命中时关闭暂停弹窗/route，恢复 `DesktopMenuRoute::Editor`，普通退出仍保持原有回主菜单行为；
+    - 新增 `desktop_launcher_paused_playtest_quit_resumes_editor_like_java_check_playtest`，锁定 Confirm Quit 后恢复 editor、清空 playtesting 状态、保留当前 map。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_playtest_quit_resumes_editor_like_java_check_playtest --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_quit_requires_confirmation --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_card_dialog_buttons_dispatch_play_and_editor_actions --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - GameOverDialog 对应的返回菜单 UI 路径仍需继续接入同一 `check_playtest_and_resume_editor()` 语义；
+  - Java `MapEditorDialog.save()` 对编辑器 tile/rules/objectives 的完整保存链仍需继续迁移；
+  - Editor 的 `@editor.ingame`、workshop 发布、导出/导入细节仍需继续按本地 Java 参考迁移。
+
 ## 801. Editor playtest 入口接入 MapPlayDialog
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

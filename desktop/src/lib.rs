@@ -33986,17 +33986,18 @@ impl DesktopLauncher {
         true
     }
 
-    fn begin_edit_map_from_index(&mut self, index: usize) -> bool {
-        let Some(map) = self.map_list_cards.get(index).cloned() else {
-            return false;
-        };
+    fn begin_edit_map(&mut self, map: MapDescriptor) -> bool {
         let mut rules = map.apply_rules(Gamemode::Editor);
         rules.mode_name = Some(Gamemode::Editor.wire_name().to_string());
         rules.editor = true;
+        self.game_state.set(GameStateState::Menu);
         self.game_state.map = map.clone();
         self.game_state.rules = rules.clone();
+        self.game_state.playtesting_map = None;
         self.runtime.state.map = map.clone();
         self.runtime.state.rules = rules;
+        self.runtime.state.set(GameStateState::Menu);
+        self.runtime.state.playtesting_map = None;
         self.active_menu_route = Some(DesktopMenuRoute::Editor);
         self.editor_map_info_dialog_index = None;
         self.map_play_dialog_index = None;
@@ -34013,6 +34014,13 @@ impl DesktopLauncher {
         self.clear_editor_import_map_dialog();
         self.last_menu_info_message = Some(format!("beginEditMap: {}", map.plain_name()));
         true
+    }
+
+    fn begin_edit_map_from_index(&mut self, index: usize) -> bool {
+        let Some(map) = self.map_list_cards.get(index).cloned() else {
+            return false;
+        };
+        self.begin_edit_map(map)
     }
 
     fn current_editor_map_index(&self) -> Option<usize> {
@@ -39079,6 +39087,9 @@ impl DesktopLauncher {
     }
 
     fn execute_pause_overlay_quit(&mut self) {
+        if self.check_playtest_and_resume_editor() {
+            return;
+        }
         self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CloseRoute);
         self.game_state.set(GameStateState::Menu);
         self.menu_renderer_state.reset_desktop_root();
@@ -39086,6 +39097,26 @@ impl DesktopLauncher {
         self.pause_overlay_modal = None;
         self.last_menu_route_shell_action = None;
         self.last_menu_guard_message = None;
+    }
+
+    fn playtesting_map_for_resume(&self) -> Option<MapDescriptor> {
+        self.game_state
+            .playtesting_map
+            .clone()
+            .or_else(|| self.runtime.state.playtesting_map.clone())
+    }
+
+    fn check_playtest_and_resume_editor(&mut self) -> bool {
+        let Some(testing) = self.playtesting_map_for_resume() else {
+            return false;
+        };
+        self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CloseRoute);
+        self.pause_overlay_modal = None;
+        self.last_menu_route_shell_action = None;
+        self.last_menu_guard_message = None;
+        self.menu_mobile_terminal_open = false;
+        self.map_play_playtesting = false;
+        self.begin_edit_map(testing)
     }
 
     fn dispatch_pause_overlay_action(&mut self, action: DesktopPausedOverlayAction) {
@@ -71805,6 +71836,61 @@ repo: "Beta/Override"
             Some(super::DesktopPauseQuitResult::Confirmed)
         );
         assert!(launcher.game_state.is_menu());
+    }
+
+    #[test]
+    fn desktop_launcher_paused_playtest_quit_resumes_editor_like_java_check_playtest() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), "Playtest Resume".to_string());
+        tags.insert("author".to_string(), "Mapper".to_string());
+        let mut map = MapDescriptor::new(
+            "maps/custom/playtest-resume.msav",
+            180,
+            180,
+            tags,
+            true,
+            1,
+            158,
+        );
+        map.spawns = 7;
+        map.teams = vec![1, 2];
+        launcher.map_list_cards = vec![map.clone()];
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.map = map.clone();
+        launcher.runtime.state.map = map.clone();
+        launcher.game_state.playtesting_map = Some(map.clone());
+        launcher.runtime.state.playtesting_map = Some(map.clone());
+        launcher.map_play_playtesting = true;
+        launcher.map_play_dialog_index = Some(0);
+        launcher.pause_overlay_modal = Some(super::DesktopPausedOverlayModal::QuitConfirm);
+        launcher.game_state.set(GameStateState::Paused);
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::ConfirmQuit);
+
+        assert_eq!(
+            launcher.last_pause_quit_result,
+            Some(super::DesktopPauseQuitResult::Confirmed)
+        );
+        assert_eq!(launcher.pause_overlay_modal, None);
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Editor)
+        );
+        assert!(launcher.game_state.is_menu());
+        assert!(launcher.game_state.is_editor());
+        assert!(launcher.runtime.state.is_menu());
+        assert!(launcher.runtime.state.is_editor());
+        assert_eq!(launcher.game_state.map.plain_name(), "Playtest Resume");
+        assert_eq!(launcher.runtime.state.map.plain_name(), "Playtest Resume");
+        assert!(launcher.game_state.playtesting_map.is_none());
+        assert!(launcher.runtime.state.playtesting_map.is_none());
+        assert!(!launcher.map_play_playtesting);
+        assert_eq!(launcher.map_play_dialog_index, None);
+        assert_eq!(
+            launcher.last_menu_info_message.as_deref(),
+            Some("beginEditMap: Playtest Resume")
+        );
     }
 
     #[test]
