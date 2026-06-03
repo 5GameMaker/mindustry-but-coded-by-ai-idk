@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 847. CustomRulesDialog edit 子弹窗 Copy/Load 关闭语义对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.79%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `CustomRulesDialog` 的 `@waves.edit` 是独立编辑子弹窗；
+  - Copy / Load 执行后调用 `dialog.hide()`，应关闭 edit 子弹窗；
+  - Reset 只重置规则并 refresh，edit 子弹窗仍保持打开。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMapCardActionKind::CopyCustomRules` / `LoadCustomRules` 执行后关闭 `map_play_rules_edit_dialog_open`；
+    - `DesktopPausedOverlayAction::CopyPauseCustomRules` / `LoadPauseCustomRules` 执行后关闭 `pause_custom_rules_edit_dialog_open`；
+    - 更新 map-play 与 pause custom rules 回归测试，锁定 Copy/Load 关闭、Reset 保持打开的 Java 行为。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop paused_world_overlay_custom_rules`
+  - `cargo test -p mindustry-desktop map_play`
+  - `cargo test -p mindustry-desktop weather_dialog`
+- 仍未完成：
+  - pause 侧仍需补齐 weather / banned blocks / banned units / team rules 子流；
+  - CustomRules 主 ScrollPane 仍需继续补 Java 风格滚动条/knob 视觉与拖拽；
+  - 关闭规则后向联机端广播 `Call.setRules(toEdit)` 的 Java 互通语义仍需继续接入；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 846. PausedDialog CustomRules 主内容滚动接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。

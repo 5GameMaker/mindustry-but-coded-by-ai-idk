@@ -40192,7 +40192,7 @@ impl DesktopLauncher {
                                 action.index,
                                 &mut platform,
                             );
-                            self.map_play_rules_edit_dialog_open = true;
+                            self.map_play_rules_edit_dialog_open = false;
                             self.map_play_custom_rules_search_focused = false;
                         }
                         DesktopMapCardActionKind::LoadCustomRules => {
@@ -40201,7 +40201,7 @@ impl DesktopLauncher {
                                 action.index,
                                 &mut platform,
                             );
-                            self.map_play_rules_edit_dialog_open = true;
+                            self.map_play_rules_edit_dialog_open = false;
                             self.map_play_custom_rules_search_focused = false;
                         }
                         DesktopMapCardActionKind::ResetCustomRules => {
@@ -41426,11 +41426,11 @@ impl DesktopLauncher {
             }
             DesktopPausedOverlayAction::CopyPauseCustomRules => {
                 let _ = self.copy_pause_custom_rules_to_clipboard_with_platform(platform);
-                self.pause_custom_rules_edit_dialog_open = true;
+                self.pause_custom_rules_edit_dialog_open = false;
             }
             DesktopPausedOverlayAction::LoadPauseCustomRules => {
                 let _ = self.load_pause_custom_rules_from_clipboard_with_platform(platform);
-                self.pause_custom_rules_edit_dialog_open = true;
+                self.pause_custom_rules_edit_dialog_open = false;
             }
             DesktopPausedOverlayAction::ResetPauseCustomRules => {
                 self.reset_pause_custom_rules_edit();
@@ -76667,11 +76667,18 @@ displayName: "Alpha Pack"
             launcher.last_pause_custom_rules_clipboard_text.as_deref(),
             Some(copied.as_str())
         );
+        assert!(
+            !launcher.pause_custom_rules_edit_dialog_open,
+            "Java @waves.edit dialog hides after copying custom rules"
+        );
 
         let mut load_rules = launcher.game_state.rules.copy();
         load_rules.infinite_resources = true;
         load_rules.win_wave = 9;
         platform.clipboard_read = Some(DesktopLauncher::map_play_rules_clipboard_json(&load_rules));
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::OpenPauseCustomRulesEdit,
+        );
         launcher
             .pause_custom_rules_edit
             .as_mut()
@@ -76685,7 +76692,14 @@ displayName: "Alpha Pack"
         assert!(edit.infinite_resources);
         assert_eq!(edit.win_wave, 9);
         assert_eq!(launcher.pause_custom_rules_error, None);
+        assert!(
+            !launcher.pause_custom_rules_edit_dialog_open,
+            "Java @waves.edit dialog hides after loading custom rules"
+        );
 
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::OpenPauseCustomRulesEdit,
+        );
         launcher.dispatch_pause_overlay_action(
             super::DesktopPausedOverlayAction::ResetPauseCustomRules,
         );
@@ -81079,20 +81093,16 @@ displayName: "Alpha Pack"
         assert!(copied_rules.contains("\"protectCores\":false"));
         assert!(copied_rules.contains("\"rtsAi\":false"));
         assert!(copied_rules.contains("\"blockHealthMultiplier\":1.1"));
+        assert!(
+            !launcher.map_play_rules_edit_dialog_open,
+            "Java @waves.edit dialog hides after copying custom rules"
+        );
+
+        launcher.dispatch_menu_route_shell_action(open_edit);
+        assert!(launcher.map_play_rules_edit_dialog_open);
 
         let reset_center =
             DesktopLauncher::map_play_rules_edit_button_rect(edit_dialog, 2).center();
-        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
-            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::ResetCustomRules),
-        ));
-        assert!(
-            !launcher
-                .map_play_rules
-                .as_ref()
-                .map(|rules| rules.attack_mode)
-                .unwrap_or(false),
-            "reset should restore the selected mode defaults before Load from Clipboard"
-        );
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 viewport,
@@ -81106,8 +81116,36 @@ displayName: "Alpha Pack"
                 )
             ))
         );
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::ResetCustomRules),
+        ));
+        assert!(
+            !launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| rules.attack_mode)
+                .unwrap_or(false),
+            "reset should restore the selected mode defaults before Load from Clipboard"
+        );
+        assert!(
+            launcher.map_play_rules_edit_dialog_open,
+            "Java @waves.edit dialog stays open after Reset"
+        );
 
         let load_center = DesktopLauncher::map_play_rules_edit_button_rect(edit_dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                load_center.x,
+                load_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(
+                    0,
+                    super::DesktopMapCardActionKind::LoadCustomRules
+                )
+            ))
+        );
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
             super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::LoadCustomRules),
         ));
@@ -81172,20 +81210,13 @@ displayName: "Alpha Pack"
             Some((false, false, 1.1)),
             "load should restore nested CustomRulesDialog team rule fields from JSON"
         );
-        assert_eq!(
-            launcher.active_menu_route_shell_action_at_surface_point(
-                viewport,
-                load_center.x,
-                load_center.y
-            ),
-            Some(super::DesktopMenuRouteShellAction::MapCard(
-                super::DesktopMapCardAction::new(
-                    0,
-                    super::DesktopMapCardActionKind::LoadCustomRules
-                )
-            ))
+        assert!(
+            !launcher.map_play_rules_edit_dialog_open,
+            "Java @waves.edit dialog hides after loading custom rules"
         );
 
+        launcher.dispatch_menu_route_shell_action(open_edit);
+        assert!(launcher.map_play_rules_edit_dialog_open);
         let close_center =
             DesktopLauncher::map_play_rules_edit_button_rect(edit_dialog, 3).center();
         let close_edit =
