@@ -17,6 +17,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 856. MapPlay CustomRules planet/anyenv 选择器接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **93.88%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 为 map-play CustomRules 补齐 `OpenPlanet / ClosePlanet / SelectPlanet(index) / SelectAnyEnv`；
+    - 新增 `map_play_planet_dialog_open`，接入 hit-test、back-stack、dispatch、render 与 pending `map_play_rules.planet/env`；
+    - 复用 pause 侧 planet picker，选择 planet 写入默认 env，选择 anyenv 写入 `planet = "sun"` 与 `default_planet_env()`；
+    - 关闭/切换 map-play 子弹窗时同步清理 planet 状态，避免独立残留。
+- 已验证：
+  - `cargo fmt --all`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_map_play_custom_rules_planet_picker_like_java -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_map_play_back_key_closes_nested_child_dialogs_like_java_stack -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop map_play_custom_rules -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop map_play -- --nocapture`
+- 注意：不带 `RUSTFLAGS='-C debuginfo=0' -j 1` 的首次测试曾在 rustc/LLVM 编译阶段 OOM；单线程无 debuginfo 后同一测试通过。
+- 下一步优先：按本地 Java `CustomRulesDialog.java` 继续补 map-play `@configure`/loadout、`@rules.ambientlight` 与完整 environment 子项，确保不是独立 UI 壳。
+
 ## 855. Menu 前端测试基线与本地化/label sprite 收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只处理本地前端测试基线。

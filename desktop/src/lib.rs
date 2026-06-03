@@ -1846,6 +1846,10 @@ pub enum DesktopMapCardActionKind {
     ToggleTeamRuleSection(usize),
     ToggleTeamRule(usize, DesktopTeamRuleToggle),
     AdjustTeamRuleNumber(usize, DesktopTeamRuleNumber, i32),
+    OpenPlanet,
+    ClosePlanet,
+    SelectPlanet(usize),
+    SelectAnyEnv,
     OpenInEditor,
     Delete,
     ViewWorkshop,
@@ -18983,6 +18987,7 @@ pub struct DesktopLauncher {
     pub map_play_weather_add_dialog_open: bool,
     pub map_play_team_rules_dialog_open: bool,
     pub map_play_team_rules_selected_team: Option<usize>,
+    pub map_play_planet_dialog_open: bool,
     pub map_play_rules: Option<Rules>,
     pub last_map_play_rules_clipboard_text: Option<String>,
     pub map_play_rules_error: Option<String>,
@@ -20221,6 +20226,7 @@ impl DesktopLauncher {
             map_play_weather_add_dialog_open: false,
             map_play_team_rules_dialog_open: false,
             map_play_team_rules_selected_team: None,
+            map_play_planet_dialog_open: false,
             map_play_rules: None,
             last_map_play_rules_clipboard_text: None,
             map_play_rules_error: None,
@@ -24549,6 +24555,7 @@ impl DesktopLauncher {
             self.map_play_weather_scroll_offset = 0;
             self.map_play_weather_add_dialog_open = false;
             self.map_play_team_rules_dialog_open = false;
+            self.map_play_planet_dialog_open = false;
             self.editor_map_info_dialog_index = None;
             self.last_menu_dispatch = None;
             self.last_menu_route_shell_action = None;
@@ -24587,6 +24594,8 @@ impl DesktopLauncher {
             DesktopMapCardActionKind::CloseWeather
         } else if self.map_play_team_rules_dialog_open {
             DesktopMapCardActionKind::CloseTeamRules
+        } else if self.map_play_planet_dialog_open {
+            DesktopMapCardActionKind::ClosePlanet
         } else {
             return Some(DesktopMenuRouteShellAction::CloseMapPlayCustomize);
         };
@@ -36611,6 +36620,26 @@ impl DesktopLauncher {
         self.pause_custom_rules_error = None;
     }
 
+    fn select_map_play_planet(&mut self, index: usize, candidate_index: usize) {
+        let Some((name, _, env)) = self.pause_planet_candidates().get(candidate_index).cloned()
+        else {
+            return;
+        };
+        self.update_map_play_rules_for_team(index, |rules| {
+            rules.planet = name;
+            rules.env = env;
+        });
+        self.map_play_planet_dialog_open = false;
+    }
+
+    fn select_map_play_any_env(&mut self, index: usize) {
+        self.update_map_play_rules_for_team(index, |rules| {
+            rules.planet = "sun".into();
+            rules.env = default_planet_env();
+        });
+        self.map_play_planet_dialog_open = false;
+    }
+
     fn map_play_rules_clipboard_json(rules: &Rules) -> String {
         let mode_name = rules.mode_name.as_deref().unwrap_or("custom");
         format!(
@@ -36930,6 +36959,7 @@ impl DesktopLauncher {
         self.map_play_banned_content_dialog = None;
         self.map_play_weather_dialog_open = false;
         self.map_play_weather_scroll_offset = 0;
+        self.map_play_planet_dialog_open = false;
         self.map_play_rules = None;
         self.map_play_rules_error = None;
         self.map_play_playtesting = false;
@@ -36991,6 +37021,7 @@ impl DesktopLauncher {
         self.map_play_rules_edit_dialog_open = false;
         self.map_play_banned_content_dialog = None;
         self.map_play_weather_dialog_open = false;
+        self.map_play_planet_dialog_open = false;
         self.map_play_rules = None;
         self.map_play_rules_error = None;
         self.map_play_playtesting = false;
@@ -37096,6 +37127,7 @@ impl DesktopLauncher {
         self.map_play_rules_edit_dialog_open = false;
         self.map_play_banned_content_dialog = None;
         self.map_play_weather_dialog_open = false;
+        self.map_play_planet_dialog_open = false;
         self.map_play_rules_error = None;
         true
     }
@@ -37117,6 +37149,7 @@ impl DesktopLauncher {
         self.map_play_rules_edit_dialog_open = false;
         self.map_play_banned_content_dialog = None;
         self.map_play_weather_dialog_open = false;
+        self.map_play_planet_dialog_open = false;
         self.map_play_rules_error = None;
         self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::MapCard(
             DesktopMapCardAction::new(index, DesktopMapCardActionKind::PlaySelected),
@@ -38627,6 +38660,41 @@ impl DesktopLauncher {
                 let child = Self::map_play_child_dialog_rect(dialog);
                 if self.map_play_customize_dialog_open {
                     if let Some(index) = self.map_play_dialog_index {
+                        if self.map_play_planet_dialog_open {
+                            let planet_dialog = Self::pause_planet_dialog_rect(child);
+                            if Self::pause_planet_close_rect(planet_dialog).contains_point(point) {
+                                return Some(DesktopMenuRouteShellAction::MapCard(
+                                    DesktopMapCardAction::new(
+                                        index,
+                                        DesktopMapCardActionKind::ClosePlanet,
+                                    ),
+                                ));
+                            }
+                            let candidates = self.pause_planet_candidates();
+                            for (candidate_index, _) in candidates.iter().enumerate() {
+                                if Self::pause_planet_button_rect(planet_dialog, candidate_index)
+                                    .contains_point(point)
+                                {
+                                    return Some(DesktopMenuRouteShellAction::MapCard(
+                                        DesktopMapCardAction::new(
+                                            index,
+                                            DesktopMapCardActionKind::SelectPlanet(candidate_index),
+                                        ),
+                                    ));
+                                }
+                            }
+                            if Self::pause_planet_button_rect(planet_dialog, candidates.len())
+                                .contains_point(point)
+                            {
+                                return Some(DesktopMenuRouteShellAction::MapCard(
+                                    DesktopMapCardAction::new(
+                                        index,
+                                        DesktopMapCardActionKind::SelectAnyEnv,
+                                    ),
+                                ));
+                            }
+                            return None;
+                        }
                         if let Some(kind) = self.map_play_banned_content_dialog {
                             let banned_dialog = Self::map_play_banned_content_dialog_rect(child);
                             if Self::map_play_banned_content_close_rect(banned_dialog)
@@ -39141,6 +39209,15 @@ impl DesktopLauncher {
                                 DesktopMapCardAction::new(
                                     index,
                                     DesktopMapCardActionKind::OpenTeamRules,
+                                ),
+                            ));
+                        }
+                        if Self::map_play_customize_edit_button_rect(child, 6).contains_point(point)
+                        {
+                            return Some(DesktopMenuRouteShellAction::MapCard(
+                                DesktopMapCardAction::new(
+                                    index,
+                                    DesktopMapCardActionKind::OpenPlanet,
                                 ),
                             ));
                         }
@@ -41371,6 +41448,7 @@ impl DesktopLauncher {
                             self.map_play_banned_content_dialog = None;
                             self.map_play_weather_dialog_open = false;
                             self.map_play_weather_scroll_offset = 0;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_rules = None;
                             self.map_play_rules_error = None;
                             self.map_play_playtesting = false;
@@ -41417,6 +41495,7 @@ impl DesktopLauncher {
                             self.map_play_rules_edit_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
                             self.map_play_weather_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_rules = None;
                             self.map_play_rules_error = None;
                             self.map_play_playtesting = false;
@@ -41427,6 +41506,7 @@ impl DesktopLauncher {
                             self.map_play_rules_edit_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
                             self.map_play_weather_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_mode_help_dialog_open = false;
                         }
                         DesktopMapCardActionKind::ShowModeHelp => {
@@ -41435,6 +41515,7 @@ impl DesktopLauncher {
                             self.map_play_rules_edit_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
                             self.map_play_weather_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                         }
                         DesktopMapCardActionKind::ToggleCustomRule(toggle) => {
                             self.toggle_map_play_custom_rule(action.index, toggle);
@@ -41442,6 +41523,7 @@ impl DesktopLauncher {
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
                             self.map_play_weather_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                         }
                         DesktopMapCardActionKind::AdjustCustomRuleNumber(number, direction) => {
                             self.adjust_map_play_custom_rule_number(
@@ -41454,6 +41536,7 @@ impl DesktopLauncher {
                             self.map_play_rules_edit_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
                             self.map_play_weather_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                         }
                         DesktopMapCardActionKind::AdjustLimitAreaNumber(number, direction) => {
                             self.adjust_map_play_limit_area_number(action.index, number, direction);
@@ -41462,6 +41545,7 @@ impl DesktopLauncher {
                             self.map_play_rules_edit_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
                             self.map_play_weather_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                         }
                         DesktopMapCardActionKind::FocusCustomRulesSearch => {
                             self.map_play_customize_dialog_open = true;
@@ -41471,6 +41555,7 @@ impl DesktopLauncher {
                             self.map_play_banned_content_dialog = None;
                             self.map_play_weather_dialog_open = false;
                             self.map_play_team_rules_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                         }
                         DesktopMapCardActionKind::ClearCustomRulesSearch => {
                             self.map_play_custom_rules_search.clear();
@@ -41481,11 +41566,13 @@ impl DesktopLauncher {
                             self.map_play_banned_content_dialog = None;
                             self.map_play_weather_dialog_open = false;
                             self.map_play_team_rules_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                         }
                         DesktopMapCardActionKind::OpenCustomRulesEdit => {
                             self.map_play_rules_edit_dialog_open = true;
                             self.map_play_banned_content_dialog = None;
                             self.map_play_weather_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_rules_error = None;
@@ -41523,6 +41610,7 @@ impl DesktopLauncher {
                             self.map_play_banned_content_search_focused = false;
                             self.map_play_banned_content_scroll_offset = 0;
                             self.map_play_weather_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_rules_edit_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
@@ -41538,6 +41626,7 @@ impl DesktopLauncher {
                             self.map_play_banned_content_search_focused = true;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                         }
                         DesktopMapCardActionKind::ClearBannedContentSearch(kind) => {
                             self.map_play_banned_content_search.clear();
@@ -41559,6 +41648,7 @@ impl DesktopLauncher {
                             self.map_play_banned_content_search_focused = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                         }
                         DesktopMapCardActionKind::ToggleBannedContent(kind, candidate_index) => {
                             self.toggle_map_play_banned_content(
@@ -41568,6 +41658,7 @@ impl DesktopLauncher {
                             );
                             self.map_play_banned_content_dialog = Some(kind);
                             self.map_play_weather_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
@@ -41575,6 +41666,7 @@ impl DesktopLauncher {
                             self.set_all_map_play_banned_content(action.index, kind, true);
                             self.map_play_banned_content_dialog = Some(kind);
                             self.map_play_weather_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
@@ -41582,6 +41674,7 @@ impl DesktopLauncher {
                             self.set_all_map_play_banned_content(action.index, kind, false);
                             self.map_play_banned_content_dialog = Some(kind);
                             self.map_play_weather_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
@@ -41592,6 +41685,7 @@ impl DesktopLauncher {
                             self.map_play_banned_content_dialog = None;
                             self.map_play_banned_content_search_focused = false;
                             self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_rules_error = None;
@@ -41607,6 +41701,7 @@ impl DesktopLauncher {
                             self.map_play_weather_add_dialog_open = true;
                             self.map_play_banned_content_dialog = None;
                             self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_rules_error = None;
@@ -41620,6 +41715,7 @@ impl DesktopLauncher {
                             self.map_play_weather_dialog_open = true;
                             self.map_play_weather_add_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
@@ -41628,6 +41724,7 @@ impl DesktopLauncher {
                             self.map_play_weather_dialog_open = true;
                             self.map_play_weather_add_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
@@ -41636,6 +41733,7 @@ impl DesktopLauncher {
                             self.map_play_weather_dialog_open = true;
                             self.map_play_weather_add_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
@@ -41653,6 +41751,7 @@ impl DesktopLauncher {
                             self.map_play_weather_dialog_open = true;
                             self.map_play_weather_add_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
@@ -41669,6 +41768,7 @@ impl DesktopLauncher {
                             self.map_play_weather_add_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
                             self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_rules_error = None;
@@ -41682,6 +41782,7 @@ impl DesktopLauncher {
                                 rules.allow_edit_rules = !rules.allow_edit_rules;
                             });
                             self.map_play_team_rules_dialog_open = true;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
@@ -41689,6 +41790,7 @@ impl DesktopLauncher {
                             self.select_map_play_default_team(action.index, team_id);
                             self.map_play_team_rules_selected_team = Some(team_id);
                             self.map_play_team_rules_dialog_open = true;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
@@ -41696,12 +41798,14 @@ impl DesktopLauncher {
                             self.select_map_play_wave_team(action.index, team_id);
                             self.map_play_team_rules_selected_team = Some(team_id);
                             self.map_play_team_rules_dialog_open = true;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
                         DesktopMapCardActionKind::ToggleTeamRuleSection(team_id) => {
                             self.map_play_team_rules_selected_team = Some(team_id);
                             self.map_play_team_rules_dialog_open = true;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
@@ -41709,6 +41813,7 @@ impl DesktopLauncher {
                             self.toggle_map_play_team_rule(action.index, team_id, toggle);
                             self.map_play_team_rules_selected_team = Some(team_id);
                             self.map_play_team_rules_dialog_open = true;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
@@ -41725,6 +41830,33 @@ impl DesktopLauncher {
                             );
                             self.map_play_team_rules_selected_team = Some(team_id);
                             self.map_play_team_rules_dialog_open = true;
+                            self.map_play_planet_dialog_open = false;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::OpenPlanet => {
+                            self.map_play_planet_dialog_open = true;
+                            self.map_play_team_rules_dialog_open = false;
+                            self.map_play_weather_dialog_open = false;
+                            self.map_play_weather_scroll_offset = 0;
+                            self.map_play_weather_add_dialog_open = false;
+                            self.map_play_banned_content_dialog = None;
+                            self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                            self.map_play_rules_error = None;
+                            self.map_play_custom_rules_search_focused = false;
+                        }
+                        DesktopMapCardActionKind::ClosePlanet => {
+                            self.map_play_planet_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::SelectPlanet(candidate_index) => {
+                            self.select_map_play_planet(action.index, candidate_index);
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::SelectAnyEnv => {
+                            self.select_map_play_any_env(action.index);
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
@@ -41757,6 +41889,7 @@ impl DesktopLauncher {
                             self.map_play_rules_edit_dialog_open = false;
                             self.map_play_banned_content_dialog = None;
                             self.map_play_weather_dialog_open = false;
+                            self.map_play_planet_dialog_open = false;
                             self.map_play_rules = None;
                             self.map_play_rules_error = None;
                             self.map_play_playtesting = false;
@@ -41782,6 +41915,7 @@ impl DesktopLauncher {
                 self.map_play_banned_content_dialog = None;
                 self.map_play_weather_dialog_open = false;
                 self.map_play_weather_scroll_offset = 0;
+                self.map_play_planet_dialog_open = false;
                 self.map_play_rules = None;
                 self.map_play_rules_error = None;
                 self.map_play_playtesting = false;
@@ -41799,6 +41933,7 @@ impl DesktopLauncher {
                 self.map_play_weather_add_dialog_open = false;
                 self.map_play_team_rules_dialog_open = false;
                 self.map_play_team_rules_selected_team = None;
+                self.map_play_planet_dialog_open = false;
                 self.map_play_rules_error = None;
             }
             DesktopMenuRouteShellAction::NewEditorMap => {
@@ -48556,6 +48691,7 @@ impl DesktopLauncher {
             self.localize_bundle_markup_text("@bannedunits"),
             self.localize_bundle_markup_text("@rules.weather"),
             self.localize_bundle_markup_text("@rules.title.teams"),
+            self.localize_bundle_markup_text("@rules.title.planet"),
         ]
         .into_iter()
         .enumerate()
@@ -48603,6 +48739,9 @@ impl DesktopLauncher {
         }
         if self.map_play_team_rules_dialog_open {
             self.push_map_play_team_rules_dialog(pass, child, &rules);
+        }
+        if self.map_play_planet_dialog_open {
+            self.push_pause_planet_dialog(pass, child, &rules);
         }
     }
 
@@ -52025,6 +52164,7 @@ impl DesktopLauncher {
                         && self.map_play_banned_content_dialog.is_none()
                         && !self.map_play_weather_dialog_open
                         && !self.map_play_team_rules_dialog_open
+                        && !self.map_play_planet_dialog_open
                         && matches!(key_code.as_str(), "Backspace" | "Delete") =>
                 {
                     if key_code == "Backspace" {
@@ -52533,6 +52673,7 @@ impl DesktopLauncher {
                         && self.map_play_banned_content_dialog.is_none()
                         && !self.map_play_weather_dialog_open
                         && !self.map_play_team_rules_dialog_open
+                        && !self.map_play_planet_dialog_open
                     {
                         for ch in text.chars().filter(|ch| !ch.is_control()) {
                             if self.map_play_custom_rules_search.len()
@@ -85378,6 +85519,181 @@ displayName: "Alpha Pack"
     }
 
     #[test]
+    fn desktop_launcher_map_play_custom_rules_planet_picker_like_java() {
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), "Planet Rules".to_string());
+        let mut map = MapDescriptor::new(
+            "maps/custom/planet-rules.msav",
+            180,
+            180,
+            tags,
+            true,
+            1,
+            157,
+        );
+        map.spawns = 1;
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.map_list_cards = vec![map];
+        let original_game_planet = launcher.game_state.rules.planet.clone();
+        let original_game_env = launcher.game_state.rules.env;
+        launcher.dispatch_menu_action(MenuButtonRole::CustomGame);
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenPlay),
+        ));
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::Customize),
+        ));
+
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::CustomGame,
+        );
+        let dialog = DesktopLauncher::map_card_dialog_rect_for_panel(panel);
+        let child = DesktopLauncher::map_play_child_dialog_rect(dialog);
+        let planet_center = DesktopLauncher::map_play_customize_edit_button_rect(child, 6).center();
+        let open_planet = super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenPlanet),
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                planet_center.x,
+                planet_center.y
+            ),
+            Some(open_planet)
+        );
+        launcher.dispatch_menu_route_shell_action(open_planet);
+        assert!(launcher.map_play_planet_dialog_open);
+        assert!(!launcher.map_play_weather_dialog_open);
+        assert!(!launcher.map_play_team_rules_dialog_open);
+
+        launcher.map_play_custom_rules_search = "planet".into();
+        launcher.map_play_custom_rules_search_focused = true;
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("x".into())]);
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "Backspace".into(),
+                pressed: true,
+            }],
+        );
+        assert_eq!(launcher.map_play_custom_rules_search, "planet");
+
+        let candidates = launcher.pause_planet_candidates();
+        let erekir_index = candidates
+            .iter()
+            .position(|(name, _, _)| name == "erekir")
+            .expect("map play custom rules should expose vanilla landable erekir");
+        let erekir_env = candidates[erekir_index].2;
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("map play planet picker should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.iter().any(
+            |text| text.contains(&launcher.localize_bundle_markup_text("@rules.title.planet"))
+        ));
+        assert!(texts.iter().any(|text| text.contains("serpulo")));
+        assert!(texts.iter().any(|text| text.contains("erekir")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains(&launcher.localize_bundle_markup_text("@rules.anyenv"))));
+
+        let planet_dialog = DesktopLauncher::pause_planet_dialog_rect(child);
+        let erekir_button =
+            DesktopLauncher::pause_planet_button_rect(planet_dialog, erekir_index).center();
+        let select_erekir =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::SelectPlanet(erekir_index),
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                erekir_button.x,
+                erekir_button.y
+            ),
+            Some(select_erekir)
+        );
+        launcher.dispatch_menu_route_shell_action(select_erekir);
+        assert!(!launcher.map_play_planet_dialog_open);
+        assert_eq!(
+            launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| rules.planet.as_str()),
+            Some("erekir")
+        );
+        assert_eq!(
+            launcher.map_play_rules.as_ref().map(|rules| rules.env),
+            Some(erekir_env)
+        );
+        assert_eq!(
+            launcher.game_state.rules.planet, original_game_planet,
+            "MapPlayDialog keeps custom planet pending until PlaySelected"
+        );
+        assert_eq!(launcher.game_state.rules.env, original_game_env);
+
+        launcher.dispatch_menu_route_shell_action(open_planet);
+        let anyenv_button =
+            DesktopLauncher::pause_planet_button_rect(planet_dialog, candidates.len()).center();
+        let select_anyenv = super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::SelectAnyEnv),
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                anyenv_button.x,
+                anyenv_button.y
+            ),
+            Some(select_anyenv)
+        );
+        launcher.dispatch_menu_route_shell_action(select_anyenv);
+        assert_eq!(
+            launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| rules.planet.as_str()),
+            Some("sun")
+        );
+        assert_eq!(
+            launcher.map_play_rules.as_ref().map(|rules| rules.env),
+            Some(super::default_planet_env())
+        );
+
+        launcher.dispatch_menu_route_shell_action(open_planet);
+        assert!(launcher.map_play_planet_dialog_open);
+        assert!(launcher.apply_menu_back_key());
+        assert!(!launcher.map_play_planet_dialog_open);
+        assert!(launcher.map_play_customize_dialog_open);
+
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::PlaySelected),
+        ));
+        assert_eq!(launcher.game_state.rules.planet, "sun");
+        assert_eq!(launcher.game_state.rules.env, super::default_planet_env());
+        assert_eq!(launcher.runtime.state.rules.planet, "sun");
+        assert_eq!(
+            launcher.runtime.state.rules.env,
+            super::default_planet_env()
+        );
+    }
+
+    #[test]
     fn desktop_launcher_map_play_back_key_closes_nested_child_dialogs_like_java_stack() {
         let mut tags = BTreeMap::new();
         tags.insert("name".to_string(), "Back Stack Arena".to_string());
@@ -85449,6 +85765,14 @@ displayName: "Alpha Pack"
         assert!(launcher.map_play_team_rules_dialog_open);
         assert!(launcher.apply_menu_back_key());
         assert!(!launcher.map_play_team_rules_dialog_open);
+        assert!(launcher.map_play_customize_dialog_open);
+
+        launcher.dispatch_menu_route_shell_action(map_card_action(
+            super::DesktopMapCardActionKind::OpenPlanet,
+        ));
+        assert!(launcher.map_play_planet_dialog_open);
+        assert!(launcher.apply_menu_back_key());
+        assert!(!launcher.map_play_planet_dialog_open);
         assert!(launcher.map_play_customize_dialog_open);
 
         assert!(launcher.apply_menu_back_key());
