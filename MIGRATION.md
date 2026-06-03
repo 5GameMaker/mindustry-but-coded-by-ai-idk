@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 795. OpenGL sprite mesh upload 跨帧签名缓存
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **92.9%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容、性能收口与所有子菜单接近原版。
+- 背景：
+  - 上一轮已将菜单 `draw_commands` 从约 `248` 压到约 `84`，但首次帧仍有 `sprite_mesh_upload_commands=351`，后续帧仍会重复上传一部分 UI sprite mesh；
+  - 原版 Arc/SpriteBatch 的稳定 UI 路径会复用 GL 资源，Rust 当前过渡 renderer 仍偏向每帧重建 plan，因此先补一个严格签名级缓存，降低不必要上传。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteMeshUploadSignature`，记录 `vertex_count`、`index_count`、stride、vertex attributes、vertex bytes、index bytes；
+    - `DesktopOpenGlBackendGraphicsRenderer` 记录已提交的 `vertex_array_key -> upload signature`；
+    - 每帧提交前只在同 `vertex_array_key` 且签名完全一致时跳过 pending sprite mesh upload；
+    - 提交后记住本帧实际上传的 mesh 签名，避免把未上传或已变化的数据错误标记为最新；
+    - 不改变 batch/layer/draw order，不放宽 exact-layer 分桶。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_does_not_reupload_static_sprite_mesh_each_frame --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --release --features opengl-native-runtime`
+  - `MINDUSTRY_DESKTOP_TRACE_SUMMARY=1 ./target/release/mindustry-desktop.exe` 短跑核对：首次帧仍有 `sprite_mesh_upload_commands=351`；后续菜单帧降到约 `26`，`texture_upload_commands=0`，`draw_commands=84`。
+- 仍未完成：
+  - 仍有约 `26` 个动态/变化 UI mesh upload 每帧发生，后续需要把静态菜单子树、hover/动画、文字 atlas/布局拆分缓存；
+  - 当前修复只降低重复上传，不等于完整原版 UI batcher；
+  - 旧 broad OpenGL primitive 测试的历史期望仍应后续单独清理，不能为过测试牺牲层级正确性。
+
 ## 794. OpenGL resolving executor 连续 draw 状态去重
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

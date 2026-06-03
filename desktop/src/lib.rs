@@ -9136,6 +9136,31 @@ pub struct DesktopGraphicsOpenGlBackendResolvedSpriteMeshUpload {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendSpriteMeshUploadSignature {
+    pub vertex_count: usize,
+    pub index_count: usize,
+    pub vertex_stride_bytes: usize,
+    pub vertex_attributes: Vec<DesktopGraphicsOpenGlBackendVertexAttributePlan>,
+    pub vertex_bytes: Vec<u8>,
+    pub index_bytes: Vec<u8>,
+}
+
+impl From<&DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan>
+    for DesktopGraphicsOpenGlBackendSpriteMeshUploadSignature
+{
+    fn from(upload: &DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan) -> Self {
+        Self {
+            vertex_count: upload.vertex_count,
+            index_count: upload.index_count,
+            vertex_stride_bytes: upload.vertex_stride_bytes,
+            vertex_attributes: upload.vertex_attributes.clone(),
+            vertex_bytes: upload.vertex_bytes.clone(),
+            index_bytes: upload.index_bytes.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand {
     BindVertexArray {
         vertex_array_handle: u32,
@@ -17763,6 +17788,8 @@ pub struct DesktopOpenGlBackendGraphicsRenderer<R> {
     pub frames_rendered: usize,
     pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
     pub submitted_frame_texture_generations: BTreeMap<String, u64>,
+    pub submitted_sprite_mesh_upload_signatures:
+        BTreeMap<String, DesktopGraphicsOpenGlBackendSpriteMeshUploadSignature>,
     pub resolver_allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
     pub resolver_cache: DesktopGraphicsOpenGlBackendHandleCache,
     pub resolver_location_cache: DesktopGraphicsOpenGlBackendLocationCache,
@@ -17784,6 +17811,7 @@ impl<R> DesktopOpenGlBackendGraphicsRenderer<R> {
             sprite_texture_resource_table:
                 DesktopGraphicsOpenGlBackendTextureResourceTable::default(),
             submitted_frame_texture_generations: BTreeMap::new(),
+            submitted_sprite_mesh_upload_signatures: BTreeMap::new(),
             resolver_allocator: DesktopGraphicsOpenGlBackendHandleAllocator::default(),
             resolver_cache: DesktopGraphicsOpenGlBackendHandleCache::default(),
             resolver_location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
@@ -17841,6 +17869,30 @@ impl<R> DesktopOpenGlBackendGraphicsRenderer<R> {
                 self.submitted_frame_texture_generations
                     .insert(upload.texture_key.clone(), upload.generation);
             }
+        }
+    }
+
+    fn retain_pending_sprite_mesh_uploads(
+        &self,
+        state: &mut DesktopGraphicsOpenGlBackendExecutorState,
+    ) {
+        state.sprite_mesh_upload_plans.retain(|upload| {
+            let signature = DesktopGraphicsOpenGlBackendSpriteMeshUploadSignature::from(upload);
+            self.submitted_sprite_mesh_upload_signatures
+                .get(&upload.vertex_array_key)
+                .map_or(true, |submitted| *submitted != signature)
+        });
+    }
+
+    fn remember_sprite_mesh_upload_signatures(
+        &mut self,
+        uploads: &[DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan],
+    ) {
+        for upload in uploads {
+            self.submitted_sprite_mesh_upload_signatures.insert(
+                upload.vertex_array_key.clone(),
+                DesktopGraphicsOpenGlBackendSpriteMeshUploadSignature::from(upload),
+            );
         }
     }
 }
@@ -17925,6 +17977,11 @@ where
             .state
             .sprite_texture_upload_plans
             .extend(opengl_backend_plan.texture_upload_plans.clone());
+        self.retain_pending_sprite_mesh_uploads(&mut opengl_backend_step_sink.state);
+        let pending_sprite_mesh_upload_plans = opengl_backend_step_sink
+            .state
+            .sprite_mesh_upload_plans
+            .clone();
 
         let mut resolving_executor = DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
             allocator: self.resolver_allocator.clone(),
@@ -17952,6 +18009,7 @@ where
 
         self.frames_rendered += 1;
         self.remember_resolved_frame_texture_uploads(&resolving_executor.resolved_texture_uploads);
+        self.remember_sprite_mesh_upload_signatures(&pending_sprite_mesh_upload_plans);
         self.sprite_texture_resource_table = next_sprite_texture_resource_table;
         self.resolver_allocator = resolving_executor.allocator.clone();
         self.resolver_cache = resolving_executor.cache.clone();
@@ -70520,6 +70578,48 @@ repo: "Beta/Override"
         assert!(second_commands.iter().all(|command| !matches!(
             command,
             super::DesktopGraphicsOpenGlBackendDriverCommand::TextureUpload(_)
+        )));
+    }
+
+    #[cfg(feature = "opengl-backend")]
+    #[test]
+    fn desktop_opengl_backend_renderer_does_not_reupload_static_sprite_mesh_each_frame() {
+        let viewport = RenderViewport::new(0.0, 0.0, 96.0, 96.0);
+        let camera = RenderCamera::new(RenderPoint::new(48.0, 48.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(92, RenderSize::new(96.0, 96.0), camera, viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Ui).with_target(RenderTarget::Screen);
+        pass.push(RenderCommand::fill_rect(
+            RenderRect::new(12.0, 12.0, 32.0, 18.0),
+            [0.2, 0.3, 0.4, 1.0],
+            Layer::END_PIXELED,
+        ));
+        render_frame.push_pass(pass);
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
+            texture_atlas: TextureAtlasPlan::new(),
+        };
+        let mut renderer = super::DesktopOpenGlBackendGraphicsRenderer::new(
+            super::DesktopGraphicsNullOpenGlBackendRuntime::default(),
+        );
+
+        renderer.render_graphics_frame(&frame);
+        let first_command_count = renderer.runtime.driver.commands.len();
+        assert!(renderer.last_driver_state.sprite_mesh_upload_commands > 0);
+        assert!(!renderer.submitted_sprite_mesh_upload_signatures.is_empty());
+
+        renderer.render_graphics_frame(&frame);
+        let second_commands = &renderer.runtime.driver.commands[first_command_count..];
+
+        assert_eq!(renderer.last_driver_state.sprite_mesh_upload_commands, 0);
+        assert!(second_commands.iter().all(|command| !matches!(
+            command,
+            super::DesktopGraphicsOpenGlBackendDriverCommand::SpriteMeshUpload(_)
         )));
     }
 
