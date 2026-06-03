@@ -17,6 +17,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 840. ModsDialog browser 卡片 selection modal 回归锁定
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.72%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ModsDialog.rebuildBrowser()` 中 browser listing 是整卡 `button(...)`；
+  - `Add/Reinstall`、`@mods.github.open`、`@mods.browser.view-releases` 位于点击卡片后的 `BaseDialog sel`，不是 browser card inline action；
+  - 打开 releases 弹窗后应阻塞后层 browser card 点击。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_mods_browser_card_click_only_opens_selection_modal_like_java` 回归测试；
+    - 锁定 browser card 只返回 `OpenModsBrowserSelection(index)`；
+    - 锁定 card 渲染层不出现 `Add/Reinstall/Repo/View Releases` 内联按钮；
+    - 锁定 selection modal 才暴露 Back、Add、Repo、View Releases 四个动作。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_card_click_only_opens_selection_modal_like_java`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser`
+- 仍未完成：
+  - ModsDialog 后续仍需继续核查 releases/listing/detail 的细节差异与真实远端/安装链路；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 839. PausedDialog CustomRules 数值字段扩展
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。

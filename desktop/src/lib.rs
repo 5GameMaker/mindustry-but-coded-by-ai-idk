@@ -72477,6 +72477,132 @@ repo: "Beta/Override"
     }
 
     #[test]
+    fn desktop_launcher_mods_browser_card_click_only_opens_selection_modal_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.last_mods_directory_mod_names = vec!["beta".into()];
+        launcher.last_mods_directory_mod_metas = vec![ModMetadata::from_source_text(
+            "beta",
+            Some("mod.hjson"),
+            r#"
+name: beta
+displayName: "Beta Override"
+author: "Beta Author"
+description: "Beta browser entry for selection modal"
+repo: "Beta/Override"
+"#,
+        )];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::OpenModsBrowser);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let browser = DesktopLauncher::mods_browser_dialog_rect_for_panel(panel);
+        let list = DesktopLauncher::mods_browser_list_rect_for_dialog(browser);
+        let card_center = DesktopLauncher::mods_browser_entry_rect_for_list(list, 0).center();
+
+        let browser_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let browser_texts = browser_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods browser dialog should render before selection")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(browser_texts.contains(&"Beta Override"));
+        assert!(
+            !browser_texts.contains(
+                &launcher
+                    .localize_bundle_markup_text("@mods.browser.add")
+                    .as_str()
+            ),
+            "Java ModsDialog browser card itself has no inline Add button"
+        );
+        assert!(
+            !browser_texts.contains(&"Reinstall"),
+            "Java ModsDialog browser card itself has no inline Reinstall button"
+        );
+        assert!(
+            !browser_texts.contains(
+                &launcher
+                    .localize_bundle_markup_text("@mods.github.open")
+                    .as_str()
+            ),
+            "Java ModsDialog browser card itself has no inline GitHub button"
+        );
+        assert!(
+            !browser_texts.contains(&"View Releases"),
+            "Java ModsDialog browser card itself has no inline Releases button"
+        );
+
+        let card_action = launcher.active_menu_route_shell_action_at_surface_point(
+            surface,
+            card_center.x,
+            card_center.y,
+        );
+        assert_eq!(
+            card_action,
+            Some(super::DesktopMenuRouteShellAction::OpenModsBrowserSelection(0)),
+            "Java ModsDialog.rebuildBrowser() wraps the whole card in a button that opens the selection modal"
+        );
+        assert!(!matches!(
+            card_action,
+            Some(
+                super::DesktopMenuRouteShellAction::ModsBrowserAdd(_)
+                    | super::DesktopMenuRouteShellAction::ModsBrowserReinstall(_)
+                    | super::DesktopMenuRouteShellAction::ModsBrowserOpenGithub(_)
+                    | super::DesktopMenuRouteShellAction::ModsBrowserViewReleases(_)
+            )
+        ));
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsBrowserSelection(0),
+        );
+        assert!(launcher.mods_browser_dialog_open);
+        assert_eq!(launcher.mods_browser_selected_mod_index, Some(0));
+        assert_eq!(launcher.mods_browser_releases_dialog_index, None);
+
+        let selection_specs = launcher.mods_browser_selection_button_specs(0);
+        assert_eq!(
+            selection_specs,
+            vec![
+                (
+                    super::DesktopMenuRouteShellAction::CloseModsBrowserSelection,
+                    "@back",
+                    "left"
+                ),
+                (
+                    super::DesktopMenuRouteShellAction::ModsBrowserAdd(0),
+                    "@mods.browser.add",
+                    "download"
+                ),
+                (
+                    super::DesktopMenuRouteShellAction::ModsBrowserOpenGithub(0),
+                    "@mods.github.open",
+                    "link"
+                ),
+                (
+                    super::DesktopMenuRouteShellAction::ModsBrowserViewReleases(0),
+                    "@mods.browser.view-releases",
+                    "zoom"
+                ),
+            ],
+            "Java ModsDialog selection modal is the only place that exposes Add/GitHub/Releases actions"
+        );
+    }
+
+    #[test]
     fn desktop_launcher_mods_browser_selection_button_switches_between_add_and_reinstall_like_java()
     {
         let mut launcher = DesktopLauncher::new(Vec::new());
