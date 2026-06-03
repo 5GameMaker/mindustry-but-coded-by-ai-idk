@@ -17,6 +17,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 808. ModsDialog releases 按钮顺序对齐 Java
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.39%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ModsDialog.rebuildBrowser()` 的 releases dialog 每个 release entry 内部按钮顺序是 `@mods.github.open-release`，然后 `@mods.browser.add`；
+  - Rust 当前显示/命中顺序反过来，导致用户按原版位置点击时动作不一致。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `mods_browser_releases_action_at_point(...)` 的 release button 0 改为 `ModsBrowserOpenRelease`，button 1 改为 `ModsBrowserInstallRelease`；
+    - `push_mods_browser_releases_dialog(...)` 的按钮渲染顺序改为 `Release Page` 在前、`Install/Add` 在后；
+    - 更新 `desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries` 对 release buttons 的命中断言。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - releases 仍是 synthetic latest entry；真实 GitHub releases JSON 多条列表、empty/error dialog 与 Java `githubImportMod(..., releaseId)` 仍需继续迁移。
+
 ## 807. ModsDialog browser 兼容性字段与版本提示
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

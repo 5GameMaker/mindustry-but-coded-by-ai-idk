@@ -49790,12 +49790,12 @@ impl DesktopLauncher {
         for (release_index, _) in self.mods_browser_release_entries.iter().take(4).enumerate() {
             let entry = Self::mods_browser_release_entry_rect_for_dialog(dialog, release_index);
             if Self::mods_browser_release_button_rect(entry, 0).contains_point(point) {
-                return Some(DesktopMenuRouteShellAction::ModsBrowserInstallRelease(
+                return Some(DesktopMenuRouteShellAction::ModsBrowserOpenRelease(
                     release_index,
                 ));
             }
             if Self::mods_browser_release_button_rect(entry, 1).contains_point(point) {
-                return Some(DesktopMenuRouteShellAction::ModsBrowserOpenRelease(
+                return Some(DesktopMenuRouteShellAction::ModsBrowserInstallRelease(
                     release_index,
                 ));
             }
@@ -50975,8 +50975,8 @@ impl DesktopLauncher {
                     Layer::END_PIXELED + 0.1175 + release_index as f32 * 0.001,
                 ));
                 for (button_index, (label, icon)) in [
-                    ("@mods.browser.add", "download"),
                     ("@mods.github.open-release", "link"),
+                    ("@mods.browser.add", "download"),
                 ]
                 .into_iter()
                 .enumerate()
@@ -68741,18 +68741,8 @@ stars: 3
             DesktopLauncher::mods_browser_releases_dialog_rect_for_browser(dialog);
         let release_entry =
             DesktopLauncher::mods_browser_release_entry_rect_for_dialog(releases_dialog, 0);
-        let release_install =
-            DesktopLauncher::mods_browser_release_button_rect(release_entry, 0).center();
-        assert_eq!(
-            launcher.active_menu_route_shell_action_at_surface_point(
-                surface,
-                release_install.x,
-                release_install.y
-            ),
-            Some(super::DesktopMenuRouteShellAction::ModsBrowserInstallRelease(0))
-        );
         let release_page =
-            DesktopLauncher::mods_browser_release_button_rect(release_entry, 1).center();
+            DesktopLauncher::mods_browser_release_button_rect(release_entry, 0).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
@@ -68762,6 +68752,16 @@ stars: 3
             Some(super::DesktopMenuRouteShellAction::ModsBrowserOpenRelease(
                 0
             ))
+        );
+        let release_install =
+            DesktopLauncher::mods_browser_release_button_rect(release_entry, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                release_install.x,
+                release_install.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ModsBrowserInstallRelease(0))
         );
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
