@@ -13520,6 +13520,128 @@ pub enum DesktopGraphicsOpenGlBackendDrawCommand {
     },
 }
 
+#[derive(Debug, Clone, PartialEq)]
+enum DesktopGraphicsOpenGlBackendDrawScissorState {
+    Set {
+        target: Option<RenderTarget>,
+        rect: RenderRect,
+    },
+    Clear {
+        target: Option<RenderTarget>,
+    },
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendDrawCommandStateCache {
+    bound_framebuffer_target: Option<Option<RenderTarget>>,
+    viewport_target: Option<Option<RenderTarget>>,
+    blend_state: Option<DesktopGraphicsOpenGlBackendBlendState>,
+    scissor_state: Option<DesktopGraphicsOpenGlBackendDrawScissorState>,
+    program_handle: Option<u32>,
+    active_texture_unit: Option<u32>,
+    bound_textures: BTreeMap<(u32, u32), u32>,
+    vertex_array_handle: Option<u32>,
+}
+
+impl DesktopGraphicsOpenGlBackendDrawCommandStateCache {
+    pub fn should_emit(&mut self, command: &DesktopGraphicsOpenGlBackendDrawCommand) -> bool {
+        match command {
+            DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer { target } => {
+                if self.bound_framebuffer_target.as_ref() == Some(target) {
+                    false
+                } else {
+                    self.bound_framebuffer_target = Some(target.clone());
+                    self.viewport_target = None;
+                    self.scissor_state = None;
+                    true
+                }
+            }
+            DesktopGraphicsOpenGlBackendDrawCommand::SetViewport { target } => {
+                if self.viewport_target.as_ref() == Some(target) {
+                    false
+                } else {
+                    self.viewport_target = Some(target.clone());
+                    true
+                }
+            }
+            DesktopGraphicsOpenGlBackendDrawCommand::SetBlend { state } => {
+                if self.blend_state.as_ref() == Some(state) {
+                    false
+                } else {
+                    self.blend_state = Some(*state);
+                    true
+                }
+            }
+            DesktopGraphicsOpenGlBackendDrawCommand::SetScissor { target, rect } => {
+                let state = DesktopGraphicsOpenGlBackendDrawScissorState::Set {
+                    target: target.clone(),
+                    rect: *rect,
+                };
+                if self.scissor_state.as_ref() == Some(&state) {
+                    false
+                } else {
+                    self.scissor_state = Some(state);
+                    true
+                }
+            }
+            DesktopGraphicsOpenGlBackendDrawCommand::ClearScissor { target } => {
+                let state = DesktopGraphicsOpenGlBackendDrawScissorState::Clear {
+                    target: target.clone(),
+                };
+                if self.scissor_state.as_ref() == Some(&state) {
+                    false
+                } else {
+                    self.scissor_state = Some(state);
+                    true
+                }
+            }
+            DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { program_handle } => {
+                if self.program_handle == Some(*program_handle) {
+                    false
+                } else {
+                    self.program_handle = Some(*program_handle);
+                    true
+                }
+            }
+            DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture { texture_unit } => {
+                if self.active_texture_unit == Some(*texture_unit) {
+                    false
+                } else {
+                    self.active_texture_unit = Some(*texture_unit);
+                    true
+                }
+            }
+            DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
+                target,
+                texture_handle,
+            } => {
+                let texture_unit = self
+                    .active_texture_unit
+                    .unwrap_or(DESKTOP_GRAPHICS_OPENGL_TEXTURE0);
+                let key = (texture_unit, *target);
+                if self.bound_textures.get(&key) == Some(texture_handle) {
+                    false
+                } else {
+                    self.bound_textures.insert(key, *texture_handle);
+                    true
+                }
+            }
+            DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
+                vertex_array_handle,
+            } => {
+                if self.vertex_array_handle == Some(*vertex_array_handle) {
+                    false
+                } else {
+                    self.vertex_array_handle = Some(*vertex_array_handle);
+                    true
+                }
+            }
+            DesktopGraphicsOpenGlBackendDrawCommand::Clear { .. }
+            | DesktopGraphicsOpenGlBackendDrawCommand::DrawElements { .. } => true,
+        }
+    }
+}
+
 pub trait DesktopGraphicsOpenGlBackendDrawCommandSink {
     fn consume_opengl_draw_command(&mut self, command: DesktopGraphicsOpenGlBackendDrawCommand);
 }
@@ -14421,9 +14543,25 @@ pub struct DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor {
     pub cache: DesktopGraphicsOpenGlBackendHandleCache,
     pub actions: Vec<DesktopGraphicsOpenGlBackendResolvedDrawCallAction>,
     pub commands: Vec<DesktopGraphicsOpenGlBackendDrawCommand>,
+    pub draw_state_cache: DesktopGraphicsOpenGlBackendDrawCommandStateCache,
 }
 
 impl DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor {
+    fn push_draw_command(&mut self, command: DesktopGraphicsOpenGlBackendDrawCommand) {
+        if self.draw_state_cache.should_emit(&command) {
+            self.commands.push(command);
+        }
+    }
+
+    fn extend_draw_commands<I>(&mut self, commands: I)
+    where
+        I: IntoIterator<Item = DesktopGraphicsOpenGlBackendDrawCommand>,
+    {
+        for command in commands {
+            self.push_draw_command(command);
+        }
+    }
+
     pub fn drive_draw_command_sink<S: DesktopGraphicsOpenGlBackendDrawCommandSink>(
         &self,
         sink: &mut S,
@@ -14449,13 +14587,12 @@ impl DesktopGraphicsOpenGlBackendSpriteDrawCallSink
         recording.consume_opengl_sprite_draw_call(draw_call);
         for action in recording.actions {
             let resolved_action = self.cache.resolve_action(action, &mut self.allocator);
-            self.commands
-                .extend(resolved_action.to_opengl_draw_commands());
+            self.extend_draw_commands(resolved_action.to_opengl_draw_commands());
             if matches!(
                 resolved_action,
                 DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindFramebuffer { .. }
             ) {
-                self.commands.extend(
+                self.extend_draw_commands(
                     opengl_backend_state_after_framebuffer_bind_to_draw_commands(
                         target.clone(),
                         blend_state,
@@ -14527,6 +14664,7 @@ pub struct DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
     pub resolved_shader_commands: Vec<DesktopGraphicsOpenGlBackendResolvedShaderCommand>,
     pub resolved_draw_actions: Vec<DesktopGraphicsOpenGlBackendResolvedDrawCallAction>,
     pub draw_commands: Vec<DesktopGraphicsOpenGlBackendDrawCommand>,
+    pub draw_state_cache: DesktopGraphicsOpenGlBackendDrawCommandStateCache,
     pub resolve_commands: Vec<DesktopGraphicsOpenGlBackendResolveCommand>,
     pub resolve_sample_quads: Vec<DesktopGraphicsOpenGlBackendResolveQuad>,
     pub resolve_draw_commands: Vec<DesktopGraphicsOpenGlBackendDrawCommand>,
@@ -14750,11 +14888,26 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
         self.resolved_shader_commands.push(resolved);
     }
 
+    fn push_draw_command(&mut self, command: DesktopGraphicsOpenGlBackendDrawCommand) {
+        if self.draw_state_cache.should_emit(&command) {
+            self.draw_commands.push(command);
+        }
+    }
+
+    fn extend_draw_commands<I>(&mut self, commands: I)
+    where
+        I: IntoIterator<Item = DesktopGraphicsOpenGlBackendDrawCommand>,
+    {
+        for command in commands {
+            self.push_draw_command(command);
+        }
+    }
+
     pub fn consume_opengl_draw_command(
         &mut self,
         command: DesktopGraphicsOpenGlBackendDrawCommand,
     ) {
-        self.draw_commands.push(command);
+        self.push_draw_command(command);
     }
 
     pub fn consume_opengl_sprite_draw_call(
@@ -14768,13 +14921,12 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
         recording.consume_opengl_sprite_draw_call(draw_call);
         for action in recording.actions {
             let resolved_action = self.cache.resolve_action(action, &mut self.allocator);
-            self.draw_commands
-                .extend(resolved_action.to_opengl_draw_commands());
+            self.extend_draw_commands(resolved_action.to_opengl_draw_commands());
             if matches!(
                 resolved_action,
                 DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindFramebuffer { .. }
             ) {
-                self.draw_commands.extend(
+                self.extend_draw_commands(
                     opengl_backend_state_after_framebuffer_bind_to_draw_commands(
                         target.clone(),
                         blend_state,
@@ -64981,6 +65133,87 @@ mod tests {
             executor.draw_commands.len()
         );
         assert_eq!(draw_sink.commands, executor.draw_commands);
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_resolving_executor_skips_redundant_draw_state_commands() {
+        let texture_identity =
+            super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_atlas_page(
+                PageType::Main,
+                "sprites/shared-state.png",
+            );
+        let draw_call = |batch_index, vertex_array_key: &str| {
+            super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
+                batch_index,
+                target: None,
+                shader_program:
+                    super::DesktopGraphicsOpenGlBackendShaderProgramIdentity::from_shader(
+                        ShaderId::Mesh,
+                    ),
+                blend_state: super::DesktopGraphicsOpenGlBackendBlendState::default(),
+                clip: None,
+                texture_identity: texture_identity.clone(),
+                vertex_array_key: vertex_array_key.into(),
+                index_count: 6,
+                index_offset: 0,
+                primitive_type:
+                    super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
+            }
+        };
+        let state = super::DesktopGraphicsOpenGlBackendExecutorState {
+            sprite_draw_call_plans: vec![
+                draw_call(0, "sprite-batch:state:0:vao"),
+                draw_call(1, "sprite-batch:state:1:vao"),
+            ],
+            ..Default::default()
+        };
+        let mut executor = super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
+        state.drive_resolving_command_executor(&mut executor);
+
+        assert_eq!(
+            executor
+                .draw_commands
+                .iter()
+                .filter(|command| matches!(
+                    command,
+                    super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { .. }
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(
+            executor
+                .draw_commands
+                .iter()
+                .filter(|command| matches!(
+                    command,
+                    super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture { .. }
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(
+            executor
+                .draw_commands
+                .iter()
+                .filter(|command| matches!(
+                    command,
+                    super::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray { .. }
+                ))
+                .count(),
+            2
+        );
+        assert_eq!(
+            executor
+                .draw_commands
+                .iter()
+                .filter(|command| matches!(
+                    command,
+                    super::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements { .. }
+                ))
+                .count(),
+            2
+        );
     }
 
     #[test]

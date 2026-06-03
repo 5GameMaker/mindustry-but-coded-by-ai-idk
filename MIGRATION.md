@@ -17,6 +17,37 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 794. OpenGL resolving executor 连续 draw 状态去重
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **92.8%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容、性能收口与所有子菜单接近原版。
+- 背景：
+  - 上一轮 native runtime 已能跳过重复 GL 调用，但 `desktop/src/lib.rs` 仍每帧生成大量重复 `draw_commands`；
+  - 菜单 release trace 中 `draw_commands` 约为 `248`，很多是连续 batch 之间重复的 framebuffer/viewport/blend/clip/program/texture/VAO 状态命令。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendDrawCommandStateCache`；
+    - 在 `DesktopGraphicsResolvingOpenGlBackendCommandExecutor` 与 `DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor` 内，对连续重复的 `BindFramebuffer`、`SetViewport`、`SetBlend`、`SetScissor/ClearScissor`、`UseProgram`、`ActiveTexture`、`BindTexture`、`BindVertexArray` 做保序去重；
+    - `Clear` 与 `DrawElements` 永远保留，避免改变绘制次数或命令顺序；
+    - 不放宽 `opengl_backend_sprite_mesh_batches_from_quads(...)` 的 exact layer 分桶，继续保留层级正确性保险丝；
+    - 新增回归测试锁定两个同状态 sprite draw call 只保留第一组状态命令，第二个 draw call 仍会绑定自身 VAO 并执行 `DrawElements`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_resolving_executor_skips_redundant_draw_state_commands --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_sprite_draw_call_plans_sort_batches_by_min_layer --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_batches_split_shared_texture_by_layer --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_clear_emits_targeted_draw_commands_and_driver_records_them --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_resolve_shader_blit_translates_to_fullscreen_quad_draw_commands --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_fast_menu_path_uses_lightweight_background_without_placeholder_panel --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop synthetic_menu_background --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --release --features opengl-native-runtime`
+  - `MINDUSTRY_DESKTOP_TRACE_SUMMARY=1 ./target/release/mindustry-desktop.exe` 短跑核对：菜单 `draw_commands` 从约 `248` 降到约 `84`。
+- 仍未完成：
+  - `sprite_mesh_upload_commands=351` 仍未从源头降低；后续应继续做 batch signature / mesh upload plan 跳过；
+  - 旧的部分 broad OpenGL primitive 测试仍暴露历史期望与 exact-layer batching 之间的张力，后续需要单独清理测试语义而不是放宽 layer 分桶；
+  - 前端仍需继续做真实文本/font atlas、静态 UI mesh cache 与完整子菜单对齐。
+
 ## 793. Mods Browser 卡片动作收敛到 selection 弹窗
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
