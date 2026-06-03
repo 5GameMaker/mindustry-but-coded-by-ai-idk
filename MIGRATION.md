@@ -17,6 +17,20 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 862. ModsDialog View Content 图标 tooltip 对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **93.94%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 对照 Java `ModsDialog.showMod(...)` 中 View Content 图标按钮 `.size(50f).tooltip(c.localizedName)`；
+    - 在 Rust `push_mods_content_dialog(...)` 的 50x50 content icon grid 上接入 hover tooltip；
+    - tooltip 使用当前 content entry 的 display title，并随 `last_menu_cursor` 只在悬停图标时绘制，不恢复文件路径/类型文本，保持 Java 图标网格观感。
+- 已验证：
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_route_opens_and_closes_detail_dialog -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop mods -- --nocapture`
+- 下一步优先：按只读子代理建议处理 HostDialog beta/alpha Steam 公共房间保护分支，再继续 ModsDialog GitHub/file import 流程。
+
 ## 861. CustomRulesDialog additionalSetup 扩展钩子接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
