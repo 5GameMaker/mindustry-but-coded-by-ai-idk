@@ -4308,6 +4308,14 @@ enum DesktopPausedOverlayAction {
     ResetPauseCustomRules,
     FocusPauseCustomRulesSearch,
     ClearPauseCustomRulesSearch,
+    OpenPauseBannedContent(DesktopBannedContentKind),
+    ClosePauseBannedContent,
+    FocusPauseBannedContentSearch(DesktopBannedContentKind),
+    ClearPauseBannedContentSearch(DesktopBannedContentKind),
+    TogglePauseBannedContentCategory(Category),
+    TogglePauseBannedContent(DesktopBannedContentKind, usize),
+    AddAllPauseBannedContent(DesktopBannedContentKind),
+    RemoveAllPauseBannedContent(DesktopBannedContentKind),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18801,6 +18809,11 @@ pub struct DesktopLauncher {
     pause_custom_rules_search: String,
     pause_custom_rules_search_focused: bool,
     pause_custom_rules_scroll_offset: f32,
+    pause_custom_rules_banned_content_dialog: Option<DesktopBannedContentKind>,
+    pause_custom_rules_banned_content_search: String,
+    pause_custom_rules_banned_content_search_focused: bool,
+    pause_custom_rules_banned_content_scroll_offset: usize,
+    pause_custom_rules_banned_content_selected_category: Option<Category>,
     last_pause_custom_rules_clipboard_text: Option<String>,
     pause_custom_rules_error: Option<String>,
     last_pause_quit_result: Option<DesktopPauseQuitResult>,
@@ -20024,6 +20037,11 @@ impl DesktopLauncher {
             pause_custom_rules_search: String::new(),
             pause_custom_rules_search_focused: false,
             pause_custom_rules_scroll_offset: 0.0,
+            pause_custom_rules_banned_content_dialog: None,
+            pause_custom_rules_banned_content_search: String::new(),
+            pause_custom_rules_banned_content_search_focused: false,
+            pause_custom_rules_banned_content_scroll_offset: 0,
+            pause_custom_rules_banned_content_selected_category: None,
             last_pause_custom_rules_clipboard_text: None,
             pause_custom_rules_error: None,
             last_pause_quit_result: None,
@@ -31535,6 +31553,18 @@ impl DesktopLauncher {
         RenderRect::new(dialog.right() - 160.0, dialog.y + 18.0, 132.0, 38.0)
     }
 
+    fn pause_overlay_custom_rules_child_button_rect(
+        dialog: RenderRect,
+        index: usize,
+    ) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 28.0 + index as f32 * 140.0,
+            dialog.y + 18.0,
+            132.0,
+            38.0,
+        )
+    }
+
     fn pause_custom_rules_visible_number_count(&self) -> usize {
         DesktopCustomRulesNumber::PAUSE_ALL
             .into_iter()
@@ -31682,6 +31712,91 @@ impl DesktopLauncher {
         if self.pause_overlay_modal.is_some() {
             if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules) {
                 let dialog = Self::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+                if let Some(kind) = self.pause_custom_rules_banned_content_dialog {
+                    let banned_dialog = Self::map_play_banned_content_dialog_rect(dialog);
+                    if Self::map_play_banned_content_close_rect(banned_dialog).contains_point(point)
+                    {
+                        return Some(DesktopPausedOverlayAction::ClosePauseBannedContent);
+                    }
+                    if Self::map_play_banned_content_search_rect(banned_dialog)
+                        .contains_point(point)
+                    {
+                        if Self::map_play_banned_content_search_clear_rect(banned_dialog)
+                            .contains_point(point)
+                        {
+                            return Some(
+                                DesktopPausedOverlayAction::ClearPauseBannedContentSearch(kind),
+                            );
+                        }
+                        return Some(DesktopPausedOverlayAction::FocusPauseBannedContentSearch(
+                            kind,
+                        ));
+                    }
+                    if kind == DesktopBannedContentKind::Blocks {
+                        for (category_index, category) in Category::ALL.into_iter().enumerate() {
+                            if Self::map_play_banned_content_category_rect(
+                                banned_dialog,
+                                category_index,
+                            )
+                            .contains_point(point)
+                            {
+                                return Some(
+                                    DesktopPausedOverlayAction::TogglePauseBannedContentCategory(
+                                        category,
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    if Self::map_play_banned_content_add_all_rect(banned_dialog, true)
+                        .contains_point(point)
+                    {
+                        return Some(DesktopPausedOverlayAction::AddAllPauseBannedContent(kind));
+                    }
+                    if Self::map_play_banned_content_add_all_rect(banned_dialog, false)
+                        .contains_point(point)
+                    {
+                        return Some(DesktopPausedOverlayAction::RemoveAllPauseBannedContent(
+                            kind,
+                        ));
+                    }
+                    let rules = self.pause_custom_rules_current_rules();
+                    let candidates = self.pause_banned_content_candidate_entries(kind);
+                    let mut selected_row = 0usize;
+                    let mut deselected_row = 0usize;
+                    let scroll = self
+                        .pause_custom_rules_banned_content_scroll_offset
+                        .min(self.pause_banned_content_max_scroll_offset(kind, rules));
+                    let visible_rows = Self::map_play_banned_content_visible_rows();
+                    for (candidate_index, entry) in candidates.iter().enumerate() {
+                        let selected = kind.contains(rules, &entry.name);
+                        let row_index = if selected {
+                            let row = selected_row;
+                            selected_row += 1;
+                            row
+                        } else {
+                            let row = deselected_row;
+                            deselected_row += 1;
+                            row
+                        };
+                        if row_index < scroll || row_index >= scroll + visible_rows {
+                            continue;
+                        }
+                        if Self::map_play_banned_content_item_rect(
+                            banned_dialog,
+                            selected,
+                            row_index - scroll,
+                        )
+                        .contains_point(point)
+                        {
+                            return Some(DesktopPausedOverlayAction::TogglePauseBannedContent(
+                                kind,
+                                candidate_index,
+                            ));
+                        }
+                    }
+                    return None;
+                }
                 if self.pause_custom_rules_edit_dialog_open {
                     let edit = Self::map_play_rules_edit_dialog_rect(dialog);
                     for (button_index, action) in [
@@ -31712,6 +31827,20 @@ impl DesktopLauncher {
                 }
                 if Self::pause_overlay_custom_rules_edit_button_rect(dialog).contains_point(point) {
                     return Some(DesktopPausedOverlayAction::OpenPauseCustomRulesEdit);
+                }
+                if Self::pause_overlay_custom_rules_child_button_rect(dialog, 0)
+                    .contains_point(point)
+                {
+                    return Some(DesktopPausedOverlayAction::OpenPauseBannedContent(
+                        DesktopBannedContentKind::Blocks,
+                    ));
+                }
+                if Self::pause_overlay_custom_rules_child_button_rect(dialog, 1)
+                    .contains_point(point)
+                {
+                    return Some(DesktopPausedOverlayAction::OpenPauseBannedContent(
+                        DesktopBannedContentKind::Units,
+                    ));
                 }
                 if Self::pause_overlay_modal_close_rect(dialog).contains_point(point) {
                     return Some(DesktopPausedOverlayAction::CloseModal);
@@ -34636,6 +34765,30 @@ impl DesktopLauncher {
         &self,
         kind: DesktopBannedContentKind,
     ) -> Vec<DesktopBannedContentEntry> {
+        self.banned_content_candidate_entries_with_filter(
+            kind,
+            &self.map_play_banned_content_search,
+            self.map_play_banned_content_selected_category,
+        )
+    }
+
+    fn pause_banned_content_candidate_entries(
+        &self,
+        kind: DesktopBannedContentKind,
+    ) -> Vec<DesktopBannedContentEntry> {
+        self.banned_content_candidate_entries_with_filter(
+            kind,
+            &self.pause_custom_rules_banned_content_search,
+            self.pause_custom_rules_banned_content_selected_category,
+        )
+    }
+
+    fn banned_content_candidate_entries_with_filter(
+        &self,
+        kind: DesktopBannedContentKind,
+        search: &str,
+        selected_category: Option<Category>,
+    ) -> Vec<DesktopBannedContentEntry> {
         let mut entries = match kind {
             DesktopBannedContentKind::Blocks => self
                 .content_loader
@@ -34670,7 +34823,7 @@ impl DesktopLauncher {
                 .cmp(&schematic_search_normalize(&b.label))
                 .then_with(|| a.name.cmp(&b.name))
         });
-        let query = schematic_search_normalize(&self.map_play_banned_content_search);
+        let query = schematic_search_normalize(search);
         if !query.is_empty() {
             entries.retain(|entry| {
                 schematic_search_normalize(&entry.label).contains(&query)
@@ -34678,7 +34831,7 @@ impl DesktopLauncher {
             });
         }
         if kind == DesktopBannedContentKind::Blocks {
-            if let Some(category) = self.map_play_banned_content_selected_category {
+            if let Some(category) = selected_category {
                 entries.retain(|entry| entry.category == Some(category));
             }
         }
@@ -34690,6 +34843,13 @@ impl DesktopLauncher {
         kind: DesktopBannedContentKind,
     ) -> Vec<String> {
         self.map_play_banned_content_candidate_entries(kind)
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect()
+    }
+
+    fn pause_banned_content_candidate_names(&self, kind: DesktopBannedContentKind) -> Vec<String> {
+        self.pause_banned_content_candidate_entries(kind)
             .into_iter()
             .map(|entry| entry.name)
             .collect()
@@ -34707,6 +34867,18 @@ impl DesktopLauncher {
             .collect()
     }
 
+    fn pause_banned_content_column_entries(
+        &self,
+        kind: DesktopBannedContentKind,
+        rules: &Rules,
+        selected_side: bool,
+    ) -> Vec<DesktopBannedContentEntry> {
+        self.pause_banned_content_candidate_entries(kind)
+            .into_iter()
+            .filter(|entry| kind.contains(rules, &entry.name) == selected_side)
+            .collect()
+    }
+
     fn map_play_banned_content_max_scroll_offset(
         &self,
         kind: DesktopBannedContentKind,
@@ -34717,6 +34889,22 @@ impl DesktopLauncher {
             .len();
         let deselected = self
             .map_play_banned_content_column_entries(kind, rules, false)
+            .len();
+        selected
+            .max(deselected)
+            .saturating_sub(Self::map_play_banned_content_visible_rows())
+    }
+
+    fn pause_banned_content_max_scroll_offset(
+        &self,
+        kind: DesktopBannedContentKind,
+        rules: &Rules,
+    ) -> usize {
+        let selected = self
+            .pause_banned_content_column_entries(kind, rules, true)
+            .len();
+        let deselected = self
+            .pause_banned_content_column_entries(kind, rules, false)
             .len();
         selected
             .max(deselected)
@@ -35104,6 +35292,37 @@ impl DesktopLauncher {
         self.map_play_rules_error = None;
     }
 
+    fn toggle_pause_banned_content(
+        &mut self,
+        kind: DesktopBannedContentKind,
+        candidate_index: usize,
+    ) {
+        let Some(name) = self
+            .pause_banned_content_candidate_names(kind)
+            .get(candidate_index)
+            .cloned()
+        else {
+            return;
+        };
+        let rules = self.ensure_pause_custom_rules_edit_rules();
+        kind.toggle(rules, &name);
+        self.pause_custom_rules_error = None;
+    }
+
+    fn set_all_pause_banned_content(&mut self, kind: DesktopBannedContentKind, banned: bool) {
+        let names = self.pause_banned_content_candidate_names(kind);
+        {
+            let rules = self.ensure_pause_custom_rules_edit_rules();
+            kind.set_all(rules, names, banned);
+        }
+        let max = self
+            .pause_banned_content_max_scroll_offset(kind, self.pause_custom_rules_current_rules());
+        self.pause_custom_rules_banned_content_scroll_offset = self
+            .pause_custom_rules_banned_content_scroll_offset
+            .min(max);
+        self.pause_custom_rules_error = None;
+    }
+
     fn apply_map_play_banned_content_scroll_delta(
         &mut self,
         surface_size: DesktopSurfaceSize,
@@ -35154,6 +35373,55 @@ impl DesktopLauncher {
         };
         let next = (current as isize + step).clamp(0, max as isize) as usize;
         self.map_play_banned_content_scroll_offset = next;
+        next != current
+    }
+
+    fn apply_pause_banned_content_scroll_delta(
+        &mut self,
+        surface_size: DesktopSurfaceSize,
+        delta_y: f32,
+    ) -> bool {
+        if self.pause_overlay_modal != Some(DesktopPausedOverlayModal::CustomRules)
+            || !self.pause_overlay_custom_rules_visible()
+            || self.pause_custom_rules_edit_dialog_open
+            || self.pause_custom_rules_banned_content_dialog.is_some()
+        {
+            return false;
+        }
+        let Some(kind) = self.pause_custom_rules_banned_content_dialog else {
+            return false;
+        };
+        let Some(cursor) = self.last_menu_cursor else {
+            return false;
+        };
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel = Self::pause_overlay_panel_for_viewport_with_button_count(
+            viewport,
+            self.pause_overlay_button_specs().len(),
+        );
+        let dialog = Self::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let banned_dialog = Self::map_play_banned_content_dialog_rect(dialog);
+        if !banned_dialog.contains_point(cursor) {
+            return false;
+        }
+        let rules = self.pause_custom_rules_current_rules();
+        let max = self.pause_banned_content_max_scroll_offset(kind, rules);
+        if max == 0 {
+            return false;
+        }
+        let current = self
+            .pause_custom_rules_banned_content_scroll_offset
+            .min(max);
+        let rows = delta_y.abs().ceil().max(1.0) as isize;
+        let step = if delta_y < 0.0 {
+            rows
+        } else if delta_y > 0.0 {
+            -rows
+        } else {
+            0
+        };
+        let next = (current as isize + step).clamp(0, max as isize) as usize;
+        self.pause_custom_rules_banned_content_scroll_offset = next;
         next != current
     }
 
@@ -41241,6 +41509,9 @@ impl DesktopLauncher {
         self.pause_custom_rules_edit_dialog_open = false;
         self.pause_custom_rules_search_focused = false;
         self.pause_custom_rules_scroll_offset = 0.0;
+        self.pause_custom_rules_banned_content_dialog = None;
+        self.pause_custom_rules_banned_content_search_focused = false;
+        self.pause_custom_rules_banned_content_scroll_offset = 0;
         self.pause_custom_rules_error = None;
         self.pause_overlay_modal = None;
     }
@@ -41370,7 +41641,15 @@ impl DesktopLauncher {
             | DesktopPausedOverlayAction::LoadPauseCustomRules
             | DesktopPausedOverlayAction::ResetPauseCustomRules
             | DesktopPausedOverlayAction::FocusPauseCustomRulesSearch
-            | DesktopPausedOverlayAction::ClearPauseCustomRulesSearch => {
+            | DesktopPausedOverlayAction::ClearPauseCustomRulesSearch
+            | DesktopPausedOverlayAction::OpenPauseBannedContent(_)
+            | DesktopPausedOverlayAction::ClosePauseBannedContent
+            | DesktopPausedOverlayAction::FocusPauseBannedContentSearch(_)
+            | DesktopPausedOverlayAction::ClearPauseBannedContentSearch(_)
+            | DesktopPausedOverlayAction::TogglePauseBannedContentCategory(_)
+            | DesktopPausedOverlayAction::TogglePauseBannedContent(_, _)
+            | DesktopPausedOverlayAction::AddAllPauseBannedContent(_)
+            | DesktopPausedOverlayAction::RemoveAllPauseBannedContent(_) => {
                 self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
                     && self.pause_overlay_custom_rules_visible()
             }
@@ -41406,6 +41685,9 @@ impl DesktopLauncher {
                 self.pause_overlay_modal = Some(DesktopPausedOverlayModal::CustomRules);
                 self.pause_custom_rules_edit_dialog_open = false;
                 self.pause_custom_rules_scroll_offset = 0.0;
+                self.pause_custom_rules_banned_content_dialog = None;
+                self.pause_custom_rules_banned_content_search_focused = false;
+                self.pause_custom_rules_banned_content_scroll_offset = 0;
                 self.pause_custom_rules_error = None;
                 self.last_menu_guard_message = None;
             }
@@ -41418,6 +41700,8 @@ impl DesktopLauncher {
             DesktopPausedOverlayAction::OpenPauseCustomRulesEdit => {
                 self.pause_custom_rules_edit_dialog_open = true;
                 self.pause_custom_rules_search_focused = false;
+                self.pause_custom_rules_banned_content_dialog = None;
+                self.pause_custom_rules_banned_content_search_focused = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseCustomRulesEdit => {
@@ -41446,8 +41730,66 @@ impl DesktopLauncher {
                 self.pause_custom_rules_edit_dialog_open = false;
                 self.pause_custom_rules_scroll_offset = 0.0;
             }
+            DesktopPausedOverlayAction::OpenPauseBannedContent(kind) => {
+                self.pause_custom_rules_banned_content_dialog = Some(kind);
+                self.pause_custom_rules_banned_content_search_focused = false;
+                self.pause_custom_rules_banned_content_scroll_offset = 0;
+                self.pause_custom_rules_edit_dialog_open = false;
+                self.pause_custom_rules_search_focused = false;
+                self.pause_custom_rules_error = None;
+            }
+            DesktopPausedOverlayAction::ClosePauseBannedContent => {
+                self.pause_custom_rules_banned_content_dialog = None;
+                self.pause_custom_rules_banned_content_search_focused = false;
+            }
+            DesktopPausedOverlayAction::FocusPauseBannedContentSearch(kind) => {
+                self.pause_custom_rules_banned_content_dialog = Some(kind);
+                self.pause_custom_rules_banned_content_search_focused = true;
+                self.pause_custom_rules_edit_dialog_open = false;
+                self.pause_custom_rules_search_focused = false;
+            }
+            DesktopPausedOverlayAction::ClearPauseBannedContentSearch(kind) => {
+                self.pause_custom_rules_banned_content_search.clear();
+                self.pause_custom_rules_banned_content_search_focused = true;
+                self.pause_custom_rules_banned_content_scroll_offset = 0;
+                self.pause_custom_rules_banned_content_dialog = Some(kind);
+            }
+            DesktopPausedOverlayAction::TogglePauseBannedContentCategory(category) => {
+                self.pause_custom_rules_banned_content_selected_category =
+                    if self.pause_custom_rules_banned_content_selected_category == Some(category) {
+                        None
+                    } else {
+                        Some(category)
+                    };
+                self.pause_custom_rules_banned_content_scroll_offset = 0;
+                self.pause_custom_rules_banned_content_dialog =
+                    Some(DesktopBannedContentKind::Blocks);
+                self.pause_custom_rules_banned_content_search_focused = false;
+            }
+            DesktopPausedOverlayAction::TogglePauseBannedContent(kind, candidate_index) => {
+                self.toggle_pause_banned_content(kind, candidate_index);
+                self.pause_custom_rules_banned_content_dialog = Some(kind);
+                self.pause_custom_rules_banned_content_search_focused = false;
+            }
+            DesktopPausedOverlayAction::AddAllPauseBannedContent(kind) => {
+                self.set_all_pause_banned_content(kind, true);
+                self.pause_custom_rules_banned_content_dialog = Some(kind);
+                self.pause_custom_rules_banned_content_search_focused = false;
+            }
+            DesktopPausedOverlayAction::RemoveAllPauseBannedContent(kind) => {
+                self.set_all_pause_banned_content(kind, false);
+                self.pause_custom_rules_banned_content_dialog = Some(kind);
+                self.pause_custom_rules_banned_content_search_focused = false;
+            }
             DesktopPausedOverlayAction::Back => {
                 if self.pause_overlay_modal.is_some() {
+                    if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
+                        && self.pause_custom_rules_banned_content_dialog.is_some()
+                    {
+                        self.pause_custom_rules_banned_content_dialog = None;
+                        self.pause_custom_rules_banned_content_search_focused = false;
+                        return;
+                    }
                     self.close_pause_overlay_modal();
                     return;
                 } else if self.active_menu_route.is_some() {
@@ -50281,6 +50623,21 @@ impl DesktopLauncher {
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
+                        && self.pause_overlay_modal
+                            == Some(DesktopPausedOverlayModal::CustomRules)
+                        && self.pause_custom_rules_banned_content_dialog.is_some()
+                        && self.pause_custom_rules_banned_content_search_focused
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.pause_custom_rules_banned_content_search.pop();
+                    } else {
+                        self.pause_custom_rules_banned_content_search.clear();
+                    }
+                    self.pause_custom_rules_banned_content_scroll_offset = 0;
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
                         && matches!(
                             self.active_menu_route,
                             Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
@@ -50666,6 +51023,9 @@ impl DesktopLauncher {
                             continue;
                         }
                     }
+                    if self.apply_pause_banned_content_scroll_delta(surface_size, *delta_y) {
+                        continue;
+                    }
                     if self.apply_pause_custom_rules_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
@@ -50773,6 +51133,14 @@ impl DesktopLauncher {
                             self.pause_custom_rules_search.push(ch);
                         }
                         self.pause_custom_rules_scroll_offset = 0.0;
+                    } else if self.pause_overlay_modal
+                        == Some(DesktopPausedOverlayModal::CustomRules)
+                        && self.pause_custom_rules_banned_content_dialog.is_some()
+                        && self.pause_custom_rules_banned_content_search_focused
+                    {
+                        self.pause_custom_rules_banned_content_search
+                            .extend(text.chars().filter(|ch| !ch.is_control()));
+                        self.pause_custom_rules_banned_content_scroll_offset = 0;
                     } else if matches!(
                         self.active_menu_route,
                         Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
@@ -54896,6 +55264,246 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_pause_banned_content_dialog(
+        &self,
+        pass: &mut RenderPass,
+        dialog_parent: RenderRect,
+        kind: DesktopBannedContentKind,
+        rules: &Rules,
+    ) {
+        let layer = Layer::END_PIXELED + 0.230;
+        let dialog = Self::map_play_banned_content_dialog_rect(dialog_parent);
+        pass.push(RenderCommand::fill_rect(
+            dialog_parent,
+            [0.0, 0.0, 0.0, 0.52],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.62, 0.82, 1.0, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text(kind.selected_label_key()),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 26.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.004,
+        ));
+        let search = Self::map_play_banned_content_search_rect(dialog);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol(
+                "grayt",
+                false,
+                self.pause_custom_rules_banned_content_search_focused,
+            ),
+            search,
+            if self.pause_custom_rules_banned_content_search_focused {
+                [1.0, 1.0, 1.0, 0.96]
+            } else {
+                [1.0, 1.0, 1.0, 0.84]
+            },
+            0.0,
+            layer + 0.005,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("zoom", "zoom"),
+            RenderPoint::new(search.x + 20.0, search.center().y),
+            [0.72, 0.82, 0.9, 1.0],
+            13.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.006,
+        ));
+        let search_text = if self.pause_custom_rules_banned_content_search.is_empty() {
+            self.localize_bundle_markup_text_or("@search", "Search")
+        } else {
+            self.pause_custom_rules_banned_content_search.clone()
+        };
+        pass.push(RenderCommand::draw_text_styled(
+            search_text,
+            RenderPoint::new(search.x + 40.0, search.center().y),
+            if self.pause_custom_rules_banned_content_search.is_empty() {
+                [0.60, 0.70, 0.78, 1.0]
+            } else {
+                [0.90, 0.96, 1.0, 1.0]
+            },
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_wrap_width((search.width - 80.0).max(80.0))
+                .with_integer_position(true),
+            layer + 0.007,
+        ));
+        let clear = Self::map_play_banned_content_search_clear_rect(dialog);
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("cancel", "x"),
+            clear.center(),
+            [0.72, 0.82, 0.9, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.008,
+        ));
+        if kind == DesktopBannedContentKind::Blocks {
+            for (category_index, category) in Category::ALL.into_iter().enumerate() {
+                self.push_map_list_filter_icon_toggle(
+                    pass,
+                    Self::map_play_banned_content_category_rect(dialog, category_index),
+                    desktop_ui_icon_glyph_or_label(category.wire_name(), category.wire_name()),
+                    self.pause_custom_rules_banned_content_selected_category == Some(category),
+                    true,
+                    layer + 0.009 + category_index as f32 * 0.0002,
+                );
+            }
+            if let Some(category) = self.pause_custom_rules_banned_content_selected_category {
+                pass.push(RenderCommand::draw_text_styled(
+                    category.wire_name(),
+                    RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 132.0),
+                    [0.62, 0.74, 0.84, 0.92],
+                    8.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    layer + 0.011,
+                ));
+            }
+        }
+        for (selected_side, label, color) in [
+            (true, kind.selected_label_key(), [0.95, 0.44, 0.42, 1.0]),
+            (
+                false,
+                kind.deselected_label_key(),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+            ),
+        ] {
+            let column = Self::map_play_banned_content_item_rect(dialog, selected_side, 0);
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text(label),
+                RenderPoint::new(column.center().x, dialog.y + dialog.height - 138.0),
+                color,
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.006,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                RenderRect::new(
+                    column.x,
+                    dialog.y + dialog.height - 150.0,
+                    column.width,
+                    1.0,
+                ),
+                color,
+                1.0,
+                layer + 0.007,
+            ));
+        }
+
+        let max_scroll = self.pause_banned_content_max_scroll_offset(kind, rules);
+        let scroll = self
+            .pause_custom_rules_banned_content_scroll_offset
+            .min(max_scroll);
+        let visible_rows = Self::map_play_banned_content_visible_rows();
+        for (selected_side, color) in [
+            (true, [1.0, 0.78, 0.78, 0.34]),
+            (false, [1.0, 1.0, 1.0, 0.24]),
+        ] {
+            let entries = self.pause_banned_content_column_entries(kind, rules, selected_side);
+            for (visible_index, entry) in entries.iter().skip(scroll).take(visible_rows).enumerate()
+            {
+                let row =
+                    Self::map_play_banned_content_item_rect(dialog, selected_side, visible_index);
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_drawable_symbol("button"),
+                    row,
+                    color,
+                    0.0,
+                    layer + 0.010 + visible_index as f32 * 0.0005,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    entry.label.clone(),
+                    RenderPoint::new(row.x + 8.0, row.center().y),
+                    [0.88, 0.95, 1.0, 1.0],
+                    9.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_wrap_width((row.width - 16.0).max(80.0))
+                        .with_integer_position(true),
+                    layer + 0.011 + visible_index as f32 * 0.0005,
+                ));
+            }
+            if entries.is_empty() {
+                let row = Self::map_play_banned_content_item_rect(dialog, selected_side, 0);
+                pass.push(RenderCommand::draw_text_styled(
+                    self.localize_bundle_markup_text("@empty"),
+                    row.center(),
+                    [0.62, 0.70, 0.76, 0.80],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    layer + 0.030,
+                ));
+            }
+            self.push_settings_text_button(
+                pass,
+                Self::map_play_banned_content_add_all_rect(dialog, selected_side),
+                self.localize_bundle_markup_text("@addall"),
+                Some("add"),
+                layer + 0.040,
+            );
+        }
+        if max_scroll > 0 {
+            pass.push(RenderCommand::draw_text_styled(
+                format!("{}/{}", scroll + 1, max_scroll + 1),
+                RenderPoint::new(dialog.right() - 42.0, dialog.y + 48.0),
+                [0.62, 0.70, 0.76, 0.82],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.044,
+            ));
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_banned_content_close_rect(dialog),
+            self.localize_bundle_markup_text("@back"),
+            Some("left"),
+            layer + 0.050,
+        );
+    }
+
     fn push_pause_overlay_custom_rules_modal(&self, pass: &mut RenderPass, panel: RenderRect) {
         let dialog = Self::pause_overlay_custom_rules_modal_rect_for_panel(panel);
         let content = Self::pause_overlay_custom_rules_content_rect(dialog);
@@ -55128,6 +55736,29 @@ impl DesktopLauncher {
             Some("edit"),
             layer + 0.079,
         );
+        for (index, (label, kind)) in [
+            ("@bannedblocks", DesktopBannedContentKind::Blocks),
+            ("@bannedunits", DesktopBannedContentKind::Units),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.push_settings_text_button(
+                pass,
+                Self::pause_overlay_custom_rules_child_button_rect(dialog, index),
+                label,
+                None,
+                layer + 0.0795 + index as f32 * 0.001,
+            );
+            if self.pause_custom_rules_banned_content_dialog == Some(kind) {
+                pass.push(RenderCommand::stroke_rect(
+                    Self::pause_overlay_custom_rules_child_button_rect(dialog, index),
+                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.90],
+                    1.0,
+                    layer + 0.0797 + index as f32 * 0.001,
+                ));
+            }
+        }
         self.push_settings_text_button(
             pass,
             Self::pause_overlay_modal_close_rect(dialog),
@@ -55137,6 +55768,9 @@ impl DesktopLauncher {
         );
         if self.pause_custom_rules_edit_dialog_open {
             self.push_pause_custom_rules_edit_dialog(pass, dialog);
+        }
+        if let Some(kind) = self.pause_custom_rules_banned_content_dialog {
+            self.push_pause_banned_content_dialog(pass, dialog, kind, rules);
         }
     }
 
@@ -76908,6 +77542,166 @@ displayName: "Alpha Pack"
             clip_count > 0 && clear_count > 0,
             "rendering should clip scrolled pause custom-rule rows to the content pane"
         );
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_custom_rules_banned_content_child_dialog_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.game_state.rules.allow_edit_rules = true;
+        launcher.runtime.state.rules = launcher.game_state.rules.copy();
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CustomRules);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = launcher.pause_overlay_panel_for_current_state(viewport);
+        let dialog = DesktopLauncher::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let banned_blocks = launcher.localize_bundle_markup_text("@bannedblocks");
+        let banned_units = launcher.localize_bundle_markup_text("@bannedunits");
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts
+            .iter()
+            .any(|text| text.contains(banned_blocks.as_str())));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains(banned_units.as_str())));
+
+        let blocks_center =
+            DesktopLauncher::pause_overlay_custom_rules_child_button_rect(dialog, 0).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                blocks_center.x,
+                blocks_center.y
+            ),
+            Some(super::DesktopPausedOverlayAction::OpenPauseBannedContent(
+                super::DesktopBannedContentKind::Blocks
+            ))
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::OpenPauseBannedContent(
+                super::DesktopBannedContentKind::Blocks,
+            ),
+        );
+        assert_eq!(
+            launcher.pause_custom_rules_banned_content_dialog,
+            Some(super::DesktopBannedContentKind::Blocks)
+        );
+
+        let block_entry = launcher
+            .pause_banned_content_candidate_entries(super::DesktopBannedContentKind::Blocks)
+            .into_iter()
+            .next()
+            .expect("vanilla block list should provide a pause BannedContentDialog candidate");
+        let banned_dialog = DesktopLauncher::map_play_banned_content_dialog_rect(dialog);
+        let first_unbanned =
+            DesktopLauncher::map_play_banned_content_item_rect(banned_dialog, false, 0).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                first_unbanned.x,
+                first_unbanned.y
+            ),
+            Some(super::DesktopPausedOverlayAction::TogglePauseBannedContent(
+                super::DesktopBannedContentKind::Blocks,
+                0
+            ))
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::TogglePauseBannedContent(
+                super::DesktopBannedContentKind::Blocks,
+                0,
+            ),
+        );
+        assert!(
+            launcher
+                .pause_custom_rules_edit
+                .as_ref()
+                .map(|rules| rules.banned_blocks.contains(&block_entry.name))
+                .unwrap_or(false),
+            "pause BannedContentDialog should write into pending edit rules"
+        );
+        assert!(
+            !launcher
+                .game_state
+                .rules
+                .banned_blocks
+                .contains(&block_entry.name),
+            "Java CustomRulesDialog only commits pending rules when the parent dialog closes"
+        );
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::Back);
+        assert_eq!(launcher.pause_custom_rules_banned_content_dialog, None);
+        assert_eq!(
+            launcher.pause_overlay_modal,
+            Some(super::DesktopPausedOverlayModal::CustomRules)
+        );
+
+        let units_center =
+            DesktopLauncher::pause_overlay_custom_rules_child_button_rect(dialog, 1).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, units_center.x, units_center.y),
+            Some(super::DesktopPausedOverlayAction::OpenPauseBannedContent(
+                super::DesktopBannedContentKind::Units
+            ))
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::OpenPauseBannedContent(
+                super::DesktopBannedContentKind::Units,
+            ),
+        );
+        let unit_entry = launcher
+            .pause_banned_content_candidate_entries(super::DesktopBannedContentKind::Units)
+            .into_iter()
+            .next()
+            .expect("vanilla unit list should provide a pause BannedContentDialog candidate");
+        let first_unbanned_unit =
+            DesktopLauncher::map_play_banned_content_item_rect(banned_dialog, false, 0).center();
+        launcher.dispatch_pause_overlay_action(
+            launcher
+                .pause_overlay_action_at_surface_point(
+                    surface,
+                    first_unbanned_unit.x,
+                    first_unbanned_unit.y,
+                )
+                .expect("first pause unit row should be clickable"),
+        );
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CloseModal);
+        assert!(launcher
+            .game_state
+            .rules
+            .banned_blocks
+            .contains(&block_entry.name));
+        assert!(launcher
+            .runtime
+            .state
+            .rules
+            .banned_blocks
+            .contains(&block_entry.name));
+        assert!(launcher
+            .game_state
+            .rules
+            .banned_units
+            .contains(&unit_entry.name));
+        assert!(launcher
+            .runtime
+            .state
+            .rules
+            .banned_units
+            .contains(&unit_entry.name));
     }
 
     #[test]

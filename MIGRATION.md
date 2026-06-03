@@ -17,6 +17,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 848. PausedDialog CustomRules banned blocks/units 子流接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.80%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `CustomRulesDialog.setupMain()` 中 banned blocks / banned units 是独立子流入口；
+  - 子流内要有搜索、block category filter、selected/unselected 双列、Add All、滚动与返回；
+  - 规则修改只写入 pending `toEdit`，关闭整个 CustomRulesDialog 后才提交。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 pause banned content 状态：dialog kind、search、search focus、scroll offset、block category；
+    - 新增 `DesktopPausedOverlayAction` 的 pause banned content action 族；
+    - 将 banned content 候选集过滤抽成可复用 helper，map-play 与 pause 共用同一内容候选来源；
+    - Pause CustomRules 主窗新增 Banned Blocks / Banned Units 底部入口按钮，避开规则内容区命中重叠；
+    - 新增 pause banned 子窗渲染，复用 map-play 的双列布局/分类/search/add-all/scroll 结构；
+    - hit-test / dispatch / Back 栈接入：Back 先关 banned 子窗，CloseModal 才提交 pending rules；
+    - 新增回归测试，锁定 blocks/units 子窗打开、候选点击、pending-only 修改、最终提交到 game/runtime。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop paused_world_overlay_custom_rules`
+  - `cargo test -p mindustry-desktop map_play`
+  - `cargo test -p mindustry-desktop weather_dialog`
+  - `cargo test -p mindustry-desktop paused_world_overlay`
+- 仍未完成：
+  - pause 侧仍需补齐 weather 与 team rules 子流；
+  - CustomRules 主 ScrollPane 仍需继续补 Java 风格滚动条/knob 视觉与拖拽；
+  - 关闭规则后向联机端广播 `Call.setRules(toEdit)` 的 Java 互通语义仍需继续接入；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 847. CustomRulesDialog edit 子弹窗 Copy/Load 关闭语义对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
