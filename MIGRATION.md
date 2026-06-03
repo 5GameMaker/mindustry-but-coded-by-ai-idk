@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 825. Settings Data 真实 zip 导入导出
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.56%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `SettingsMenuDialog.java#exportData(Fi)` 将 `settings.bin`、`maps`、`saves`、`mods`、`schematics` 打包为相对 data-dir 的 zip entry；
+  - `SettingsMenuDialog.java#importData(Fi)` 要求 zip 内存在 `settings.bin`，导入前删除 `saves` 与 `tmp`，再把 zip 内容解到 data-dir 并重新加载 settings；
+  - Rust 过渡实现保留 Java 相对路径语义，并额外递归收集目录内容，保证 folder mod / nested data 也能形成完整数据包。
+- 本轮主改动：
+  - `desktop/Cargo.toml`
+    - `mindustry-desktop` 接入 workspace `flate2`，用于读取 Java `ZipOutputStream` 常见 deflated entry。
+  - `desktop/src/lib.rs`
+    - 新增 Settings Data archive 结果记录与 zip helper，支持 stored 写出、stored/deflated 读取、central directory 解析、CRC32 写入；
+    - `DesktopLauncher::export_settings_data_to(...)` 收集 `settings.bin/maps/saves/mods/schematics`，写出 `.zip`，并记录 `last_settings_data_export_result`；
+    - `DesktopLauncher::import_settings_data_from(...)` 校验 `settings.bin`、拒绝路径穿越/绝对路径/盘符逃逸，删除旧 `saves/tmp` 后解包到 data-dir，清空过渡 settings overrides 并重新同步 locale；
+    - 新增导出相对 entry、导入替换 saves/tmp、缺少 `settings.bin` 拒绝三条回归测试。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_settings_export_data --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_settings_import_data --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 文件选择器返回路径后的真实 UI 回调、crash log 内容拼接/export/shareFile、导入后更完整的 Java `settings.clear(); settings.load(); app.exit();` 生命周期仍需继续迁移；
+  - 后续优先按本地对照推进 Load/Save、Join、Mods、Editor 等高可见前端缺口，并修复 `fpscap` 未接入导致的低帧率问题。
+
 ## 824. Settings Data 页平台动作分发
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

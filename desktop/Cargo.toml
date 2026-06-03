@@ -17,6 +17,7 @@ opengl-native-runtime = [
 ]
 
 [dependencies]
+flate2.workspace = true
 glow = { version = "0.17.0", optional = true }
 glutin = { version = "0.32.3", optional = true }
 glutin-winit = { version = "0.5.0", optional = true }

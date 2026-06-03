@@ -1,3 +1,4 @@
+use flate2::read::DeflateDecoder;
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::content::blocks::{
     BlockDef, BulletKind, BulletSpec, CampaignBlockData, CampaignBlockKind, DistributionBlockKind,
@@ -133,7 +134,7 @@ use mindustry_core::mindustry::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -3148,6 +3149,250 @@ pub fn settings_pref_highlight_summary_line(table: &str) -> Option<String> {
     } else {
         Some(summaries.join(" | "))
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopSettingsDataArchiveResult {
+    pub file: String,
+    pub entries: usize,
+    pub files: usize,
+    pub directories: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DesktopSettingsDataArchiveEntry {
+    name: String,
+    data: Option<Vec<u8>>,
+}
+
+fn desktop_zip_u16(bytes: &[u8], offset: usize) -> io::Result<u16> {
+    let slice = bytes
+        .get(offset..offset + 2)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "truncated zip u16"))?;
+    Ok(u16::from_le_bytes([slice[0], slice[1]]))
+}
+
+fn desktop_zip_u32(bytes: &[u8], offset: usize) -> io::Result<u32> {
+    let slice = bytes
+        .get(offset..offset + 4)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "truncated zip u32"))?;
+    Ok(u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
+}
+
+fn desktop_zip_push_u16(out: &mut Vec<u8>, value: u16) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
+fn desktop_zip_push_u32(out: &mut Vec<u8>, value: u32) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
+fn desktop_crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            let mask = 0u32.wrapping_sub(crc & 1);
+            crc = (crc >> 1) ^ (0xedb8_8320 & mask);
+        }
+    }
+    !crc
+}
+
+fn desktop_settings_data_zip_bytes(
+    entries: &[DesktopSettingsDataArchiveEntry],
+) -> io::Result<Vec<u8>> {
+    struct Central {
+        name: String,
+        crc: u32,
+        size: u32,
+        offset: u32,
+        directory: bool,
+    }
+
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    for entry in entries {
+        let data = entry.data.as_deref().unwrap_or(&[]);
+        let name = entry.name.as_bytes();
+        let name_len = u16::try_from(name.len())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "zip entry name too long"))?;
+        let size = u32::try_from(data.len())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "zip entry too large"))?;
+        let offset = u32::try_from(out.len())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "zip file too large"))?;
+        let crc = desktop_crc32(data);
+
+        desktop_zip_push_u32(&mut out, 0x0403_4b50);
+        desktop_zip_push_u16(&mut out, 20);
+        desktop_zip_push_u16(&mut out, 0);
+        desktop_zip_push_u16(&mut out, 0);
+        desktop_zip_push_u16(&mut out, 0);
+        desktop_zip_push_u16(&mut out, 0);
+        desktop_zip_push_u32(&mut out, crc);
+        desktop_zip_push_u32(&mut out, size);
+        desktop_zip_push_u32(&mut out, size);
+        desktop_zip_push_u16(&mut out, name_len);
+        desktop_zip_push_u16(&mut out, 0);
+        out.extend_from_slice(name);
+        out.extend_from_slice(data);
+
+        central.push(Central {
+            name: entry.name.clone(),
+            crc,
+            size,
+            offset,
+            directory: entry.data.is_none(),
+        });
+    }
+
+    let central_offset = u32::try_from(out.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "zip central offset too large"))?;
+    for entry in &central {
+        let name = entry.name.as_bytes();
+        let name_len = u16::try_from(name.len())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "zip entry name too long"))?;
+        desktop_zip_push_u32(&mut out, 0x0201_4b50);
+        desktop_zip_push_u16(&mut out, 20);
+        desktop_zip_push_u16(&mut out, 20);
+        desktop_zip_push_u16(&mut out, 0);
+        desktop_zip_push_u16(&mut out, 0);
+        desktop_zip_push_u16(&mut out, 0);
+        desktop_zip_push_u16(&mut out, 0);
+        desktop_zip_push_u32(&mut out, entry.crc);
+        desktop_zip_push_u32(&mut out, entry.size);
+        desktop_zip_push_u32(&mut out, entry.size);
+        desktop_zip_push_u16(&mut out, name_len);
+        desktop_zip_push_u16(&mut out, 0);
+        desktop_zip_push_u16(&mut out, 0);
+        desktop_zip_push_u16(&mut out, 0);
+        desktop_zip_push_u16(&mut out, 0);
+        desktop_zip_push_u32(&mut out, if entry.directory { 0x0010_0000 } else { 0 });
+        desktop_zip_push_u32(&mut out, entry.offset);
+        out.extend_from_slice(name);
+    }
+    let central_size = u32::try_from(out.len() - central_offset as usize)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "zip central size too large"))?;
+    let entry_count = u16::try_from(central.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "too many zip entries"))?;
+    desktop_zip_push_u32(&mut out, 0x0605_4b50);
+    desktop_zip_push_u16(&mut out, 0);
+    desktop_zip_push_u16(&mut out, 0);
+    desktop_zip_push_u16(&mut out, entry_count);
+    desktop_zip_push_u16(&mut out, entry_count);
+    desktop_zip_push_u32(&mut out, central_size);
+    desktop_zip_push_u32(&mut out, central_offset);
+    desktop_zip_push_u16(&mut out, 0);
+    Ok(out)
+}
+
+fn desktop_settings_data_zip_entries(
+    bytes: &[u8],
+) -> io::Result<Vec<DesktopSettingsDataArchiveEntry>> {
+    let eocd = bytes
+        .windows(4)
+        .rposition(|window| window == [0x50, 0x4b, 0x05, 0x06])
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing zip end record"))?;
+    let count = desktop_zip_u16(bytes, eocd + 10)? as usize;
+    let central_offset = desktop_zip_u32(bytes, eocd + 16)? as usize;
+    let mut pos = central_offset;
+    let mut entries = Vec::new();
+    for _ in 0..count {
+        if desktop_zip_u32(bytes, pos)? != 0x0201_4b50 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid zip central directory",
+            ));
+        }
+        let method = desktop_zip_u16(bytes, pos + 10)?;
+        let compressed_size = desktop_zip_u32(bytes, pos + 20)? as usize;
+        let uncompressed_size = desktop_zip_u32(bytes, pos + 24)? as usize;
+        let name_len = desktop_zip_u16(bytes, pos + 28)? as usize;
+        let extra_len = desktop_zip_u16(bytes, pos + 30)? as usize;
+        let comment_len = desktop_zip_u16(bytes, pos + 32)? as usize;
+        let local_offset = desktop_zip_u32(bytes, pos + 42)? as usize;
+        let name_bytes = bytes
+            .get(pos + 46..pos + 46 + name_len)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "truncated zip name"))?;
+        let name = std::str::from_utf8(name_bytes)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "zip name is not utf8"))?
+            .replace('\\', "/");
+        pos += 46 + name_len + extra_len + comment_len;
+
+        if desktop_zip_u32(bytes, local_offset)? != 0x0403_4b50 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid zip local header",
+            ));
+        }
+        let local_name_len = desktop_zip_u16(bytes, local_offset + 26)? as usize;
+        let local_extra_len = desktop_zip_u16(bytes, local_offset + 28)? as usize;
+        let data_offset = local_offset + 30 + local_name_len + local_extra_len;
+        let compressed = bytes
+            .get(data_offset..data_offset + compressed_size)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "truncated zip data"))?;
+        let data = if name.ends_with('/') {
+            None
+        } else {
+            let data = match method {
+                0 => compressed.to_vec(),
+                8 => {
+                    let mut decoder = DeflateDecoder::new(compressed);
+                    let mut decoded = Vec::with_capacity(uncompressed_size);
+                    decoder.read_to_end(&mut decoded)?;
+                    decoded
+                }
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("unsupported zip method {method}"),
+                    ));
+                }
+            };
+            Some(data)
+        };
+        entries.push(DesktopSettingsDataArchiveEntry { name, data });
+    }
+    Ok(entries)
+}
+
+fn desktop_settings_data_zip_result(
+    file: impl Into<String>,
+    entries: &[DesktopSettingsDataArchiveEntry],
+) -> DesktopSettingsDataArchiveResult {
+    DesktopSettingsDataArchiveResult {
+        file: file.into(),
+        entries: entries.len(),
+        files: entries.iter().filter(|entry| entry.data.is_some()).count(),
+        directories: entries.iter().filter(|entry| entry.data.is_none()).count(),
+    }
+}
+
+fn desktop_settings_data_archive_destination(base: &Path, name: &str) -> io::Result<PathBuf> {
+    let trimmed = name.strip_suffix('/').unwrap_or(name);
+    if trimmed.is_empty()
+        || trimmed.starts_with('/')
+        || trimmed.starts_with('\\')
+        || trimmed.contains('\\')
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid zip entry path {name}"),
+        ));
+    }
+
+    let mut destination = base.to_path_buf();
+    for component in trimmed.split('/') {
+        if component.is_empty() || component == "." || component == ".." || component.contains(':')
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("invalid zip entry path {name}"),
+            ));
+        }
+        destination.push(component);
+    }
+    Ok(destination)
 }
 
 const SETTINGS_DATA_ACTIONS: &[DesktopSettingsDataAction] = &[
@@ -18316,6 +18561,8 @@ pub struct DesktopLauncher {
     pub last_settings_crash_export_request: Option<FileChooserRequest>,
     pub last_settings_open_data_folder_path: Option<String>,
     pub last_settings_open_data_folder_result: Option<bool>,
+    pub last_settings_data_export_result: Option<DesktopSettingsDataArchiveResult>,
+    pub last_settings_data_import_result: Option<DesktopSettingsDataArchiveResult>,
     pub last_settings_hovered_control: Option<DesktopSettingsControlId>,
     pub last_settings_pressed_control: Option<DesktopSettingsControlId>,
     pub settings_scroll_drag_state: Option<DesktopSettingsScrollDragState>,
@@ -19525,6 +19772,8 @@ impl DesktopLauncher {
             last_settings_crash_export_request: None,
             last_settings_open_data_folder_path: None,
             last_settings_open_data_folder_result: None,
+            last_settings_data_export_result: None,
+            last_settings_data_import_result: None,
             last_settings_hovered_control: None,
             last_settings_pressed_control: None,
             settings_scroll_drag_state: None,
@@ -20951,7 +21200,7 @@ impl DesktopLauncher {
             .buildings
             .iter()
             .map(|building| (building.tile_pos, building))
-            .collect::<BTreeMap<_, _>>();
+            .collect::<std::collections::BTreeMap<_, _>>();
         let mut tiles = Vec::with_capacity(visible_tiles.len());
 
         for coord in visible_tiles {
@@ -25565,6 +25814,217 @@ impl DesktopLauncher {
         self.settings_locale = locale.clone();
         self.player_locale = locale.clone();
         locale
+    }
+
+    fn settings_data_archive_source_paths(&self) -> Vec<PathBuf> {
+        let paths = &self.client.context.paths;
+        vec![
+            PathBuf::from(&paths.data_dir).join("settings.bin"),
+            PathBuf::from(&paths.map_dir),
+            PathBuf::from(&paths.save_dir),
+            PathBuf::from(&paths.mod_dir),
+            PathBuf::from(&paths.schematic_dir),
+        ]
+    }
+
+    fn settings_data_archive_entry_name(
+        base: &Path,
+        path: &Path,
+        directory: bool,
+    ) -> io::Result<String> {
+        let relative = path.strip_prefix(base).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "settings data path {} is outside data dir {}",
+                    path.display(),
+                    base.display()
+                ),
+            )
+        })?;
+        let mut parts = Vec::new();
+        for component in relative.components() {
+            match component {
+                std::path::Component::Normal(value) => {
+                    let value = value.to_string_lossy();
+                    if value.is_empty() || value == "." || value == ".." || value.contains(':') {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("invalid settings data archive path {}", path.display()),
+                        ));
+                    }
+                    parts.push(value.into_owned());
+                }
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("invalid settings data archive path {}", path.display()),
+                    ));
+                }
+            }
+        }
+        let mut name = parts.join("/");
+        if directory && !name.ends_with('/') {
+            name.push('/');
+        }
+        Ok(name)
+    }
+
+    fn insert_settings_data_archive_parent_dirs(
+        entries: &mut BTreeMap<String, Option<Vec<u8>>>,
+        name: &str,
+    ) {
+        let segments = name
+            .trim_end_matches('/')
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .collect::<Vec<_>>();
+        if segments.len() < 2 {
+            return;
+        }
+        let mut parent = String::new();
+        for segment in segments.iter().take(segments.len() - 1) {
+            if !parent.is_empty() {
+                parent.push('/');
+            }
+            parent.push_str(segment);
+            entries.entry(format!("{parent}/")).or_insert(None);
+        }
+    }
+
+    fn collect_settings_data_archive_path(
+        base: &Path,
+        path: &Path,
+        entries: &mut BTreeMap<String, Option<Vec<u8>>>,
+    ) -> io::Result<()> {
+        let metadata = fs::metadata(path)?;
+        let directory = metadata.is_dir();
+        let name = Self::settings_data_archive_entry_name(base, path, directory)?;
+        if !name.is_empty() {
+            Self::insert_settings_data_archive_parent_dirs(entries, &name);
+            if directory {
+                entries.entry(name).or_insert(None);
+            } else if metadata.is_file() {
+                entries.insert(name, Some(fs::read(path)?));
+            }
+        }
+
+        if directory {
+            let mut children = fs::read_dir(path)?
+                .map(|entry| entry.map(|entry| entry.path()))
+                .collect::<io::Result<Vec<_>>>()?;
+            children.sort_by(|left, right| {
+                left.to_string_lossy()
+                    .to_ascii_lowercase()
+                    .cmp(&right.to_string_lossy().to_ascii_lowercase())
+            });
+            for child in children {
+                Self::collect_settings_data_archive_path(base, &child, entries)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_settings_data_archive_entries(
+        &self,
+    ) -> io::Result<Vec<DesktopSettingsDataArchiveEntry>> {
+        let base = PathBuf::from(&self.client.context.paths.data_dir);
+        let mut entries = BTreeMap::new();
+        for source in self.settings_data_archive_source_paths() {
+            if !source.exists() {
+                if source.file_name().and_then(|name| name.to_str()) == Some("settings.bin") {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("missing settings file {}", source.display()),
+                    ));
+                }
+                continue;
+            }
+            Self::collect_settings_data_archive_path(&base, &source, &mut entries)?;
+        }
+        Ok(entries
+            .into_iter()
+            .map(|(name, data)| DesktopSettingsDataArchiveEntry { name, data })
+            .collect())
+    }
+
+    fn normalize_settings_data_archive_destination(destination: impl AsRef<Path>) -> PathBuf {
+        let destination = destination.as_ref();
+        if destination
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+        {
+            destination.to_path_buf()
+        } else {
+            let mut normalized = destination.to_path_buf();
+            normalized.set_extension("zip");
+            normalized
+        }
+    }
+
+    pub fn export_settings_data_to(
+        &mut self,
+        destination: impl AsRef<Path>,
+    ) -> io::Result<DesktopSettingsDataArchiveResult> {
+        let destination = Self::normalize_settings_data_archive_destination(destination);
+        let entries = self.collect_settings_data_archive_entries()?;
+        let bytes = desktop_settings_data_zip_bytes(&entries)?;
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&destination, bytes)?;
+        let result = desktop_settings_data_zip_result(destination.display().to_string(), &entries);
+        self.last_settings_data_export_result = Some(result.clone());
+        Ok(result)
+    }
+
+    pub fn import_settings_data_from(
+        &mut self,
+        source: impl AsRef<Path>,
+    ) -> io::Result<DesktopSettingsDataArchiveResult> {
+        let source = source.as_ref();
+        let bytes = fs::read(source)?;
+        let entries = desktop_settings_data_zip_entries(&bytes)?;
+        if !entries
+            .iter()
+            .any(|entry| entry.name == "settings.bin" && entry.data.is_some())
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Not valid save data.",
+            ));
+        }
+
+        let base = PathBuf::from(&self.client.context.paths.data_dir);
+        let save_dir = PathBuf::from(&self.client.context.paths.save_dir);
+        let tmp_dir = base.join("tmp");
+        for path in [&save_dir, &tmp_dir] {
+            match fs::remove_dir_all(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+        fs::create_dir_all(&base)?;
+
+        for entry in &entries {
+            let destination = desktop_settings_data_archive_destination(&base, &entry.name)?;
+            if let Some(data) = &entry.data {
+                if let Some(parent) = destination.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(destination, data)?;
+            } else {
+                fs::create_dir_all(destination)?;
+            }
+        }
+
+        self.settings_overrides.clear();
+        self.load_settings_locale_from_settings();
+        let result = desktop_settings_data_zip_result(source.display().to_string(), &entries);
+        self.last_settings_data_import_result = Some(result.clone());
+        Ok(result)
     }
 
     fn set_settings_locale(&mut self, code: &'static str) -> bool {
@@ -86247,6 +86707,178 @@ repo: "Beta/Override"
                 FileChooserRequest::new(false, "@crash.export", "txt")
             ]
         );
+    }
+
+    #[test]
+    fn desktop_launcher_settings_export_data_writes_zip_with_java_relative_entries() {
+        let root = temp_desktop_path("settings-data-export");
+        let maps = root.join("maps");
+        let saves = root.join("saves");
+        let mods = root.join("mods").join("example");
+        let schematics = root.join("schematics");
+        std::fs::create_dir_all(&maps).expect("maps fixture dir should be writable");
+        std::fs::create_dir_all(&saves).expect("saves fixture dir should be writable");
+        std::fs::create_dir_all(&mods).expect("mods fixture dir should be writable");
+        std::fs::create_dir_all(&schematics).expect("schematics fixture dir should be writable");
+        std::fs::write(root.join("settings.bin"), b"settings")
+            .expect("settings fixture should write");
+        std::fs::write(maps.join("a.msav"), b"map").expect("map fixture should write");
+        std::fs::write(saves.join("1.msav"), b"save").expect("save fixture should write");
+        std::fs::write(mods.join("mod.json"), br#"{"name":"example"}"#)
+            .expect("mod fixture should write");
+        std::fs::write(schematics.join("a.msch"), b"schematic")
+            .expect("schematic fixture should write");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.data_dir = root.display().to_string();
+        launcher.client.context.paths.map_dir = maps.display().to_string();
+        launcher.client.context.paths.save_dir = saves.display().to_string();
+        launcher.client.context.paths.mod_dir = root.join("mods").display().to_string();
+        launcher.client.context.paths.schematic_dir = schematics.display().to_string();
+
+        let destination_without_extension = root.join("exported-data");
+        let result = launcher
+            .export_settings_data_to(&destination_without_extension)
+            .expect("settings data export should write zip");
+        let destination = root.join("exported-data.zip");
+        assert_eq!(result.file, destination.display().to_string());
+        assert_eq!(
+            launcher.last_settings_data_export_result,
+            Some(result.clone())
+        );
+        assert!(result.files >= 5);
+        assert!(result.directories >= 4);
+
+        let exported = std::fs::read(&destination).expect("exported zip should exist");
+        let entries =
+            super::desktop_settings_data_zip_entries(&exported).expect("zip should be readable");
+        let entry_map = entries
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.data.as_deref()))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            entry_map.get("settings.bin").copied().flatten(),
+            Some(&b"settings"[..])
+        );
+        assert_eq!(entry_map.get("maps/").copied(), Some(None));
+        assert_eq!(
+            entry_map.get("maps/a.msav").copied().flatten(),
+            Some(&b"map"[..])
+        );
+        assert_eq!(
+            entry_map.get("saves/1.msav").copied().flatten(),
+            Some(&b"save"[..])
+        );
+        assert_eq!(
+            entry_map.get("mods/example/mod.json").copied().flatten(),
+            Some(&br#"{"name":"example"}"#[..])
+        );
+        assert_eq!(
+            entry_map.get("schematics/a.msch").copied().flatten(),
+            Some(&b"schematic"[..])
+        );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_settings_import_data_validates_settings_and_replaces_save_tmp_dirs() {
+        let root = temp_desktop_path("settings-data-import");
+        let saves = root.join("saves");
+        let tmp = root.join("tmp");
+        std::fs::create_dir_all(&saves).expect("old saves fixture dir should be writable");
+        std::fs::create_dir_all(&tmp).expect("old tmp fixture dir should be writable");
+        std::fs::write(saves.join("old.msav"), b"old").expect("old save fixture should write");
+        std::fs::write(tmp.join("old.tmp"), b"old").expect("old tmp fixture should write");
+
+        let zip_path = root.join("import.zip");
+        let zip = super::desktop_settings_data_zip_bytes(&[
+            super::DesktopSettingsDataArchiveEntry {
+                name: "settings.bin".into(),
+                data: Some(b"new-settings".to_vec()),
+            },
+            super::DesktopSettingsDataArchiveEntry {
+                name: "saves/".into(),
+                data: None,
+            },
+            super::DesktopSettingsDataArchiveEntry {
+                name: "saves/new.msav".into(),
+                data: Some(b"new-save".to_vec()),
+            },
+            super::DesktopSettingsDataArchiveEntry {
+                name: "tmp/".into(),
+                data: None,
+            },
+            super::DesktopSettingsDataArchiveEntry {
+                name: "tmp/new.tmp".into(),
+                data: Some(b"new-tmp".to_vec()),
+            },
+            super::DesktopSettingsDataArchiveEntry {
+                name: "maps/imported.msav".into(),
+                data: Some(b"new-map".to_vec()),
+            },
+        ])
+        .expect("zip fixture should encode");
+        std::fs::write(&zip_path, zip).expect("zip fixture should write");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.data_dir = root.display().to_string();
+        launcher.client.context.paths.save_dir = saves.display().to_string();
+        launcher.set_setting_override("graphics", "pixelate", "true");
+        assert!(!launcher.settings_overrides.is_empty());
+
+        let result = launcher
+            .import_settings_data_from(&zip_path)
+            .expect("valid settings data import should succeed");
+        assert_eq!(
+            launcher.last_settings_data_import_result,
+            Some(result.clone())
+        );
+        assert_eq!(result.files, 4);
+        assert_eq!(
+            std::fs::read(root.join("settings.bin")).unwrap(),
+            b"new-settings"
+        );
+        assert!(!saves.join("old.msav").exists());
+        assert_eq!(std::fs::read(saves.join("new.msav")).unwrap(), b"new-save");
+        assert!(!tmp.join("old.tmp").exists());
+        assert_eq!(std::fs::read(tmp.join("new.tmp")).unwrap(), b"new-tmp");
+        assert_eq!(
+            std::fs::read(root.join("maps/imported.msav")).unwrap(),
+            b"new-map"
+        );
+        assert!(launcher.settings_overrides.is_empty());
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_settings_import_data_rejects_zip_without_settings_bin() {
+        let root = temp_desktop_path("settings-data-import-invalid");
+        let saves = root.join("saves");
+        std::fs::create_dir_all(&saves).expect("old saves fixture dir should be writable");
+        std::fs::write(saves.join("old.msav"), b"old").expect("old save fixture should write");
+        let zip_path = root.join("invalid.zip");
+        let zip =
+            super::desktop_settings_data_zip_bytes(&[super::DesktopSettingsDataArchiveEntry {
+                name: "saves/new.msav".into(),
+                data: Some(b"new-save".to_vec()),
+            }])
+            .expect("zip fixture should encode");
+        std::fs::write(&zip_path, zip).expect("zip fixture should write");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.data_dir = root.display().to_string();
+        launcher.client.context.paths.save_dir = saves.display().to_string();
+        let error = launcher
+            .import_settings_data_from(&zip_path)
+            .expect_err("zip without settings.bin must be rejected");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(saves.join("old.msav").exists());
+        assert!(!saves.join("new.msav").exists());
+        assert_eq!(launcher.last_settings_data_import_result, None);
+
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]
