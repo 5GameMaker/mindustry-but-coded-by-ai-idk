@@ -99,6 +99,7 @@ use mindustry_core::mindustry::net::{
     NetworkPlayerSyncData, NetworkWorldData, PacketKind, SoundAtCallPacket,
     StateSnapshotCallPacket,
 };
+use mindustry_core::mindustry::r#type::planet::default_planet_env;
 use mindustry_core::mindustry::r#type::{
     Category, ItemStack, ParticleDrawParticlesPlan, ParticleNoiseLayerPlan, RainDrawPlan, Sector,
     SectorPreset, SplashDrawPlan, UnitDrawStage, Weapon, WeatherEntry, WeatherState,
@@ -4348,6 +4349,10 @@ enum DesktopPausedOverlayAction {
     OpenPauseAmbientLight,
     ClosePauseAmbientLight,
     SelectPauseAmbientLight(usize),
+    OpenPausePlanet,
+    ClosePausePlanet,
+    SelectPausePlanet(usize),
+    SelectPauseAnyEnv,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18855,6 +18860,7 @@ pub struct DesktopLauncher {
     pause_custom_rules_loadout_scroll_offset: usize,
     pause_custom_rules_loadout_draft: Vec<ItemStack>,
     pause_custom_rules_ambient_light_dialog_open: bool,
+    pause_custom_rules_planet_dialog_open: bool,
     last_pause_custom_rules_clipboard_text: Option<String>,
     pause_custom_rules_error: Option<String>,
     last_pause_quit_result: Option<DesktopPauseQuitResult>,
@@ -20092,6 +20098,7 @@ impl DesktopLauncher {
             pause_custom_rules_loadout_scroll_offset: 0,
             pause_custom_rules_loadout_draft: Vec::new(),
             pause_custom_rules_ambient_light_dialog_open: false,
+            pause_custom_rules_planet_dialog_open: false,
             last_pause_custom_rules_clipboard_text: None,
             pause_custom_rules_error: None,
             last_pause_quit_result: None,
@@ -31608,7 +31615,7 @@ impl DesktopLauncher {
         index: usize,
     ) -> RenderRect {
         let gap = 8.0;
-        let count = 6.0;
+        let count = 7.0;
         let width = ((dialog.width - 196.0 - (count - 1.0) * gap) / count).clamp(52.0, 112.0);
         RenderRect::new(
             dialog.x + 28.0 + index as f32 * (width + gap),
@@ -31829,6 +31836,28 @@ impl DesktopLauncher {
                         .contains_point(point)
                     {
                         return Some(DesktopPausedOverlayAction::ClosePauseAmbientLight);
+                    }
+                    return None;
+                }
+                if self.pause_custom_rules_planet_dialog_open {
+                    let planet_dialog = Self::pause_planet_dialog_rect(dialog);
+                    if Self::pause_planet_close_rect(planet_dialog).contains_point(point) {
+                        return Some(DesktopPausedOverlayAction::ClosePausePlanet);
+                    }
+                    let candidates = self.pause_planet_candidates();
+                    for (candidate_index, _) in candidates.iter().enumerate() {
+                        if Self::pause_planet_button_rect(planet_dialog, candidate_index)
+                            .contains_point(point)
+                        {
+                            return Some(DesktopPausedOverlayAction::SelectPausePlanet(
+                                candidate_index,
+                            ));
+                        }
+                    }
+                    if Self::pause_planet_button_rect(planet_dialog, candidates.len())
+                        .contains_point(point)
+                    {
+                        return Some(DesktopPausedOverlayAction::SelectPauseAnyEnv);
                     }
                     return None;
                 }
@@ -32141,6 +32170,11 @@ impl DesktopLauncher {
                     .contains_point(point)
                 {
                     return Some(DesktopPausedOverlayAction::OpenPauseAmbientLight);
+                }
+                if Self::pause_overlay_custom_rules_child_button_rect(dialog, 6)
+                    .contains_point(point)
+                {
+                    return Some(DesktopPausedOverlayAction::OpenPausePlanet);
                 }
                 if Self::pause_overlay_modal_close_rect(dialog).contains_point(point) {
                     return Some(DesktopPausedOverlayAction::CloseModal);
@@ -35492,6 +35526,54 @@ impl DesktopLauncher {
         RenderRect::new(dialog.x + 28.0, dialog.y + dialog.height - 88.0, 58.0, 50.0)
     }
 
+    fn pause_planet_dialog_rect(child: RenderRect) -> RenderRect {
+        let width = (child.width - 42.0).clamp(460.0, 620.0);
+        let height = (child.height - 78.0).clamp(300.0, 420.0);
+        RenderRect::new(
+            child.center().x - width * 0.5,
+            child.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn pause_planet_close_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.x + 18.0, dialog.y + 16.0, 112.0, 36.0)
+    }
+
+    fn pause_planet_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let width = 140.0;
+        let height = 50.0;
+        let gap_x = 10.0;
+        let gap_y = 10.0;
+        let columns = 3;
+        let column = index % columns;
+        let row = index / columns;
+        let total_width = columns as f32 * width + (columns - 1) as f32 * gap_x;
+        RenderRect::new(
+            dialog.center().x - total_width * 0.5 + column as f32 * (width + gap_x),
+            dialog.y + dialog.height - 92.0 - row as f32 * (height + gap_y),
+            width,
+            height,
+        )
+    }
+
+    fn pause_planet_candidates(&self) -> Vec<(String, String, u32)> {
+        self.content_loader
+            .catalog()
+            .planets
+            .iter()
+            .filter(|planet| planet.meta.accessible && planet.meta.visible && planet.is_landable())
+            .map(|planet| {
+                (
+                    planet.name().to_string(),
+                    planet.localized_name().to_string(),
+                    planet.meta.default_env,
+                )
+            })
+            .collect()
+    }
+
     fn map_play_team_options() -> Vec<(usize, String, u32)> {
         vanilla_teams()
             .base_teams()
@@ -36235,6 +36317,7 @@ impl DesktopLauncher {
         self.pause_custom_rules_edit_dialog_open = false;
         self.pause_custom_rules_search_focused = false;
         self.pause_custom_rules_ambient_light_dialog_open = false;
+        self.pause_custom_rules_planet_dialog_open = false;
         self.pause_custom_rules_error = None;
     }
 
@@ -36252,6 +36335,7 @@ impl DesktopLauncher {
         self.pause_custom_rules_loadout_scroll_offset = 0;
         self.pause_custom_rules_loadout_draft.clear();
         self.pause_custom_rules_ambient_light_dialog_open = false;
+        self.pause_custom_rules_planet_dialog_open = false;
         self.pause_custom_rules_error = None;
     }
 
@@ -36308,6 +36392,25 @@ impl DesktopLauncher {
         let rgba = rgba8888_to_render_color(color, 1.0);
         self.ensure_pause_custom_rules_edit_rules().ambient_light = rgba;
         self.pause_custom_rules_ambient_light_dialog_open = false;
+        self.pause_custom_rules_error = None;
+    }
+
+    fn select_pause_planet(&mut self, index: usize) {
+        let Some((name, _, env)) = self.pause_planet_candidates().get(index).cloned() else {
+            return;
+        };
+        let rules = self.ensure_pause_custom_rules_edit_rules();
+        rules.planet = name;
+        rules.env = env;
+        self.pause_custom_rules_planet_dialog_open = false;
+        self.pause_custom_rules_error = None;
+    }
+
+    fn select_pause_any_env(&mut self) {
+        let rules = self.ensure_pause_custom_rules_edit_rules();
+        rules.planet = "sun".into();
+        rules.env = default_planet_env();
+        self.pause_custom_rules_planet_dialog_open = false;
         self.pause_custom_rules_error = None;
     }
 
@@ -42236,6 +42339,7 @@ impl DesktopLauncher {
         self.pause_custom_rules_loadout_scroll_offset = 0;
         self.pause_custom_rules_loadout_draft.clear();
         self.pause_custom_rules_ambient_light_dialog_open = false;
+        self.pause_custom_rules_planet_dialog_open = false;
         self.pause_custom_rules_error = None;
         self.pause_overlay_modal = None;
     }
@@ -42397,7 +42501,11 @@ impl DesktopLauncher {
             | DesktopPausedOverlayAction::AdjustPauseLoadoutItem(_, _)
             | DesktopPausedOverlayAction::OpenPauseAmbientLight
             | DesktopPausedOverlayAction::ClosePauseAmbientLight
-            | DesktopPausedOverlayAction::SelectPauseAmbientLight(_) => {
+            | DesktopPausedOverlayAction::SelectPauseAmbientLight(_)
+            | DesktopPausedOverlayAction::OpenPausePlanet
+            | DesktopPausedOverlayAction::ClosePausePlanet
+            | DesktopPausedOverlayAction::SelectPausePlanet(_)
+            | DesktopPausedOverlayAction::SelectPauseAnyEnv => {
                 self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
                     && self.pause_overlay_custom_rules_visible()
             }
@@ -42445,6 +42553,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_loadout_scroll_offset = 0;
                 self.pause_custom_rules_loadout_draft.clear();
                 self.pause_custom_rules_ambient_light_dialog_open = false;
+                self.pause_custom_rules_planet_dialog_open = false;
                 self.pause_custom_rules_error = None;
                 self.last_menu_guard_message = None;
             }
@@ -42466,6 +42575,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_loadout_scroll_offset = 0;
                 self.pause_custom_rules_loadout_draft.clear();
                 self.pause_custom_rules_ambient_light_dialog_open = false;
+                self.pause_custom_rules_planet_dialog_open = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseCustomRulesEdit => {
@@ -42507,6 +42617,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_loadout_scroll_offset = 0;
                 self.pause_custom_rules_loadout_draft.clear();
                 self.pause_custom_rules_ambient_light_dialog_open = false;
+                self.pause_custom_rules_planet_dialog_open = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseBannedContent => {
@@ -42565,6 +42676,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_loadout_scroll_offset = 0;
                 self.pause_custom_rules_loadout_draft.clear();
                 self.pause_custom_rules_ambient_light_dialog_open = false;
+                self.pause_custom_rules_planet_dialog_open = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseWeather => {
@@ -42611,6 +42723,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_loadout_scroll_offset = 0;
                 self.pause_custom_rules_loadout_draft.clear();
                 self.pause_custom_rules_ambient_light_dialog_open = false;
+                self.pause_custom_rules_planet_dialog_open = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseTeamRules => {
@@ -42679,6 +42792,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_loadout_dialog_open = false;
                 self.pause_custom_rules_loadout_scroll_offset = 0;
                 self.pause_custom_rules_loadout_draft.clear();
+                self.pause_custom_rules_planet_dialog_open = false;
                 self.pause_custom_rules_edit_dialog_open = false;
                 self.pause_custom_rules_search_focused = false;
                 self.pause_custom_rules_error = None;
@@ -42689,8 +42803,38 @@ impl DesktopLauncher {
             DesktopPausedOverlayAction::SelectPauseAmbientLight(index) => {
                 self.select_pause_ambient_light(index);
             }
+            DesktopPausedOverlayAction::OpenPausePlanet => {
+                self.pause_custom_rules_planet_dialog_open = true;
+                self.pause_custom_rules_banned_content_dialog = None;
+                self.pause_custom_rules_banned_content_search_focused = false;
+                self.pause_custom_rules_weather_dialog_open = false;
+                self.pause_custom_rules_weather_add_dialog_open = false;
+                self.pause_custom_rules_team_rules_dialog_open = false;
+                self.pause_custom_rules_loadout_dialog_open = false;
+                self.pause_custom_rules_loadout_scroll_offset = 0;
+                self.pause_custom_rules_loadout_draft.clear();
+                self.pause_custom_rules_ambient_light_dialog_open = false;
+                self.pause_custom_rules_edit_dialog_open = false;
+                self.pause_custom_rules_search_focused = false;
+                self.pause_custom_rules_error = None;
+            }
+            DesktopPausedOverlayAction::ClosePausePlanet => {
+                self.pause_custom_rules_planet_dialog_open = false;
+            }
+            DesktopPausedOverlayAction::SelectPausePlanet(index) => {
+                self.select_pause_planet(index);
+            }
+            DesktopPausedOverlayAction::SelectPauseAnyEnv => {
+                self.select_pause_any_env();
+            }
             DesktopPausedOverlayAction::Back => {
                 if self.pause_overlay_modal.is_some() {
+                    if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
+                        && self.pause_custom_rules_planet_dialog_open
+                    {
+                        self.pause_custom_rules_planet_dialog_open = false;
+                        return;
+                    }
                     if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
                         && self.pause_custom_rules_ambient_light_dialog_open
                     {
@@ -56948,6 +57092,111 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_pause_planet_dialog(
+        &self,
+        pass: &mut RenderPass,
+        dialog_parent: RenderRect,
+        rules: &Rules,
+    ) {
+        let layer = Layer::END_PIXELED + 0.236;
+        let dialog = Self::pause_planet_dialog_rect(dialog_parent);
+        let candidates = self.pause_planet_candidates();
+        pass.push(RenderCommand::fill_rect(
+            dialog_parent,
+            [0.0, 0.0, 0.0, 0.52],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.62, 0.82, 1.0, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@rules.title.planet"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.004,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!(
+                "{}: {} / env {}",
+                self.localize_bundle_markup_text("@current"),
+                rules.planet,
+                rules.env
+            ),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 56.0),
+            [0.70, 0.82, 0.90, 1.0],
+            9.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            layer + 0.005,
+        ));
+        for (index, (name, label, _)) in candidates.iter().enumerate() {
+            let rect = Self::pause_planet_button_rect(dialog, index);
+            let selected = rules.planet == *name;
+            self.push_settings_text_button(
+                pass,
+                rect,
+                format!("{} {}", if selected { "●" } else { "○" }, label),
+                None,
+                layer + 0.020 + index as f32 * 0.001,
+            );
+            if selected {
+                pass.push(RenderCommand::stroke_rect(
+                    rect,
+                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.96],
+                    2.0,
+                    layer + 0.021 + index as f32 * 0.001,
+                ));
+            }
+        }
+        let anyenv_index = candidates.len();
+        let anyenv_rect = Self::pause_planet_button_rect(dialog, anyenv_index);
+        let anyenv_selected = rules.planet == "sun";
+        self.push_settings_text_button(
+            pass,
+            anyenv_rect,
+            format!(
+                "{} {}",
+                if anyenv_selected { "●" } else { "○" },
+                self.localize_bundle_markup_text("@rules.anyenv")
+            ),
+            None,
+            layer + 0.050,
+        );
+        if anyenv_selected {
+            pass.push(RenderCommand::stroke_rect(
+                anyenv_rect,
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.96],
+                2.0,
+                layer + 0.051,
+            ));
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::pause_planet_close_rect(dialog),
+            self.localize_bundle_markup_text("@back"),
+            Some("left"),
+            layer + 0.080,
+        );
+    }
+
     fn push_pause_team_rules_dialog(
         &self,
         pass: &mut RenderPass,
@@ -57429,6 +57678,10 @@ impl DesktopLauncher {
                 "@rules.ambientlight",
                 self.pause_custom_rules_ambient_light_dialog_open,
             ),
+            (
+                "@rules.title.planet",
+                self.pause_custom_rules_planet_dialog_open,
+            ),
         ]
         .into_iter()
         .enumerate()
@@ -57464,6 +57717,9 @@ impl DesktopLauncher {
         }
         if self.pause_custom_rules_ambient_light_dialog_open {
             self.push_pause_ambient_light_dialog(pass, dialog, rules);
+        }
+        if self.pause_custom_rules_planet_dialog_open {
+            self.push_pause_planet_dialog(pass, dialog, rules);
         }
         if let Some(kind) = self.pause_custom_rules_banned_content_dialog {
             self.push_pause_banned_content_dialog(pass, dialog, kind, rules);
@@ -79977,6 +80233,136 @@ displayName: "Alpha Pack"
         launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CloseModal);
         assert_eq!(launcher.game_state.rules.ambient_light, expected);
         assert_eq!(launcher.runtime.state.rules.ambient_light, expected);
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_custom_rules_planet_picker_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.game_state.rules.allow_edit_rules = true;
+        launcher.runtime.state.rules = launcher.game_state.rules.copy();
+        let original_planet = launcher.game_state.rules.planet.clone();
+        let original_env = launcher.game_state.rules.env;
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CustomRules);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = launcher.pause_overlay_panel_for_current_state(viewport);
+        let dialog = DesktopLauncher::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let planet_center =
+            DesktopLauncher::pause_overlay_custom_rules_child_button_rect(dialog, 6).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                planet_center.x,
+                planet_center.y
+            ),
+            Some(super::DesktopPausedOverlayAction::OpenPausePlanet)
+        );
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::OpenPausePlanet);
+        assert!(launcher.pause_custom_rules_planet_dialog_open);
+
+        let candidates = launcher.pause_planet_candidates();
+        assert!(candidates.iter().any(|(name, _, _)| name == "serpulo"));
+        assert!(candidates.iter().any(|(name, _, _)| name == "erekir"));
+        let erekir_index = candidates
+            .iter()
+            .position(|(name, _, _)| name == "erekir")
+            .expect("vanilla landable planet candidates should contain erekir");
+        let erekir_env = candidates[erekir_index].2;
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.iter().any(
+            |text| text.contains(&launcher.localize_bundle_markup_text("@rules.title.planet"))
+        ));
+        assert!(texts.iter().any(|text| text.contains("serpulo")));
+        assert!(texts.iter().any(|text| text.contains("erekir")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains(&launcher.localize_bundle_markup_text("@rules.anyenv"))));
+
+        let planet_dialog = DesktopLauncher::pause_planet_dialog_rect(dialog);
+        let erekir_button =
+            DesktopLauncher::pause_planet_button_rect(planet_dialog, erekir_index).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                erekir_button.x,
+                erekir_button.y
+            ),
+            Some(super::DesktopPausedOverlayAction::SelectPausePlanet(
+                erekir_index
+            ))
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::SelectPausePlanet(erekir_index),
+        );
+        assert!(!launcher.pause_custom_rules_planet_dialog_open);
+        assert_eq!(
+            launcher
+                .pause_custom_rules_edit
+                .as_ref()
+                .map(|rules| rules.planet.as_str()),
+            Some("erekir")
+        );
+        assert_eq!(
+            launcher
+                .pause_custom_rules_edit
+                .as_ref()
+                .map(|rules| rules.env),
+            Some(erekir_env)
+        );
+        assert_eq!(launcher.game_state.rules.planet, original_planet);
+        assert_eq!(launcher.game_state.rules.env, original_env);
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::OpenPausePlanet);
+        let anyenv_button =
+            DesktopLauncher::pause_planet_button_rect(planet_dialog, candidates.len()).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                anyenv_button.x,
+                anyenv_button.y
+            ),
+            Some(super::DesktopPausedOverlayAction::SelectPauseAnyEnv)
+        );
+        launcher
+            .dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::SelectPauseAnyEnv);
+        assert_eq!(
+            launcher
+                .pause_custom_rules_edit
+                .as_ref()
+                .map(|rules| rules.planet.as_str()),
+            Some("sun")
+        );
+        assert_eq!(
+            launcher
+                .pause_custom_rules_edit
+                .as_ref()
+                .map(|rules| rules.env),
+            Some(super::default_planet_env())
+        );
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CloseModal);
+        assert_eq!(launcher.game_state.rules.planet, "sun");
+        assert_eq!(launcher.game_state.rules.env, super::default_planet_env());
+        assert_eq!(launcher.runtime.state.rules.planet, "sun");
+        assert_eq!(
+            launcher.runtime.state.rules.env,
+            super::default_planet_env()
+        );
     }
 
     #[test]

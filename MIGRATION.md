@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 853. PausedDialog CustomRules planet/anyenv 子流接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.85%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `CustomRulesDialog.setupMain()` 的 planet 分类会列出 `content.planets().select(p -> p.accessible && p.visible && p.isLandable())`；
+  - 选择具体 planet 时执行等价 `planet.applyRules(rules, true)`，当前 Rust 至少同步 `rules.planet` 与 `rules.env = planet.defaultEnv`；
+  - `@rules.anyenv` 应把 `rules.planet` 设为 `sun`，并把 `rules.env` 恢复为默认环境。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Pause CustomRules 顶部子入口新增 `@rules.title.planet`；
+    - 新增 planet/anyenv 子窗 open/close/select action、状态、几何 helper、hit-test、render 与 Back 栈；
+    - planet 候选直接来自 content loader 的 accessible/visible/landable planets；
+    - 选择 planet/anyenv 先写 pending `pause_custom_rules_edit`，父 CustomRules `CloseModal` 后才同步 game/runtime；
+    - 新增回归测试覆盖入口命中、渲染 `serpulo`/`erekir`/`@rules.anyenv`、选择 `erekir`、选择 anyenv、pending-only 修改与最终同步。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop paused_world_overlay_custom_rules_planet_picker_like_java`
+  - `cargo test -p mindustry-desktop paused_world_overlay_custom_rules`
+  - `cargo test -p mindustry-desktop paused_world_overlay`
+- 仍未完成：
+  - Java 的 planet 入口位于 CustomRules 滚动内容的 planet 分类内；当前 Rust 仍是顶栏快捷入口，后续应迁回内容区并让搜索过滤按 `@rules.title.planet` 控制；
+  - Rust 目前只同步 `planet/env`，完整 `planet.applyRules(rules, true)` 的所有 side effect 还需继续逐字段对照；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 852. PausedDialog CustomRules ambient light picker 子流接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
