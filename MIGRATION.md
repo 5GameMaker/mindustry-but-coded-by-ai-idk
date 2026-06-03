@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 800. Settings 动态分类无描述分支与 back 行号修正
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.31%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容、性能收口与所有子菜单接近原版。
+- Java 对照与约束：
+  - `SettingsMenuDialog.addCategory(...)` 在描述为空时不会额外渲染描述行；
+  - `SettingsDialog` 的返回按钮行号应随是否存在 description 动态变化，不能把 description 为空的页也按有描述页处理；
+  - 本轮只修正 settings route 的行号与测试，不引入新的 fallback 文案。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 修正 `settings_route_action_for_line()` 中 `DesktopSettingsPage::DynamicCategory` 的 back 行号计算：无描述时 back 行为第 4 行，有描述时 back 行为第 5 行；
+    - 在现有 `DesktopLauncher::settings_dynamic_categories_join_main_menu_model()` 测试里补上有描述分支的 back 行号断言；
+    - 新增 `desktop_launcher_settings_dynamic_category_without_description_maps_back_line_like_java_dialog`，锁定无描述动态分类页的行号、点击映射与返回行为。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_dynamic_categories_join_main_menu_model --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_dynamic_category_without_description_maps_back_line_like_java_dialog --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 仍需继续推进 Settings/Mods/Database/Editor 等子菜单的原版细节还原；
+  - `mods` 浏览器 stars 排序、Database 元数据 fallback、Editor workshop map info 仍是后续可切的小闭环；
+  - 完整前端/联机/可玩性目标仍未完成。
+
 ## 799. OpenGL sprite mesh 顶点缓冲增量上传
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

@@ -27887,7 +27887,7 @@ impl DesktopLauncher {
                     .settings_dynamic_category_page_index
                     .and_then(|index| self.settings_dynamic_categories.get(index))
                     .is_some_and(|category| !category.description.trim().is_empty());
-                let back_line = if has_description { 6 } else { 5 };
+                let back_line = if has_description { 5 } else { 4 };
                 (line_index == back_line).then_some(DesktopSettingsAction::BackToMain)
             }
         }
@@ -82206,8 +82206,76 @@ repo: "Beta/Override"
         assert!(texts.contains(&"Mod Settings"));
         assert!(texts.contains(&"Dynamic category from SettingsMenuDialog.addCategory"));
         assert!(texts.contains(&"dynamic target: example-mod"));
+        assert_eq!(
+            launcher.settings_route_action_for_line(5),
+            Some(super::DesktopSettingsAction::BackToMain)
+        );
 
         assert!(launcher.apply_menu_back_key());
+        assert_eq!(
+            launcher.settings_dialog_state.page,
+            super::DesktopSettingsPage::Main
+        );
+        assert_eq!(launcher.settings_dynamic_category_page_index, None);
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::BackToMain)
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_settings_dynamic_category_without_description_maps_back_line_like_java_dialog(
+    ) {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        let category_index = launcher.add_settings_dynamic_category(
+            "empty-description-mod",
+            "Empty Description",
+            "settings",
+            "   ",
+        );
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::Settings(
+            super::DesktopSettingsAction::OpenDynamicCategory(category_index),
+        ));
+
+        let lines = launcher.settings_route_lines();
+        assert!(lines.contains(&"settings page: dynamic-category".to_string()));
+        assert!(lines.iter().any(|line| {
+            line.contains("category: Empty Description")
+                && line.contains("target:dynamic:empty-description-mod")
+        }));
+        assert!(
+            !lines.iter().any(|line| line.starts_with("description:")),
+            "Java SettingsMenuDialog.addCategory can add a page without description; Rust must not reserve a dead description line"
+        );
+        assert_eq!(lines.get(4).map(String::as_str), Some("button: back"));
+        assert_eq!(
+            launcher.settings_route_action_for_line(4),
+            Some(super::DesktopSettingsAction::BackToMain)
+        );
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Settings,
+        );
+        let back_center = DesktopLauncher::settings_route_line_rect_for_panel(panel, 4).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: back_center.x,
+                    y: back_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
         assert_eq!(
             launcher.settings_dialog_state.page,
             super::DesktopSettingsPage::Main
