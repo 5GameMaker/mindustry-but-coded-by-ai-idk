@@ -17,6 +17,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 805. ModsDialog browser lastUpdated 默认排序接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.36%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ModsDialog.getModList(...)` 拉取 `ModListing` 后用 `SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'")` 解析 `lastUpdated` 并倒序；
+  - `ModsDialog.rebuildBrowser()` 的默认 `orderDate == true` 使用这份日期排序结果；
+  - Rust 当前仍用本地/过渡 metadata 列表，因此没有 `lastUpdated` 的本地条目必须保持稳定 fallback，不应打乱本地列表。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `mods_route_mod_last_updated_at_index(...)`；
+    - `filtered_mods_browser_indices(...)` 在 `mods_browser_sort_date == true` 时按 `last_updated` 字符串倒序排序，缺失 timestamp 的条目排在有 timestamp 的条目后面并按原 index 稳定兜底；
+    - 新增 `desktop_launcher_mods_browser_sortdate_uses_last_updated_like_java_listing`，覆盖 `2026 > 2025 > 2024 > None` 的默认排序，以及无 stars metadata 时 `sortstars` 的显示名兜底。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - 真实远端 mod listing 拉取、Java parser 对异常日期回退 `new Date()` 的精确语义、minGameVersion/hasJava/iosCompatible/legacyCompatible 过滤仍需继续迁移；
+  - browser icon async cache、installed repo border、releases 多条 JSON 列表仍未完整还原。
+
 ## 804. ModsDialog browser stars 排序字段接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

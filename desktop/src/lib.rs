@@ -49465,6 +49465,13 @@ impl DesktopLauncher {
             .unwrap_or(0)
     }
 
+    fn mods_route_mod_last_updated_at_index(&self, index: usize) -> Option<&str> {
+        self.mods_route_mod_meta_at_index(index)
+            .and_then(|meta| meta.last_updated.as_deref())
+            .map(str::trim)
+            .filter(|last_updated| !last_updated.is_empty())
+    }
+
     fn mods_route_mod_display_name_at_index(&self, index: usize) -> Option<&str> {
         self.mods_route_mod_meta_at_index(index)
             .and_then(ModMetadata::display_name_or_name)
@@ -49636,7 +49643,13 @@ impl DesktopLauncher {
                     .then_some(index)
             })
             .collect::<Vec<_>>();
-        if !self.mods_browser_sort_date {
+        if self.mods_browser_sort_date {
+            indices.sort_by(|left, right| {
+                self.mods_route_mod_last_updated_at_index(*right)
+                    .cmp(&self.mods_route_mod_last_updated_at_index(*left))
+                    .then_with(|| left.cmp(right))
+            });
+        } else {
             indices.sort_by(|left, right| {
                 self.mods_route_mod_stars_at_index(*right)
                     .cmp(&self.mods_route_mod_stars_at_index(*left))
@@ -68843,6 +68856,75 @@ stars: 3
         );
         assert!(launcher.mods_browser_dialog_open);
         assert_eq!(launcher.mods_browser_selected_mod_index, Some(1));
+    }
+
+    #[test]
+    fn desktop_launcher_mods_browser_sortdate_uses_last_updated_like_java_listing() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.last_mods_directory_mod_names = vec![
+            "gamma".into(),
+            "beta".into(),
+            "alpha".into(),
+            "local".into(),
+        ];
+        launcher.last_mods_directory_mod_metas = vec![
+            ModMetadata::from_source_text(
+                "gamma",
+                Some("listing.json"),
+                r#"
+name: gamma
+displayName: "Gamma Tools"
+lastUpdated: "2024-01-02T00:00:00Z"
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "beta",
+                Some("listing.json"),
+                r#"
+name: beta
+displayName: "Beta Override"
+lastUpdated: "2026-05-31T12:34:56Z"
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "alpha",
+                Some("listing.json"),
+                r#"
+name: alpha
+displayName: "Alpha Pack"
+lastUpdated: "2025-08-09T10:11:12Z"
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "local",
+                Some("mod.hjson"),
+                r#"
+name: local
+displayName: "Local Mod"
+"#,
+            ),
+        ];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::OpenModsBrowser);
+
+        assert!(launcher.mods_browser_sort_date);
+        assert_eq!(
+            launcher.filtered_mods_browser_indices(),
+            vec![1, 2, 0, 3],
+            "Java ModsDialog default browser order sorts ModListing.lastUpdated descending; local entries without timestamps stay behind timestamped entries"
+        );
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ToggleModsBrowserSort,
+        );
+        assert!(!launcher.mods_browser_sort_date);
+        assert_eq!(
+            launcher.filtered_mods_browser_indices(),
+            vec![2, 1, 0, 3],
+            "without stars metadata, stars mode falls back to display-name order after equal 0-star values"
+        );
     }
 
     #[test]
