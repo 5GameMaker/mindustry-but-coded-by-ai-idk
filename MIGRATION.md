@@ -17,6 +17,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 860. MapPlay CustomRules solarMultiplier 数值项接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **93.92%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 对照本地 Java `CustomRulesDialog.java` 中 environment 段的 `number("@rules.solarmultiplier", ...)`；
+    - 将已有 `DesktopCustomRulesNumber::SolarMultiplier` 接入 map-play `DesktopCustomRulesNumber::ALL`；
+    - 补齐 map-play 搜索、渲染、hit-test、`AdjustCustomRuleNumber`、pending `map_play_rules` 修改与 `PlaySelected` 同步到 `runtime/game_state` 的测试覆盖；
+    - 顺手修正 environment toggle 测试使用真实英文本地化片段 `pausing / explosion`，避免偏离 Java label 搜索语义。
+- 已验证：
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_map_play_custom_rules_solar_multiplier_like_java -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_map_play_custom_rules_environment_toggles_match_java -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop map_play -- --nocapture`
+- 下一步优先：等待/整合只读子代理给出的 CustomRulesDialog 剩余前端缺口清单，继续按最小闭环补 map-play/UI 子菜单，而不是做孤立 helper。
+
 ## 859. MapPlay CustomRules environment 纯 toggle 接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
