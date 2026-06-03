@@ -28,6 +28,11 @@ pub struct ModMetadata {
     /// Java `mindustry.mod.ModListing.lastUpdated`; kept as source text so the
     /// desktop browser can later mirror the upstream date parser exactly.
     pub last_updated: Option<String>,
+    pub min_game_version: Option<String>,
+    pub has_scripts: bool,
+    pub has_java: bool,
+    pub ios_compatible: bool,
+    pub legacy_compatible: bool,
     pub steam_id: Option<String>,
     pub source_path: Option<String>,
 }
@@ -81,6 +86,21 @@ impl ModMetadata {
             last_updated: extract_mod_metadata_value(source, "lastUpdated")
                 .or_else(|| extract_mod_metadata_value(source, "last-updated"))
                 .or_else(|| extract_mod_metadata_value(source, "last_updated")),
+            min_game_version: extract_mod_metadata_value(source, "minGameVersion")
+                .or_else(|| extract_mod_metadata_value(source, "min-game-version"))
+                .or_else(|| extract_mod_metadata_value(source, "min_game_version")),
+            has_scripts: extract_mod_metadata_bool(source, "hasScripts")
+                || extract_mod_metadata_bool(source, "has-scripts")
+                || extract_mod_metadata_bool(source, "has_scripts"),
+            has_java: extract_mod_metadata_bool(source, "hasJava")
+                || extract_mod_metadata_bool(source, "has-java")
+                || extract_mod_metadata_bool(source, "has_java"),
+            ios_compatible: extract_mod_metadata_bool(source, "iosCompatible")
+                || extract_mod_metadata_bool(source, "ios-compatible")
+                || extract_mod_metadata_bool(source, "ios_compatible"),
+            legacy_compatible: extract_mod_metadata_bool(source, "legacyCompatible")
+                || extract_mod_metadata_bool(source, "legacy-compatible")
+                || extract_mod_metadata_bool(source, "legacy_compatible"),
             steam_id: extract_mod_metadata_value(source, "steamID")
                 .or_else(|| extract_mod_metadata_value(source, "steamId"))
                 .or_else(|| extract_mod_metadata_value(source, "steamid"))
@@ -734,6 +754,15 @@ fn extract_mod_metadata_i32(source: &str, key: &str) -> Option<i32> {
     extract_mod_metadata_value(source, key).and_then(|value| value.trim().parse().ok())
 }
 
+fn extract_mod_metadata_bool(source: &str, key: &str) -> bool {
+    extract_mod_metadata_value(source, key).is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "true" | "yes" | "1" | "on"
+        )
+    })
+}
+
 fn metadata_value_start(source: &str, index: usize, key: &str) -> Option<usize> {
     if !is_metadata_key_boundary(source, index.checked_sub(1)) {
         return None;
@@ -1088,7 +1117,12 @@ mod tests {
     name: "Remote Mod",
     repo: "Example/RemoteMod",
     stars: 128,
-    lastUpdated: "2026-05-31T12:34:56Z"
+    lastUpdated: "2026-05-31T12:34:56Z",
+    minGameVersion: "159",
+    hasScripts: true,
+    hasJava: true,
+    iosCompatible: false,
+    legacyCompatible: true
 }
 "#,
         );
@@ -1097,6 +1131,11 @@ mod tests {
         assert_eq!(meta.repo.as_deref(), Some("Example/RemoteMod"));
         assert_eq!(meta.stars, Some(128));
         assert_eq!(meta.last_updated.as_deref(), Some("2026-05-31T12:34:56Z"));
+        assert_eq!(meta.min_game_version.as_deref(), Some("159"));
+        assert!(meta.has_scripts);
+        assert!(meta.has_java);
+        assert!(!meta.ios_compatible);
+        assert!(meta.legacy_compatible);
     }
 
     #[test]

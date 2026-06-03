@@ -260,6 +260,7 @@ const MODS_ROUTE_MOD_CARD_HEIGHT: f32 = 110.0;
 const MODS_ROUTE_MOD_CARD_GAP: f32 = 8.0;
 const MODS_ROUTE_MOD_CARD_ACTION_SIZE: f32 = 50.0;
 const MODS_ROUTE_MAIN_ACTION_COUNT: usize = 4;
+const MODS_BROWSER_MIN_JAVA_MOD_GAME_VERSION: f64 = 154.0;
 const PAUSE_OVERLAY_PANEL_WIDTH: f32 = 304.0;
 const PAUSE_OVERLAY_PANEL_TOP_MARGIN: f32 = 54.0;
 const PAUSE_OVERLAY_TITLE_HEIGHT: f32 = 34.0;
@@ -49472,6 +49473,45 @@ impl DesktopLauncher {
             .filter(|last_updated| !last_updated.is_empty())
     }
 
+    fn mods_route_mod_min_game_version_at_index(&self, index: usize) -> Option<&str> {
+        self.mods_route_mod_meta_at_index(index)
+            .and_then(|meta| meta.min_game_version.as_deref())
+            .map(str::trim)
+            .filter(|min_game_version| !min_game_version.is_empty())
+    }
+
+    fn mods_route_mod_min_game_version_value_at_index(&self, index: usize) -> f64 {
+        self.mods_route_mod_min_game_version_at_index(index)
+            .and_then(|version| version.parse::<f64>().ok())
+            .unwrap_or(0.0)
+    }
+
+    fn mods_browser_requires_version_text(&self, min_game_version: &str) -> String {
+        let template = self.localize_bundle_markup_text("@mod.requiresversion");
+        let template = if template == "@mod.requiresversion" {
+            "Requires game version: [red]{0}".to_string()
+        } else {
+            template
+        };
+        template.replace("{0}", min_game_version)
+    }
+
+    fn mods_browser_entry_version_warning_at_index(&self, index: usize) -> Option<String> {
+        let meta = self.mods_route_mod_meta_at_index(index)?;
+        let min_game_version = self.mods_route_mod_min_game_version_at_index(index)?;
+        let min_value = self.mods_route_mod_min_game_version_value_at_index(index);
+        if min_value > DEFAULT_CLIENT_VERSION as f64 {
+            return Some(self.mods_browser_requires_version_text(min_game_version));
+        }
+        if meta.has_java
+            && min_value < MODS_BROWSER_MIN_JAVA_MOD_GAME_VERSION
+            && !meta.legacy_compatible
+        {
+            return Some(self.mods_route_localize_status_bundle_text("@mod.incompatiblemod"));
+        }
+        None
+    }
+
     fn mods_route_mod_display_name_at_index(&self, index: usize) -> Option<&str> {
         self.mods_route_mod_meta_at_index(index)
             .and_then(ModMetadata::display_name_or_name)
@@ -49531,6 +49571,9 @@ impl DesktopLauncher {
         }
         if let Some(state_text) = self.mods_route_mod_state_text_at_index(index) {
             info_parts.push(state_text);
+        }
+        if let Some(version_warning) = self.mods_browser_entry_version_warning_at_index(index) {
+            info_parts.push(version_warning);
         }
         if info_parts.is_empty() {
             info_parts.push(self.localize_bundle_markup_text("@none"));
@@ -68474,6 +68517,8 @@ author: "Beta Author"
 version: "2.0.0"
 repo: "Beta/Override"
 stars: 42
+minGameVersion: "999"
+hasJava: true
 "#,
             ),
             ModMetadata::from_source_text(
@@ -68550,6 +68595,12 @@ stars: 3
         assert!(
             texts.iter().any(|text| text.contains("42")),
             "Java ModsDialog browser card shows ModListing.stars in the entry info"
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("Requires game version") && text.contains("999")),
+            "Java ModsDialog browser card shows @mod.requiresversion when minGameVersion is newer than the client"
         );
         assert!(!texts.contains(&"Reinstall"));
         assert!(!texts.contains(&"View Releases"));
@@ -68927,6 +68978,46 @@ displayName: "Local Mod"
             launcher.filtered_mods_browser_indices(),
             vec![2, 1, 0, 3],
             "without stars metadata, stars mode falls back to display-name order after equal 0-star values"
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_mods_browser_entry_warns_for_java_incompatible_listing() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.last_mods_directory_mod_names = vec!["old-java".into(), "legacy-java".into()];
+        launcher.last_mods_directory_mod_metas = vec![
+            ModMetadata::from_source_text(
+                "old-java",
+                Some("listing.json"),
+                r#"
+name: old-java
+minGameVersion: "153"
+hasJava: true
+legacyCompatible: false
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "legacy-java",
+                Some("listing.json"),
+                r#"
+name: legacy-java
+minGameVersion: "153"
+hasJava: true
+legacyCompatible: true
+"#,
+            ),
+        ];
+
+        assert_eq!(
+            launcher.mods_browser_entry_version_warning_at_index(0),
+            Some("[red]Incompatible".to_string()),
+            "Java ModsDialog marks old non-legacy Java listings as incompatible"
+        );
+        assert_eq!(
+            launcher.mods_browser_entry_version_warning_at_index(1),
+            None,
+            "legacyCompatible mirrors Java's exemption from minJavaModGameVersion"
         );
     }
 

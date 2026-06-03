@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 807. ModsDialog browser 兼容性字段与版本提示
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.38%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ModListing` 字段包含 `minGameVersion / hasScripts / hasJava / iosCompatible / legacyCompatible`；
+  - `Vars.minJavaModGameVersion = 154`；
+  - `ModsDialog.rebuildBrowser()` 卡片 info 在 `!Version.isAtLeast(mod.minGameVersion)` 时显示 `mod.requiresversion`，否则在旧 Java mod 且非 legacy 时显示 `mod.incompatiblemod`。
+- 本轮主改动：
+  - `core/src/mindustry/modsys/mod.rs`
+    - `ModMetadata` 新增 `min_game_version / has_scripts / has_java / ios_compatible / legacy_compatible`；
+    - `from_source_text(...)` 支持解析 Java listing 的 camel/kebab/snake 变体布尔字段；
+    - 扩展 `mod_metadata_parses_java_mod_listing_browser_fields`。
+  - `desktop/src/lib.rs`
+    - 新增 `MODS_BROWSER_MIN_JAVA_MOD_GAME_VERSION = 154.0`；
+    - 新增 `mods_route_mod_min_game_version_*`、`mods_browser_requires_version_text(...)` 与 `mods_browser_entry_version_warning_at_index(...)`；
+    - browser entry info 现在追加 requires-version / incompatible 提示；
+    - 扩展 browser 渲染测试，新增 `desktop_launcher_mods_browser_entry_warns_for_java_incompatible_listing`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core mod_metadata_parses_java_mod_listing_browser_fields --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - `Version.isAtLeast(...)` 的完整字符串语义、iOS 下 hasJava/hasScripts 过滤、真实远端 listing 拉取与图标 async cache 仍需继续迁移；
+  - 当前只接入 browser 前端提示，不代表 mod runtime 加载兼容性策略已完整等价。
+
 ## 806. ModsDialog browser 搜索范围收窄到 name/repo
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
