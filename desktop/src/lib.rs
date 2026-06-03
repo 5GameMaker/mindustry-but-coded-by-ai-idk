@@ -3977,6 +3977,7 @@ enum DesktopPausedOverlayAction {
     GameOverMenu,
     GameOverContinue,
     GameOverDisconnect,
+    CustomRules,
     Back,
     Settings,
     Objective,
@@ -3991,6 +3992,8 @@ enum DesktopPausedOverlayAction {
     Quit,
     CloseModal,
     ConfirmQuit,
+    TogglePauseCustomRule(DesktopCustomRulesToggle),
+    AdjustPauseCustomRuleNumber(DesktopCustomRulesNumber, i32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4005,6 +4008,7 @@ struct DesktopPausedOverlayButtonSpec {
 enum DesktopPausedOverlayModal {
     Objective,
     Abandon,
+    CustomRules,
     WorldProcessors,
     QuitConfirm,
 }
@@ -18478,6 +18482,7 @@ pub struct DesktopLauncher {
     pub last_menu_action: Option<MenuButtonRole>,
     pub active_menu_route: Option<DesktopMenuRoute>,
     pause_overlay_modal: Option<DesktopPausedOverlayModal>,
+    pause_custom_rules_edit: Option<Rules>,
     last_pause_quit_result: Option<DesktopPauseQuitResult>,
     pub last_menu_dispatch: Option<DesktopMenuActionDispatch>,
     pub last_menu_route_shell_action: Option<DesktopMenuRouteShellAction>,
@@ -19691,6 +19696,7 @@ impl DesktopLauncher {
             last_menu_action: None,
             active_menu_route: None,
             pause_overlay_modal: None,
+            pause_custom_rules_edit: None,
             last_pause_quit_result: None,
             last_menu_dispatch: None,
             last_menu_route_shell_action: None,
@@ -30993,6 +30999,15 @@ impl DesktopLauncher {
         self.runtime.network_context.server
     }
 
+    fn pause_overlay_custom_rules_visible(&self) -> bool {
+        self.game_state.rules.allow_edit_rules
+            && (self.pause_overlay_net_server() || !self.pause_overlay_net_active())
+    }
+
+    fn pause_overlay_custom_rules_button_rect_for_viewport(viewport: RenderViewport) -> RenderRect {
+        RenderRect::new(viewport.x + 18.0, viewport.y + 18.0, 70.0, 70.0)
+    }
+
     fn pause_overlay_host_invites_friends(&self) -> bool {
         self.host_steam_enabled() && self.pause_overlay_net_server()
     }
@@ -31158,6 +31173,48 @@ impl DesktopLauncher {
         )
     }
 
+    fn pause_overlay_custom_rules_modal_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::from_center(
+            panel.center(),
+            (panel.width + 420.0).clamp(560.0, 780.0),
+            (panel.height + 360.0).clamp(420.0, 620.0),
+        )
+    }
+
+    fn pause_overlay_custom_rules_content_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 28.0,
+            dialog.y + 74.0,
+            dialog.width - 56.0,
+            dialog.height - 142.0,
+        )
+    }
+
+    fn pause_overlay_custom_rules_toggle_rects(
+        content: RenderRect,
+    ) -> Vec<(DesktopCustomRulesToggle, RenderRect)> {
+        let mut y = content.y + content.height - 20.0;
+        let mut rects = Vec::new();
+        for (_, toggles) in MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS {
+            if y < content.y + 34.0 {
+                break;
+            }
+            y -= 36.0;
+            for toggle in toggles.iter().copied() {
+                if y < content.y + 18.0 {
+                    return rects;
+                }
+                rects.push((
+                    toggle,
+                    RenderRect::new(content.x + 16.0, y - 12.0, content.width - 32.0, 22.0),
+                ));
+                y -= 24.0;
+            }
+            y -= 10.0;
+        }
+        rects
+    }
+
     fn pause_overlay_modal_ok_rect(dialog: RenderRect) -> RenderRect {
         RenderRect::new(
             dialog.center().x + 8.0,
@@ -31212,6 +31269,49 @@ impl DesktopLauncher {
         let panel =
             Self::pause_overlay_panel_for_viewport_with_button_count(viewport, button_count);
         if self.pause_overlay_modal.is_some() {
+            if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules) {
+                let dialog = Self::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+                if Self::pause_overlay_modal_close_rect(dialog).contains_point(point) {
+                    return Some(DesktopPausedOverlayAction::CloseModal);
+                }
+                let content = Self::pause_overlay_custom_rules_content_rect(dialog);
+                let rules = self.pause_custom_rules_current_rules();
+                for (index, number) in DesktopCustomRulesNumber::ALL.into_iter().enumerate() {
+                    if !number.enabled(rules) {
+                        continue;
+                    }
+                    let row = Self::map_play_customize_number_row_rect(content, index);
+                    if Self::map_play_customize_number_button_rect(row, false).contains_point(point)
+                    {
+                        return Some(DesktopPausedOverlayAction::AdjustPauseCustomRuleNumber(
+                            number, -1,
+                        ));
+                    }
+                    if Self::map_play_customize_number_button_rect(row, true).contains_point(point)
+                    {
+                        return Some(DesktopPausedOverlayAction::AdjustPauseCustomRuleNumber(
+                            number, 1,
+                        ));
+                    }
+                }
+                for (index, toggle) in MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES
+                    .iter()
+                    .copied()
+                    .enumerate()
+                {
+                    if Self::map_play_customize_banned_policy_row_rect(content, index)
+                        .contains_point(point)
+                    {
+                        return Some(DesktopPausedOverlayAction::TogglePauseCustomRule(toggle));
+                    }
+                }
+                for (toggle, rect) in Self::pause_overlay_custom_rules_toggle_rects(content) {
+                    if rect.contains_point(point) && toggle.enabled(rules) {
+                        return Some(DesktopPausedOverlayAction::TogglePauseCustomRule(toggle));
+                    }
+                }
+                return None;
+            }
             let dialog = Self::pause_overlay_modal_rect_for_panel(panel);
             if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::QuitConfirm)
                 && Self::pause_overlay_modal_ok_rect(dialog).contains_point(point)
@@ -31228,6 +31328,12 @@ impl DesktopLauncher {
                 return Some(DesktopPausedOverlayAction::CloseModal);
             }
             return None;
+        }
+        if self.pause_overlay_custom_rules_visible()
+            && Self::pause_overlay_custom_rules_button_rect_for_viewport(viewport)
+                .contains_point(point)
+        {
+            return Some(DesktopPausedOverlayAction::CustomRules);
         }
         for (index, spec) in button_specs.into_iter().enumerate() {
             if Self::pause_overlay_button_rect_for_panel_with_button_count(
@@ -40553,9 +40659,37 @@ impl DesktopLauncher {
         }
     }
 
+    fn pause_custom_rules_current_rules(&self) -> &Rules {
+        self.pause_custom_rules_edit
+            .as_ref()
+            .unwrap_or(&self.game_state.rules)
+    }
+
+    fn ensure_pause_custom_rules_edit_rules(&mut self) -> &mut Rules {
+        if self.pause_custom_rules_edit.is_none() {
+            self.pause_custom_rules_edit = Some(self.game_state.rules.copy());
+        }
+        self.pause_custom_rules_edit.as_mut().unwrap()
+    }
+
+    fn apply_pause_custom_rules_edit(&mut self) {
+        let Some(rules) = self.pause_custom_rules_edit.take() else {
+            return;
+        };
+        self.game_state.rules = rules.clone();
+        self.game_state.sync_teams_with_rules();
+        self.runtime.state.rules = rules;
+        self.runtime.state.sync_teams_with_rules();
+    }
+
     fn close_pause_overlay_modal(&mut self) {
         if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::QuitConfirm) {
             self.last_pause_quit_result = Some(DesktopPauseQuitResult::Cancelled);
+        }
+        if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules) {
+            self.apply_pause_custom_rules_edit();
+        } else {
+            self.pause_custom_rules_edit = None;
         }
         self.pause_overlay_modal = None;
     }
@@ -40666,6 +40800,19 @@ impl DesktopLauncher {
             | DesktopPausedOverlayAction::GameOverDisconnect
             | DesktopPausedOverlayAction::CloseModal
             | DesktopPausedOverlayAction::ConfirmQuit => true,
+            DesktopPausedOverlayAction::CustomRules => {
+                self.pause_overlay_modal.is_none() && self.pause_overlay_custom_rules_visible()
+            }
+            DesktopPausedOverlayAction::TogglePauseCustomRule(toggle) => {
+                self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
+                    && self.pause_overlay_custom_rules_visible()
+                    && toggle.enabled(self.pause_custom_rules_current_rules())
+            }
+            DesktopPausedOverlayAction::AdjustPauseCustomRuleNumber(number, _) => {
+                self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
+                    && self.pause_overlay_custom_rules_visible()
+                    && number.enabled(self.pause_custom_rules_current_rules())
+            }
             _ => self
                 .pause_overlay_button_specs()
                 .into_iter()
@@ -40692,6 +40839,17 @@ impl DesktopLauncher {
             DesktopPausedOverlayAction::ConfirmQuit => {
                 self.last_pause_quit_result = Some(DesktopPauseQuitResult::Confirmed);
                 self.execute_pause_overlay_quit();
+            }
+            DesktopPausedOverlayAction::CustomRules => {
+                self.pause_custom_rules_edit = Some(self.game_state.rules.copy());
+                self.pause_overlay_modal = Some(DesktopPausedOverlayModal::CustomRules);
+                self.last_menu_guard_message = None;
+            }
+            DesktopPausedOverlayAction::TogglePauseCustomRule(toggle) => {
+                toggle.toggle(self.ensure_pause_custom_rules_edit_rules());
+            }
+            DesktopPausedOverlayAction::AdjustPauseCustomRuleNumber(number, direction) => {
+                number.adjust(self.ensure_pause_custom_rules_edit_rules(), direction);
             }
             DesktopPausedOverlayAction::Back => {
                 if self.pause_overlay_modal.is_some() {
@@ -45724,6 +45882,128 @@ impl DesktopLauncher {
                 layer + 0.002 + visible_index as f32 * 0.001,
             ));
             visible_index += 1;
+        }
+    }
+
+    fn push_pause_custom_rules_number_rows(
+        &self,
+        pass: &mut RenderPass,
+        content: RenderRect,
+        rules: &Rules,
+        layer: f32,
+    ) {
+        for (index, number) in DesktopCustomRulesNumber::ALL.into_iter().enumerate() {
+            let row = Self::map_play_customize_number_row_rect(content, index);
+            let enabled = number.enabled(rules);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("button"),
+                row,
+                if enabled {
+                    [1.0, 1.0, 1.0, 0.34]
+                } else {
+                    [1.0, 1.0, 1.0, 0.14]
+                },
+                0.0,
+                layer + index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text(number.label_key()),
+                RenderPoint::new(row.x + 8.0, row.center().y),
+                if enabled {
+                    [0.80, 0.90, 0.98, 1.0]
+                } else {
+                    [0.52, 0.58, 0.64, 0.70]
+                },
+                9.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_markup(true)
+                    .with_wrap_width((row.width - 104.0).max(80.0))
+                    .with_integer_position(true),
+                layer + 0.002 + index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                number.value_text(rules),
+                RenderPoint::new(row.right() - 60.0, row.center().y),
+                if enabled {
+                    [0.96, 0.98, 1.0, 1.0]
+                } else {
+                    [0.56, 0.62, 0.68, 0.76]
+                },
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::End)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.003 + index as f32 * 0.001,
+            ));
+            self.push_settings_text_button_enabled(
+                pass,
+                Self::map_play_customize_number_button_rect(row, false),
+                "-",
+                None,
+                layer + 0.004 + index as f32 * 0.001,
+                enabled,
+            );
+            self.push_settings_text_button_enabled(
+                pass,
+                Self::map_play_customize_number_button_rect(row, true),
+                "+",
+                None,
+                layer + 0.005 + index as f32 * 0.001,
+                enabled,
+            );
+        }
+    }
+
+    fn push_pause_custom_rules_banned_policy_rows(
+        &self,
+        pass: &mut RenderPass,
+        content: RenderRect,
+        rules: &Rules,
+        layer: f32,
+    ) {
+        for (index, toggle) in MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES
+            .iter()
+            .copied()
+            .enumerate()
+        {
+            let row = Self::map_play_customize_banned_policy_row_rect(content, index);
+            let value = toggle.value(rules);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("button"),
+                row,
+                if value {
+                    [1.0, 1.0, 1.0, 0.32]
+                } else {
+                    [1.0, 1.0, 1.0, 0.15]
+                },
+                0.0,
+                layer + index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                format!(
+                    "{} {}",
+                    if value { "✓" } else { "□" },
+                    self.localize_bundle_markup_text(toggle.label_key())
+                ),
+                RenderPoint::new(row.x + 8.0, row.center().y),
+                if value {
+                    [0.82, 0.91, 0.98, 1.0]
+                } else {
+                    [0.58, 0.66, 0.72, 0.82]
+                },
+                9.2,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_markup(true)
+                    .with_wrap_width((row.width - 16.0).max(80.0))
+                    .with_integer_position(true),
+                layer + 0.002 + index as f32 * 0.001,
+            ));
         }
     }
 
@@ -53712,10 +53992,160 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_pause_overlay_custom_rules_modal(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let dialog = Self::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let content = Self::pause_overlay_custom_rules_content_rect(dialog);
+        let rules = self.pause_custom_rules_current_rules();
+        let layer = Layer::END_PIXELED + 0.160;
+
+        pass.push(RenderCommand::fill_rect(
+            dialog,
+            [0.04, 0.06, 0.08, 0.94],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.50, 0.70, 0.84, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@mode.custom"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.004,
+        ));
+        if desktop_show_upstream_route_debug() {
+            pass.push(RenderCommand::draw_text_styled(
+                "CustomRulesDialog",
+                RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 50.0),
+                [0.56, 0.68, 0.78, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.005,
+            ));
+        }
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            content,
+            [1.0, 1.0, 1.0, 0.72],
+            0.0,
+            layer + 0.006,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            content,
+            [0.28, 0.42, 0.52, 0.82],
+            1.0,
+            layer + 0.007,
+        ));
+
+        let mut y = content.y + content.height - 20.0;
+        let mut row_index = 0usize;
+        'categories: for (title_key, toggles) in MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS {
+            if y < content.y + 34.0 {
+                break;
+            }
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text(*title_key),
+                RenderPoint::new(content.x + 14.0, y),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.010 + row_index as f32 * 0.001,
+            ));
+            y -= 16.0;
+            pass.push(RenderCommand::stroke_rect(
+                RenderRect::new(content.x + 14.0, y, content.width - 28.0, 1.0),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.72],
+                1.0,
+                layer + 0.011 + row_index as f32 * 0.001,
+            ));
+            y -= 20.0;
+            for toggle in toggles.iter().copied() {
+                if y < content.y + 18.0 {
+                    break 'categories;
+                }
+                let enabled = toggle.enabled(rules);
+                let value = toggle.value(rules);
+                let row_rect =
+                    RenderRect::new(content.x + 16.0, y - 12.0, content.width - 32.0, 22.0);
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_drawable_symbol("button"),
+                    row_rect,
+                    if enabled {
+                        [1.0, 1.0, 1.0, 0.32]
+                    } else {
+                        [1.0, 1.0, 1.0, 0.15]
+                    },
+                    0.0,
+                    layer + 0.0115 + row_index as f32 * 0.001,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    format!(
+                        "{} {}",
+                        if value { "✓" } else { "□" },
+                        self.localize_bundle_markup_text(toggle.label_key())
+                    ),
+                    RenderPoint::new(content.x + 22.0, y),
+                    if enabled {
+                        [0.82, 0.91, 0.98, 1.0]
+                    } else {
+                        [0.52, 0.58, 0.64, 0.72]
+                    },
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_markup(true)
+                        .with_wrap_width((content.width - 44.0).max(80.0))
+                        .with_integer_position(true),
+                    layer + 0.012 + row_index as f32 * 0.001,
+                ));
+                y -= 24.0;
+                row_index += 1;
+            }
+            y -= 10.0;
+        }
+
+        self.push_pause_custom_rules_number_rows(pass, content, rules, layer + 0.050);
+        self.push_pause_custom_rules_banned_policy_rows(pass, content, rules, layer + 0.058);
+        self.push_settings_text_button(
+            pass,
+            Self::pause_overlay_modal_close_rect(dialog),
+            "@back",
+            Some("left"),
+            layer + 0.080,
+        );
+    }
+
     fn push_pause_overlay_modal(&self, pass: &mut RenderPass, panel: RenderRect) {
         let Some(modal) = self.pause_overlay_modal else {
             return;
         };
+        if modal == DesktopPausedOverlayModal::CustomRules {
+            self.push_pause_overlay_custom_rules_modal(pass, panel);
+            return;
+        }
         let dialog = Self::pause_overlay_modal_rect_for_panel(panel);
         let (title, subtitle, body): (&str, &str, String) = match modal {
             DesktopPausedOverlayModal::Objective => (
@@ -53728,6 +54158,7 @@ impl DesktopLauncher {
                 "PlanetDialog.abandonSectorConfirm",
                 "@abandon.confirm".into(),
             ),
+            DesktopPausedOverlayModal::CustomRules => unreachable!(),
             DesktopPausedOverlayModal::WorldProcessors => (
                 "@editor.worldprocessors",
                 "MapProcessorsDialog",
@@ -54026,6 +54457,47 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.145 + index as f32 * 0.0001,
                 spec.enabled,
             );
+        }
+        if self.pause_overlay_custom_rules_visible() {
+            let custom = Self::pause_overlay_custom_rules_button_rect_for_viewport(viewport);
+            self.push_settings_text_button(
+                &mut pass,
+                custom,
+                self.localize_bundle_markup_text("@customize"),
+                Some("book"),
+                Layer::END_PIXELED + 0.154,
+            );
+            if self
+                .last_menu_cursor
+                .is_some_and(|cursor| custom.contains_point(cursor))
+            {
+                let label = self.localize_bundle_markup_text("@customize");
+                let tooltip = RenderRect::new(
+                    custom.right() + 10.0,
+                    custom.center().y - 17.0,
+                    (label.len() as f32 * 7.0 + 28.0).clamp(92.0, 260.0),
+                    34.0,
+                );
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_drawable_symbol("pane"),
+                    tooltip,
+                    [1.0, 1.0, 1.0, 0.94],
+                    0.0,
+                    Layer::END_PIXELED + 0.155,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    label,
+                    tooltip.center(),
+                    [0.92, 0.97, 1.0, 1.0],
+                    9.5,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.156,
+                ));
+            }
         }
         self.push_pause_overlay_modal(&mut pass, panel);
         Some(pass)
@@ -74529,6 +75001,147 @@ repo: "Beta/Override"
             campaign.campaign_planet_dialog.is_some(),
             "Java mobile @planetmap opens PlanetDialog"
         );
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_custom_rules_book_visibility_matches_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.game_state.rules.allow_edit_rules = false;
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let custom_center =
+            DesktopLauncher::pause_overlay_custom_rules_button_rect_for_viewport(viewport).center();
+
+        assert!(!launcher.pause_overlay_custom_rules_visible());
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                custom_center.x,
+                custom_center.y
+            ),
+            None
+        );
+
+        launcher.game_state.rules.allow_edit_rules = true;
+        assert!(launcher.pause_overlay_custom_rules_visible());
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                custom_center.x,
+                custom_center.y
+            ),
+            Some(super::DesktopPausedOverlayAction::CustomRules),
+            "Java PausedDialog shows Icon.book/@customize when allowEditRules and !net.active()"
+        );
+
+        launcher.net_client.state().lock().unwrap().connected = true;
+        assert!(!launcher.pause_overlay_custom_rules_visible());
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                custom_center.x,
+                custom_center.y
+            ),
+            None,
+            "Java PausedDialog hides @customize for connected clients"
+        );
+
+        let mut server = DesktopLauncher::new(Vec::new());
+        server.game_state.world.resize(16, 16);
+        server.game_state.set(GameStateState::Paused);
+        server.game_state.rules.allow_edit_rules = true;
+        server
+            .runtime
+            .set_network_context(GameRuntimeNetworkContext::server());
+        assert!(server.pause_overlay_custom_rules_visible());
+        assert_eq!(
+            server.pause_overlay_action_at_surface_point(surface, custom_center.x, custom_center.y),
+            Some(super::DesktopPausedOverlayAction::CustomRules),
+            "Java PausedDialog keeps @customize visible for net.server()"
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_custom_rules_apply_on_close_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.game_state.rules.allow_edit_rules = true;
+        launcher.game_state.rules.waves = true;
+        launcher.game_state.rules.infinite_resources = false;
+        launcher.game_state.rules.win_wave = 0;
+        launcher.runtime.state.rules = launcher.game_state.rules.copy();
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let custom_center =
+            DesktopLauncher::pause_overlay_custom_rules_button_rect_for_viewport(viewport).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: custom_center.x,
+                    y: custom_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.pause_overlay_modal,
+            Some(super::DesktopPausedOverlayModal::CustomRules)
+        );
+        assert!(launcher.pause_custom_rules_edit.is_some());
+
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::TogglePauseCustomRule(
+                super::DesktopCustomRulesToggle::InfiniteResources,
+            ),
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::AdjustPauseCustomRuleNumber(
+                super::DesktopCustomRulesNumber::WinWave,
+                1,
+            ),
+        );
+
+        assert!(!launcher.game_state.rules.infinite_resources);
+        assert_eq!(launcher.game_state.rules.win_wave, 0);
+        let edit_rules = launcher.pause_custom_rules_edit.as_ref().unwrap();
+        assert!(edit_rules.infinite_resources);
+        assert_eq!(edit_rules.win_wave, 1);
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"CustomRulesDialog"));
+        let infinite_resources_label =
+            launcher.localize_bundle_markup_text("@rules.infiniteresources");
+        assert!(texts
+            .iter()
+            .any(|text| text.contains(infinite_resources_label.as_str())));
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CloseModal);
+        assert_eq!(launcher.pause_overlay_modal, None);
+        assert!(launcher.pause_custom_rules_edit.is_none());
+        assert!(launcher.game_state.rules.infinite_resources);
+        assert_eq!(launcher.game_state.rules.win_wave, 1);
+        assert!(launcher.runtime.state.rules.infinite_resources);
+        assert_eq!(launcher.runtime.state.rules.win_wave, 1);
     }
 
     #[test]

@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 835. PausedDialog `@customize` 规则编辑入口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.67%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `PausedDialog` 左下角 `Icon.book` 按钮 tooltip 为 `@customize`；
+  - 可见性为 `state.rules.allowEditRules && (net.server() || !net.active())`；
+  - 点击后复制当前 `Vars.state.rules` 给 `CustomRulesDialog` 编辑，弹窗隐藏时再把编辑结果写回 `Vars.state.rules` 并调用 `Call.setRules(toEdit)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增暂停覆盖层 `CustomRules` action/modal；
+    - 新增左下角 `@customize` book 入口、hover tooltip 与 Java 可见性条件；
+    - 新增 `pause_custom_rules_edit` 编辑副本，规则 toggle/number 修改先写入副本，关闭 modal 时再同步到 `game_state.rules` 与 `runtime.state.rules`，并同步 teams；
+    - 复用并扩展 map play custom rules 的 toggle/number/banned policy UI，暂停菜单下也能显示并编辑规则项；
+    - 新增回归测试覆盖 allowEditRules/net.server/net.active 可见性，以及关闭时才应用规则的 Java 行为。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop paused_world_overlay`
+- 仍未完成：
+  - Rust 侧暂停菜单 `CustomRulesDialog` 仍是局部规则 UI，还没有完整接齐 Java `CustomRulesDialog` 的所有分类、搜索、天气、队伍、banned content、copy/load/reset 子流；
+  - `Call.setRules(toEdit)` 对联机服务端/客户端的真实 packet 广播仍需继续接入；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 834. Settings Data 文件选择结果接入真实 I/O
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
