@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::mindustry::{
     game::SpawnGroup,
-    r#type::{Sector, WeatherEntry},
+    r#type::{ItemStack, Sector, WeatherEntry},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,6 +79,7 @@ pub struct Rules {
     pub unit_whitelist: bool,
     pub banned_blocks: BTreeSet<String>,
     pub banned_units: BTreeSet<String>,
+    pub loadout: Vec<ItemStack>,
     pub weather: Vec<WeatherEntry>,
     pub revealed_blocks: BTreeSet<String>,
     pub researched: BTreeSet<String>,
@@ -1298,6 +1299,7 @@ impl Default for Rules {
             unit_whitelist: false,
             banned_blocks: BTreeSet::new(),
             banned_units: BTreeSet::new(),
+            loadout: vec![ItemStack::new("copper", 100)],
             weather: Vec::new(),
             revealed_blocks: BTreeSet::new(),
             researched: BTreeSet::new(),

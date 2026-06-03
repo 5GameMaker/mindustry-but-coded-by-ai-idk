@@ -17,6 +17,37 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 851. PausedDialog CustomRules loadout/configure 子流接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.83%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `CustomRulesDialog.setupMain()` 在 `resourcesbuilding` 分类下按 `@configure` 打开 `LoadoutDialog.show(999999, rules.loadout, ...)`；
+  - `LoadoutDialog` 打开时 reseed 出全部可用 item，`-`/`+` 按 Java step 规则调整，`@max` 写入 capacity，`@settings.reset` 恢复 copper 100；
+  - 子窗隐藏时才把 amount>0 的 draft 写回 rules.loadout，父 CustomRulesDialog 关闭时再提交到 game/runtime。
+- 本轮主改动：
+  - `core/src/mindustry/game/rules.rs`
+    - 新增 `Rules.loadout: Vec<ItemStack>`；
+    - 默认值对齐 Java reset 语义为 `copper x100`。
+  - `desktop/src/lib.rs`
+    - 新增 pause loadout 子窗状态、draft、滚动 offset 与 action 族；
+    - Pause CustomRules 主窗新增 `@configure` 入口；
+    - 新增 loadout 子窗几何、渲染、hit-test、滚轮、Back 栈；
+    - `+/-/@max/@settings.reset/@back` 接入 draft 与 pending rules；
+    - 父 `CloseModal` 前会先提交打开中的 loadout draft，避免丢失子窗编辑；
+    - 新增回归测试，锁定 configure 入口、draft-only 修改、Back 后写 pending、CloseModal 后同步 game/runtime。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop paused_world_overlay_custom_rules`
+  - `cargo test -p mindustry-desktop map_play`
+  - `cargo test -p mindustry-desktop paused_world_overlay`
+  - `cargo test -p mindustry-core rules`
+- 仍未完成：
+  - LoadoutDialog 的 pencil 文本输入量修改目前仅有视觉占位，尚未接入真正文本输入；
+  - `Rules.loadout` 尚未补入当前简化版 rules clipboard JSON parse/emit 与联机 `Call.setRules(toEdit)` 的完整互通语义；
+  - `@rules.ambientlight` 色块选择与 `@rules.title.planet` / `@rules.anyenv` 尚未接入；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 850. PausedDialog CustomRules team rules 子流接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。

@@ -1710,6 +1710,7 @@ const PAUSE_CUSTOM_RULE_TOGGLE_GROUPS: &[(&str, &[DesktopCustomRulesToggle])] = 
 const PAUSE_CUSTOM_RULE_SCROLL_ROW_HEIGHT: f32 = 27.0;
 const PAUSE_CUSTOM_RULE_TOGGLE_ROW_HEIGHT: f32 = 24.0;
 const PAUSE_CUSTOM_RULE_TOGGLE_GROUP_HEADER_HEIGHT: f32 = 46.0;
+const PAUSE_CUSTOM_RULE_LOADOUT_CAPACITY: i32 = 999_999;
 const MAP_PLAY_CUSTOM_RULE_WAVE_TOGGLES: &[DesktopCustomRulesToggle] = &[
     DesktopCustomRulesToggle::Waves,
     DesktopCustomRulesToggle::WaveSending,
@@ -4332,6 +4333,11 @@ enum DesktopPausedOverlayAction {
     TogglePauseTeamRuleSection(usize),
     TogglePauseTeamRule(usize, DesktopTeamRuleToggle),
     AdjustPauseTeamRuleNumber(usize, DesktopTeamRuleNumber, i32),
+    OpenPauseLoadout,
+    ClosePauseLoadout,
+    MaxPauseLoadout,
+    ResetPauseLoadout,
+    AdjustPauseLoadoutItem(usize, i32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18835,6 +18841,9 @@ pub struct DesktopLauncher {
     pause_custom_rules_weather_add_dialog_open: bool,
     pause_custom_rules_team_rules_dialog_open: bool,
     pause_custom_rules_team_rules_selected_team: Option<usize>,
+    pause_custom_rules_loadout_dialog_open: bool,
+    pause_custom_rules_loadout_scroll_offset: usize,
+    pause_custom_rules_loadout_draft: Vec<ItemStack>,
     last_pause_custom_rules_clipboard_text: Option<String>,
     pause_custom_rules_error: Option<String>,
     last_pause_quit_result: Option<DesktopPauseQuitResult>,
@@ -20068,6 +20077,9 @@ impl DesktopLauncher {
             pause_custom_rules_weather_add_dialog_open: false,
             pause_custom_rules_team_rules_dialog_open: false,
             pause_custom_rules_team_rules_selected_team: None,
+            pause_custom_rules_loadout_dialog_open: false,
+            pause_custom_rules_loadout_scroll_offset: 0,
+            pause_custom_rules_loadout_draft: Vec::new(),
             last_pause_custom_rules_clipboard_text: None,
             pause_custom_rules_error: None,
             last_pause_quit_result: None,
@@ -31583,10 +31595,12 @@ impl DesktopLauncher {
         dialog: RenderRect,
         index: usize,
     ) -> RenderRect {
+        let gap = 8.0;
+        let width = ((dialog.width - 228.0) / 5.0).clamp(64.0, 112.0);
         RenderRect::new(
-            dialog.x + 28.0 + index as f32 * 140.0,
+            dialog.x + 28.0 + index as f32 * (width + gap),
             dialog.y + 18.0,
-            132.0,
+            width,
             38.0,
         )
     }
@@ -31738,6 +31752,55 @@ impl DesktopLauncher {
         if self.pause_overlay_modal.is_some() {
             if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules) {
                 let dialog = Self::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+                if self.pause_custom_rules_loadout_dialog_open {
+                    let loadout_dialog = Self::pause_loadout_dialog_rect(dialog);
+                    if Self::pause_loadout_close_rect(loadout_dialog).contains_point(point) {
+                        return Some(DesktopPausedOverlayAction::ClosePauseLoadout);
+                    }
+                    if Self::pause_loadout_max_rect(loadout_dialog).contains_point(point) {
+                        return Some(DesktopPausedOverlayAction::MaxPauseLoadout);
+                    }
+                    if Self::pause_loadout_reset_rect(loadout_dialog).contains_point(point) {
+                        return Some(DesktopPausedOverlayAction::ResetPauseLoadout);
+                    }
+                    let clip = Self::pause_loadout_entries_clip_rect(loadout_dialog);
+                    if clip.contains_point(point) {
+                        let scroll = self.pause_custom_rules_loadout_scroll_offset.min(
+                            Self::pause_loadout_max_scroll_offset(
+                                loadout_dialog,
+                                self.pause_custom_rules_loadout_draft.len(),
+                            ),
+                        );
+                        let visible_rows = Self::pause_loadout_visible_entry_rows(loadout_dialog);
+                        let columns = Self::pause_loadout_entry_columns(loadout_dialog);
+                        let first_visible = scroll * columns;
+                        let last_visible = (scroll + visible_rows) * columns;
+                        for (item_index, _) in self
+                            .pause_custom_rules_loadout_draft
+                            .iter()
+                            .enumerate()
+                            .skip(first_visible)
+                            .take(last_visible.saturating_sub(first_visible))
+                        {
+                            let row = Self::pause_loadout_entry_rect_with_scroll(
+                                loadout_dialog,
+                                item_index,
+                                scroll,
+                            );
+                            if Self::pause_loadout_entry_decrease_rect(row).contains_point(point) {
+                                return Some(DesktopPausedOverlayAction::AdjustPauseLoadoutItem(
+                                    item_index, -1,
+                                ));
+                            }
+                            if Self::pause_loadout_entry_increase_rect(row).contains_point(point) {
+                                return Some(DesktopPausedOverlayAction::AdjustPauseLoadoutItem(
+                                    item_index, 1,
+                                ));
+                            }
+                        }
+                    }
+                    return None;
+                }
                 if let Some(kind) = self.pause_custom_rules_banned_content_dialog {
                     let banned_dialog = Self::map_play_banned_content_dialog_rect(dialog);
                     if Self::map_play_banned_content_close_rect(banned_dialog).contains_point(point)
@@ -32037,6 +32100,11 @@ impl DesktopLauncher {
                     .contains_point(point)
                 {
                     return Some(DesktopPausedOverlayAction::OpenPauseTeamRules);
+                }
+                if Self::pause_overlay_custom_rules_child_button_rect(dialog, 4)
+                    .contains_point(point)
+                {
+                    return Some(DesktopPausedOverlayAction::OpenPauseLoadout);
                 }
                 if Self::pause_overlay_modal_close_rect(dialog).contains_point(point) {
                     return Some(DesktopPausedOverlayAction::CloseModal);
@@ -35272,6 +35340,107 @@ impl DesktopLauncher {
             .collect()
     }
 
+    fn pause_loadout_dialog_rect(child: RenderRect) -> RenderRect {
+        let width = (child.width - 40.0).clamp(520.0, 720.0);
+        let height = (child.height - 70.0).clamp(340.0, 500.0);
+        RenderRect::new(
+            child.center().x - width * 0.5,
+            child.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn pause_loadout_close_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.x + 18.0, dialog.y + 16.0, 132.0, 36.0)
+    }
+
+    fn pause_loadout_max_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.center().x - 66.0, dialog.y + 16.0, 132.0, 36.0)
+    }
+
+    fn pause_loadout_reset_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.right() - 150.0, dialog.y + 16.0, 132.0, 36.0)
+    }
+
+    fn pause_loadout_entries_clip_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 18.0,
+            dialog.y + 62.0,
+            dialog.width - 36.0,
+            dialog.height - 116.0,
+        )
+    }
+
+    fn pause_loadout_entry_columns(dialog: RenderRect) -> usize {
+        if dialog.width >= 560.0 {
+            2
+        } else {
+            1
+        }
+    }
+
+    fn pause_loadout_entry_height() -> f32 {
+        42.0
+    }
+
+    fn pause_loadout_entry_row_gap() -> f32 {
+        8.0
+    }
+
+    fn pause_loadout_visible_entry_rows(dialog: RenderRect) -> usize {
+        let clip = Self::pause_loadout_entries_clip_rect(dialog);
+        let step = Self::pause_loadout_entry_height() + Self::pause_loadout_entry_row_gap();
+        ((clip.height + Self::pause_loadout_entry_row_gap()) / step)
+            .floor()
+            .max(1.0) as usize
+    }
+
+    fn pause_loadout_total_entry_rows(dialog: RenderRect, entry_count: usize) -> usize {
+        let columns = Self::pause_loadout_entry_columns(dialog).max(1);
+        entry_count.div_ceil(columns)
+    }
+
+    fn pause_loadout_max_scroll_offset(dialog: RenderRect, entry_count: usize) -> usize {
+        Self::pause_loadout_total_entry_rows(dialog, entry_count)
+            .saturating_sub(Self::pause_loadout_visible_entry_rows(dialog))
+    }
+
+    fn pause_loadout_entry_rect_with_scroll(
+        dialog: RenderRect,
+        index: usize,
+        scroll_offset: usize,
+    ) -> RenderRect {
+        let columns = Self::pause_loadout_entry_columns(dialog);
+        let column = index % columns;
+        let row = index / columns;
+        let column_gap = 10.0;
+        let entry_width =
+            (dialog.width - 44.0 - column_gap * columns.saturating_sub(1) as f32) / columns as f32;
+        let entry_height = Self::pause_loadout_entry_height();
+        RenderRect::new(
+            dialog.x + 22.0 + column as f32 * (entry_width + column_gap),
+            dialog.y + dialog.height
+                - 88.0
+                - (row as f32 - scroll_offset as f32)
+                    * (entry_height + Self::pause_loadout_entry_row_gap()),
+            entry_width,
+            entry_height,
+        )
+    }
+
+    fn pause_loadout_entry_decrease_rect(row: RenderRect) -> RenderRect {
+        RenderRect::new(row.x + 8.0, row.center().y - 14.0, 28.0, 28.0)
+    }
+
+    fn pause_loadout_entry_increase_rect(row: RenderRect) -> RenderRect {
+        RenderRect::new(row.x + 42.0, row.center().y - 14.0, 28.0, 28.0)
+    }
+
+    fn pause_loadout_entry_edit_rect(row: RenderRect) -> RenderRect {
+        RenderRect::new(row.x + 76.0, row.center().y - 14.0, 28.0, 28.0)
+    }
+
     fn map_play_team_options() -> Vec<(usize, String, u32)> {
         vanilla_teams()
             .base_teams()
@@ -35721,6 +35890,52 @@ impl DesktopLauncher {
         next != current
     }
 
+    fn apply_pause_loadout_scroll_delta(
+        &mut self,
+        surface_size: DesktopSurfaceSize,
+        delta_y: f32,
+    ) -> bool {
+        if self.pause_overlay_modal != Some(DesktopPausedOverlayModal::CustomRules)
+            || !self.pause_overlay_custom_rules_visible()
+            || !self.pause_custom_rules_loadout_dialog_open
+        {
+            return false;
+        }
+        let Some(cursor) = self.last_menu_cursor else {
+            return false;
+        };
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel = Self::pause_overlay_panel_for_viewport_with_button_count(
+            viewport,
+            self.pause_overlay_button_specs().len(),
+        );
+        let dialog = Self::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let loadout_dialog = Self::pause_loadout_dialog_rect(dialog);
+        let clip = Self::pause_loadout_entries_clip_rect(loadout_dialog);
+        if !clip.contains_point(cursor) {
+            return false;
+        }
+        let max = Self::pause_loadout_max_scroll_offset(
+            loadout_dialog,
+            self.pause_custom_rules_loadout_draft.len(),
+        );
+        if max == 0 {
+            return false;
+        }
+        let current = self.pause_custom_rules_loadout_scroll_offset.min(max);
+        let rows = delta_y.abs().ceil().max(1.0) as isize;
+        let step = if delta_y < 0.0 {
+            rows
+        } else if delta_y > 0.0 {
+            -rows
+        } else {
+            0
+        };
+        let next = (current as isize + step).clamp(0, max as isize) as usize;
+        self.pause_custom_rules_loadout_scroll_offset = next;
+        next != current
+    }
+
     fn add_map_play_weather(&mut self, index: usize, candidate_index: usize) {
         let Some(map) = self.map_list_cards.get(index) else {
             return;
@@ -35928,6 +36143,109 @@ impl DesktopLauncher {
         self.update_pause_rules_for_team(|rules| {
             number.adjust(rules.teams.get_or_insert(team_id), direction);
         });
+    }
+
+    fn pause_loadout_reseed_from_stacks(&self, stacks: &[ItemStack]) -> Vec<ItemStack> {
+        let mut by_name = BTreeMap::new();
+        for stack in stacks {
+            by_name.insert(
+                stack.item.clone(),
+                stack.amount.clamp(0, PAUSE_CUSTOM_RULE_LOADOUT_CAPACITY),
+            );
+        }
+        let mut draft = Vec::new();
+        for item in self.content_loader.items() {
+            if item.is_hidden() {
+                continue;
+            }
+            let name = item.name().to_string();
+            let amount = by_name.remove(&name).unwrap_or(0);
+            draft.push(ItemStack::new(name, amount));
+        }
+        for (name, amount) in by_name {
+            if amount > 0 {
+                draft.push(ItemStack::new(name, amount));
+            }
+        }
+        draft
+    }
+
+    fn open_pause_loadout_dialog(&mut self) {
+        let draft =
+            self.pause_loadout_reseed_from_stacks(&self.pause_custom_rules_current_rules().loadout);
+        self.pause_custom_rules_loadout_draft = draft;
+        self.pause_custom_rules_loadout_scroll_offset = 0;
+        self.pause_custom_rules_loadout_dialog_open = true;
+        self.pause_custom_rules_banned_content_dialog = None;
+        self.pause_custom_rules_banned_content_search_focused = false;
+        self.pause_custom_rules_weather_dialog_open = false;
+        self.pause_custom_rules_weather_add_dialog_open = false;
+        self.pause_custom_rules_team_rules_dialog_open = false;
+        self.pause_custom_rules_edit_dialog_open = false;
+        self.pause_custom_rules_search_focused = false;
+        self.pause_custom_rules_error = None;
+    }
+
+    fn close_pause_loadout_dialog(&mut self) {
+        if self.pause_custom_rules_loadout_dialog_open {
+            let loadout = self
+                .pause_custom_rules_loadout_draft
+                .iter()
+                .filter(|stack| stack.amount > 0)
+                .cloned()
+                .collect::<Vec<_>>();
+            self.ensure_pause_custom_rules_edit_rules().loadout = loadout;
+        }
+        self.pause_custom_rules_loadout_dialog_open = false;
+        self.pause_custom_rules_loadout_scroll_offset = 0;
+        self.pause_custom_rules_loadout_draft.clear();
+        self.pause_custom_rules_error = None;
+    }
+
+    fn pause_loadout_step(amount: i32) -> i32 {
+        if amount < 1000 {
+            100
+        } else if amount < 2000 {
+            200
+        } else if amount < 5000 {
+            500
+        } else {
+            1000
+        }
+    }
+
+    fn adjust_pause_loadout_item(&mut self, index: usize, direction: i32) {
+        let Some(stack) = self.pause_custom_rules_loadout_draft.get_mut(index) else {
+            return;
+        };
+        let step = Self::pause_loadout_step(stack.amount);
+        if direction < 0 {
+            stack.amount = (stack.amount - step).max(0);
+        } else if direction > 0 {
+            stack.amount = (stack.amount + step).min(PAUSE_CUSTOM_RULE_LOADOUT_CAPACITY);
+        }
+        self.pause_custom_rules_error = None;
+    }
+
+    fn max_pause_loadout_draft(&mut self) {
+        for stack in &mut self.pause_custom_rules_loadout_draft {
+            stack.amount = PAUSE_CUSTOM_RULE_LOADOUT_CAPACITY;
+        }
+        self.pause_custom_rules_error = None;
+    }
+
+    fn reset_pause_loadout_draft(&mut self) {
+        let reset = [ItemStack::new("copper", 100)];
+        self.pause_custom_rules_loadout_draft = self.pause_loadout_reseed_from_stacks(&reset);
+        self.pause_custom_rules_loadout_scroll_offset = 0;
+        self.pause_custom_rules_error = None;
+    }
+
+    fn pause_loadout_item_label(&self, name: &str) -> String {
+        self.content_loader
+            .item_by_name(name)
+            .map(|item| item.localized_name().to_string())
+            .unwrap_or_else(|| name.to_string())
     }
 
     fn map_play_rules_clipboard_json(rules: &Rules) -> String {
@@ -41792,6 +42110,7 @@ impl DesktopLauncher {
         if self.pause_overlay_modal != Some(DesktopPausedOverlayModal::CustomRules)
             || !self.pause_overlay_custom_rules_visible()
             || self.pause_custom_rules_edit_dialog_open
+            || self.pause_custom_rules_loadout_dialog_open
         {
             return false;
         }
@@ -41832,6 +42151,7 @@ impl DesktopLauncher {
             self.last_pause_quit_result = Some(DesktopPauseQuitResult::Cancelled);
         }
         if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules) {
+            self.close_pause_loadout_dialog();
             self.apply_pause_custom_rules_edit();
         } else {
             self.pause_custom_rules_edit = None;
@@ -41847,6 +42167,9 @@ impl DesktopLauncher {
         self.pause_custom_rules_weather_add_dialog_open = false;
         self.pause_custom_rules_team_rules_dialog_open = false;
         self.pause_custom_rules_team_rules_selected_team = None;
+        self.pause_custom_rules_loadout_dialog_open = false;
+        self.pause_custom_rules_loadout_scroll_offset = 0;
+        self.pause_custom_rules_loadout_draft.clear();
         self.pause_custom_rules_error = None;
         self.pause_overlay_modal = None;
     }
@@ -42000,7 +42323,12 @@ impl DesktopLauncher {
             | DesktopPausedOverlayAction::SelectPauseWaveTeam(_)
             | DesktopPausedOverlayAction::TogglePauseTeamRuleSection(_)
             | DesktopPausedOverlayAction::TogglePauseTeamRule(_, _)
-            | DesktopPausedOverlayAction::AdjustPauseTeamRuleNumber(_, _, _) => {
+            | DesktopPausedOverlayAction::AdjustPauseTeamRuleNumber(_, _, _)
+            | DesktopPausedOverlayAction::OpenPauseLoadout
+            | DesktopPausedOverlayAction::ClosePauseLoadout
+            | DesktopPausedOverlayAction::MaxPauseLoadout
+            | DesktopPausedOverlayAction::ResetPauseLoadout
+            | DesktopPausedOverlayAction::AdjustPauseLoadoutItem(_, _) => {
                 self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
                     && self.pause_overlay_custom_rules_visible()
             }
@@ -42044,6 +42372,9 @@ impl DesktopLauncher {
                 self.pause_custom_rules_weather_add_dialog_open = false;
                 self.pause_custom_rules_team_rules_dialog_open = false;
                 self.pause_custom_rules_team_rules_selected_team = None;
+                self.pause_custom_rules_loadout_dialog_open = false;
+                self.pause_custom_rules_loadout_scroll_offset = 0;
+                self.pause_custom_rules_loadout_draft.clear();
                 self.pause_custom_rules_error = None;
                 self.last_menu_guard_message = None;
             }
@@ -42061,6 +42392,9 @@ impl DesktopLauncher {
                 self.pause_custom_rules_weather_dialog_open = false;
                 self.pause_custom_rules_weather_add_dialog_open = false;
                 self.pause_custom_rules_team_rules_dialog_open = false;
+                self.pause_custom_rules_loadout_dialog_open = false;
+                self.pause_custom_rules_loadout_scroll_offset = 0;
+                self.pause_custom_rules_loadout_draft.clear();
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseCustomRulesEdit => {
@@ -42098,6 +42432,9 @@ impl DesktopLauncher {
                 self.pause_custom_rules_weather_dialog_open = false;
                 self.pause_custom_rules_weather_add_dialog_open = false;
                 self.pause_custom_rules_team_rules_dialog_open = false;
+                self.pause_custom_rules_loadout_dialog_open = false;
+                self.pause_custom_rules_loadout_scroll_offset = 0;
+                self.pause_custom_rules_loadout_draft.clear();
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseBannedContent => {
@@ -42152,6 +42489,9 @@ impl DesktopLauncher {
                 self.pause_custom_rules_edit_dialog_open = false;
                 self.pause_custom_rules_search_focused = false;
                 self.pause_custom_rules_team_rules_dialog_open = false;
+                self.pause_custom_rules_loadout_dialog_open = false;
+                self.pause_custom_rules_loadout_scroll_offset = 0;
+                self.pause_custom_rules_loadout_draft.clear();
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseWeather => {
@@ -42194,6 +42534,9 @@ impl DesktopLauncher {
                 self.pause_custom_rules_weather_add_dialog_open = false;
                 self.pause_custom_rules_edit_dialog_open = false;
                 self.pause_custom_rules_search_focused = false;
+                self.pause_custom_rules_loadout_dialog_open = false;
+                self.pause_custom_rules_loadout_scroll_offset = 0;
+                self.pause_custom_rules_loadout_draft.clear();
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseTeamRules => {
@@ -42234,8 +42577,32 @@ impl DesktopLauncher {
                 self.pause_custom_rules_team_rules_selected_team = Some(team_id);
                 self.pause_custom_rules_team_rules_dialog_open = true;
             }
+            DesktopPausedOverlayAction::OpenPauseLoadout => {
+                self.open_pause_loadout_dialog();
+            }
+            DesktopPausedOverlayAction::ClosePauseLoadout => {
+                self.close_pause_loadout_dialog();
+            }
+            DesktopPausedOverlayAction::MaxPauseLoadout => {
+                self.max_pause_loadout_draft();
+                self.pause_custom_rules_loadout_dialog_open = true;
+            }
+            DesktopPausedOverlayAction::ResetPauseLoadout => {
+                self.reset_pause_loadout_draft();
+                self.pause_custom_rules_loadout_dialog_open = true;
+            }
+            DesktopPausedOverlayAction::AdjustPauseLoadoutItem(index, direction) => {
+                self.adjust_pause_loadout_item(index, direction);
+                self.pause_custom_rules_loadout_dialog_open = true;
+            }
             DesktopPausedOverlayAction::Back => {
                 if self.pause_overlay_modal.is_some() {
+                    if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
+                        && self.pause_custom_rules_loadout_dialog_open
+                    {
+                        self.close_pause_loadout_dialog();
+                        return;
+                    }
                     if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
                         && self.pause_custom_rules_banned_content_dialog.is_some()
                     {
@@ -51494,6 +51861,9 @@ impl DesktopLauncher {
                             continue;
                         }
                     }
+                    if self.apply_pause_loadout_scroll_delta(surface_size, *delta_y) {
+                        continue;
+                    }
                     if self.apply_pause_weather_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
@@ -56232,6 +56602,146 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_pause_loadout_dialog(&self, pass: &mut RenderPass, dialog_parent: RenderRect) {
+        let layer = Layer::END_PIXELED + 0.236;
+        let dialog = Self::pause_loadout_dialog_rect(dialog_parent);
+        pass.push(RenderCommand::fill_rect(
+            dialog_parent,
+            [0.0, 0.0, 0.0, 0.52],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.62, 0.82, 1.0, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@configure"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 26.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.004,
+        ));
+        let clip = Self::pause_loadout_entries_clip_rect(dialog);
+        pass.push(RenderCommand::set_clip(clip));
+        let scroll = self.pause_custom_rules_loadout_scroll_offset.min(
+            Self::pause_loadout_max_scroll_offset(
+                dialog,
+                self.pause_custom_rules_loadout_draft.len(),
+            ),
+        );
+        let visible_rows = Self::pause_loadout_visible_entry_rows(dialog);
+        let columns = Self::pause_loadout_entry_columns(dialog);
+        let first_visible = scroll * columns;
+        let last_visible = (scroll + visible_rows) * columns;
+        for (item_index, stack) in self
+            .pause_custom_rules_loadout_draft
+            .iter()
+            .enumerate()
+            .skip(first_visible)
+            .take(last_visible.saturating_sub(first_visible))
+        {
+            let row = Self::pause_loadout_entry_rect_with_scroll(dialog, item_index, scroll);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("button"),
+                row,
+                [1.0, 1.0, 1.0, 0.30],
+                0.0,
+                layer + 0.010 + item_index as f32 * 0.001,
+            ));
+            self.push_settings_text_button(
+                pass,
+                Self::pause_loadout_entry_decrease_rect(row),
+                "-",
+                None,
+                layer + 0.011 + item_index as f32 * 0.001,
+            );
+            self.push_settings_text_button(
+                pass,
+                Self::pause_loadout_entry_increase_rect(row),
+                "+",
+                None,
+                layer + 0.012 + item_index as f32 * 0.001,
+            );
+            self.push_settings_text_button(
+                pass,
+                Self::pause_loadout_entry_edit_rect(row),
+                desktop_ui_icon_glyph_or_label("edit", "✎"),
+                None,
+                layer + 0.013 + item_index as f32 * 0.001,
+            );
+            let icon_rect = RenderRect::new(row.x + 110.0, row.center().y - 12.0, 24.0, 24.0);
+            let icon_symbol = item_full_icon_region_symbol(&stack.item, &self.content_loader)
+                .filter(|symbol| self.texture_atlas.lookup(symbol).is_ok())
+                .unwrap_or_else(|| stack.item.clone());
+            pass.push(RenderCommand::draw_sprite(
+                icon_symbol,
+                icon_rect,
+                [1.0, 1.0, 1.0, 0.96],
+                0.0,
+                layer + 0.014 + item_index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                self.pause_loadout_item_label(&stack.item),
+                RenderPoint::new(row.x + 140.0, row.center().y),
+                [0.84, 0.92, 1.0, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_wrap_width((row.width - 210.0).max(70.0)),
+                layer + 0.015 + item_index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                stack.amount.to_string(),
+                RenderPoint::new(row.right() - 44.0, row.center().y),
+                [0.94, 0.98, 1.0, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.016 + item_index as f32 * 0.001,
+            ));
+        }
+        pass.push(RenderCommand::clear_clip());
+        self.push_settings_text_button(
+            pass,
+            Self::pause_loadout_close_rect(dialog),
+            self.localize_bundle_markup_text("@back"),
+            Some("left"),
+            layer + 0.080,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::pause_loadout_max_rect(dialog),
+            self.localize_bundle_markup_text("@max"),
+            Some("export"),
+            layer + 0.081,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::pause_loadout_reset_rect(dialog),
+            self.localize_bundle_markup_text("@settings.reset"),
+            Some("refresh"),
+            layer + 0.082,
+        );
+    }
+
     fn push_pause_team_rules_dialog(
         &self,
         pass: &mut RenderPass,
@@ -56708,6 +57218,7 @@ impl DesktopLauncher {
                 "@rules.title.teams",
                 self.pause_custom_rules_team_rules_dialog_open,
             ),
+            ("@configure", self.pause_custom_rules_loadout_dialog_open),
         ]
         .into_iter()
         .enumerate()
@@ -56737,6 +57248,9 @@ impl DesktopLauncher {
         );
         if self.pause_custom_rules_edit_dialog_open {
             self.push_pause_custom_rules_edit_dialog(pass, dialog);
+        }
+        if self.pause_custom_rules_loadout_dialog_open {
+            self.push_pause_loadout_dialog(pass, dialog);
         }
         if let Some(kind) = self.pause_custom_rules_banned_content_dialog {
             self.push_pause_banned_content_dialog(pass, dialog, kind, rules);
@@ -79000,6 +79514,171 @@ displayName: "Alpha Pack"
                 .get_or_default(*target_team)
                 .block_health_multiplier
                 > 1.0
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_custom_rules_loadout_child_dialog_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.game_state.rules.allow_edit_rules = true;
+        launcher.game_state.rules.loadout = vec![ItemStack::new("copper", 100)];
+        launcher.runtime.state.rules = launcher.game_state.rules.copy();
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CustomRules);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = launcher.pause_overlay_panel_for_current_state(viewport);
+        let dialog = DesktopLauncher::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let configure_center =
+            DesktopLauncher::pause_overlay_custom_rules_child_button_rect(dialog, 4).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                configure_center.x,
+                configure_center.y
+            ),
+            Some(super::DesktopPausedOverlayAction::OpenPauseLoadout)
+        );
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::OpenPauseLoadout);
+        assert!(launcher.pause_custom_rules_loadout_dialog_open);
+        assert!(launcher
+            .pause_custom_rules_loadout_draft
+            .iter()
+            .any(|stack| stack.item == "copper" && stack.amount == 100));
+        assert!(launcher
+            .pause_custom_rules_loadout_draft
+            .iter()
+            .any(|stack| stack.item == "lead" && stack.amount == 0));
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts
+            .iter()
+            .any(|text| text.contains(&launcher.localize_bundle_markup_text("@configure"))));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains(&launcher.localize_bundle_markup_text("@max"))));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains(&launcher.localize_bundle_markup_text("@settings.reset"))));
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::MaxPauseLoadout);
+        assert!(launcher
+            .pause_custom_rules_loadout_draft
+            .iter()
+            .all(|stack| stack.amount == super::PAUSE_CUSTOM_RULE_LOADOUT_CAPACITY));
+        launcher
+            .dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::ResetPauseLoadout);
+        assert_eq!(
+            launcher
+                .pause_custom_rules_loadout_draft
+                .iter()
+                .find(|stack| stack.item == "copper")
+                .map(|stack| stack.amount),
+            Some(100)
+        );
+        assert_eq!(
+            launcher
+                .pause_custom_rules_loadout_draft
+                .iter()
+                .find(|stack| stack.item == "lead")
+                .map(|stack| stack.amount),
+            Some(0)
+        );
+
+        let loadout_dialog = DesktopLauncher::pause_loadout_dialog_rect(dialog);
+        let copper_index = launcher
+            .pause_custom_rules_loadout_draft
+            .iter()
+            .position(|stack| stack.item == "copper")
+            .expect("vanilla item list should contain copper");
+        let copper_row =
+            DesktopLauncher::pause_loadout_entry_rect_with_scroll(loadout_dialog, copper_index, 0);
+        let increase = DesktopLauncher::pause_loadout_entry_increase_rect(copper_row).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, increase.x, increase.y),
+            Some(super::DesktopPausedOverlayAction::AdjustPauseLoadoutItem(
+                copper_index,
+                1
+            ))
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::AdjustPauseLoadoutItem(copper_index, 1),
+        );
+        assert_eq!(
+            launcher.pause_custom_rules_loadout_draft[copper_index].amount,
+            200
+        );
+        assert_eq!(
+            launcher
+                .pause_custom_rules_edit
+                .as_ref()
+                .unwrap()
+                .loadout
+                .iter()
+                .find(|stack| stack.item == "copper")
+                .map(|stack| stack.amount),
+            Some(100),
+            "Java LoadoutDialog writes back to rules only when the child dialog hides"
+        );
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::Back);
+        assert!(!launcher.pause_custom_rules_loadout_dialog_open);
+        assert_eq!(
+            launcher
+                .pause_custom_rules_edit
+                .as_ref()
+                .unwrap()
+                .loadout
+                .iter()
+                .find(|stack| stack.item == "copper")
+                .map(|stack| stack.amount),
+            Some(200)
+        );
+        assert_eq!(
+            launcher
+                .game_state
+                .rules
+                .loadout
+                .iter()
+                .find(|stack| stack.item == "copper")
+                .map(|stack| stack.amount),
+            Some(100),
+            "CustomRulesDialog still keeps loadout pending until the parent dialog closes"
+        );
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CloseModal);
+        assert_eq!(
+            launcher
+                .game_state
+                .rules
+                .loadout
+                .iter()
+                .find(|stack| stack.item == "copper")
+                .map(|stack| stack.amount),
+            Some(200)
+        );
+        assert_eq!(
+            launcher
+                .runtime
+                .state
+                .rules
+                .loadout
+                .iter()
+                .find(|stack| stack.item == "copper")
+                .map(|stack| stack.amount),
+            Some(200)
         );
     }
 
