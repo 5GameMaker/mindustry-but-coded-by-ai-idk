@@ -49620,17 +49620,12 @@ impl DesktopLauncher {
             .mods_route_mod_display_name_at_index(index)
             .unwrap_or_default()
             .to_ascii_lowercase();
-        let internal_name = self
-            .last_mods_directory_mod_names
-            .get(index)
-            .map(|name| name.to_ascii_lowercase())
-            .unwrap_or_default();
         let meta = self.mods_route_mod_meta_at_index(index);
         let repo = meta
             .and_then(|meta| meta.repo.as_deref())
             .unwrap_or_default()
             .to_ascii_lowercase();
-        display_name.contains(&query) || internal_name.contains(&query) || repo.contains(&query)
+        display_name.contains(&query) || repo.contains(&query)
     }
 
     fn filtered_mods_browser_indices(&self) -> Vec<usize> {
@@ -68452,8 +68447,11 @@ steamID: "987654321"
     fn desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.settings_locale = "en".into();
-        launcher.last_mods_directory_mod_names =
-            vec!["gamma".into(), "beta".into(), "alpha".into()];
+        launcher.last_mods_directory_mod_names = vec![
+            "gamma-internal".into(),
+            "beta-internal".into(),
+            "alpha-internal".into(),
+        ];
         launcher.last_mods_directory_mod_metas = vec![
             ModMetadata::from_source_text(
                 "gamma",
@@ -68565,6 +68563,11 @@ stars: 3
         assert!(
             launcher.filtered_mods_browser_indices().is_empty(),
             "Java ModsDialog browser search only matches listing name/repo, not version"
+        );
+        launcher.mods_browser_search = "beta-internal".into();
+        assert!(
+            launcher.filtered_mods_browser_indices().is_empty(),
+            "Java ModsDialog browser search only matches listing name/repo, not local/internal directory names"
         );
         launcher.mods_browser_search = "Beta/Override".into();
         assert_eq!(

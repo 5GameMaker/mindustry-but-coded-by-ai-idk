@@ -17,6 +17,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 806. ModsDialog browser 搜索范围收窄到 name/repo
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.37%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ModsDialog.rebuildBrowser()` 的过滤条件是 `Strings.matches(searchtxt, mod.name)` 或 `Strings.matches(searchtxt, mod.repo)`；
+  - 搜索不应匹配 author、version，也不应匹配 Rust 本地扫描时的目录/internal 名。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `mods_browser_entry_matches_search(...)` 移除对 `last_mods_directory_mod_names` 的额外匹配；
+    - 继续保留展示名/name 与 repo 搜索；
+    - 扩展 `desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries`，让 fixture 的内部目录名与展示名不同，并断言搜索 `beta-internal` 不命中。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - browser 真实远端 listing 拉取、installed repo 状态、minGameVersion/Java/iOS 过滤、icon async cache 与 releases 多条列表仍需继续迁移。
+
 ## 805. ModsDialog browser lastUpdated 默认排序接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
