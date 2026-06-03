@@ -17,6 +17,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 857. MapPlay CustomRules ambient light picker 接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **93.89%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 为 map-play CustomRules 补齐 `OpenAmbientLight / CloseAmbientLight / SelectAmbientLight(index)`；
+    - 新增 `map_play_ambient_light_dialog_open`，接入 hit-test、back-stack、dispatch、render、输入屏蔽与 pending `map_play_rules.ambient_light`；
+    - 复用 pause 侧 ambient palette rect/render，选择颜色只写 `map_play_rules`，直到 `PlaySelected` 才同步到 runtime/game_state；
+    - 关闭/切换 map-play 子弹窗时同步清理 ambient 状态，避免独立残留。
+- 已验证：
+  - `cargo fmt --all`
+  - `git diff --check`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_map_play_custom_rules_ambient_light_picker_like_java -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop map_play -- --nocapture`
+- 下一步优先：按本地 Java `CustomRulesDialog.java` 补 map-play `@configure`/loadout；ambient 已占右侧按钮 index 7，后续 loadout 建议顺延到 index 8，避免覆盖现有 planet/ambient。
+
 ## 856. MapPlay CustomRules planet/anyenv 选择器接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
