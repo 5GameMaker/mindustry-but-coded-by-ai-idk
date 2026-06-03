@@ -50497,7 +50497,7 @@ impl DesktopLauncher {
             DesktopModsRouteModStateKind::IncompleteDependencies => {
                 Some("@mod.incompletedependencies")
             }
-            DesktopModsRouteModStateKind::Hidden => Some("@server.hidden"),
+            DesktopModsRouteModStateKind::Hidden => Some("@mod.multiplayer.compatible"),
         }
     }
 
@@ -50554,6 +50554,7 @@ impl DesktopLauncher {
             "@mod.erroredcontent" => "[red]Content Errors",
             "@mod.circulardependencies" => "[red]Circular Dependencies",
             "@mod.incompletedependencies" => "[red]Incomplete Dependencies",
+            "@mod.multiplayer.compatible" => "[gray]Multiplayer Compatible",
             "@mod.reloadrequired" => "[red]Restart Required",
             "@mod.delete.error" => "Unable to delete mod. File may be in use.",
             "@mod.remove.confirm" => "This mod will be deleted.",
@@ -50561,6 +50562,7 @@ impl DesktopLauncher {
             "@mod.blacklisted.details" => "This mod has been manually blacklisted for causing crashes or other issues with this version of the game. Do not use it.",
             "@mod.missingdependencies.details" => "This mod is missing dependencies: {0}",
             "@mod.erroredcontent.details" => "This mod caused errors when loading. Ask the mod author to fix them.",
+            "@mod.installed" => "[[Installed]",
             "@mod.circulardependencies.details" => {
                 "This mod has dependencies that depends on each other."
             }
@@ -50756,6 +50758,9 @@ impl DesktopLauncher {
         if let Some(state_text) = self.mods_route_mod_state_text_at_index(index) {
             info_parts.push(state_text);
         }
+        if self.mods_browser_entry_installed_like_java(index) {
+            info_parts.push(self.localize_bundle_markup_text("@mod.installed"));
+        }
         if let Some(version_warning) = self.mods_browser_entry_version_warning_at_index(index) {
             info_parts.push(version_warning);
         }
@@ -50855,6 +50860,22 @@ impl DesktopLauncher {
         display_name.contains(&query) || repo.contains(&query)
     }
 
+    fn mods_browser_entry_installed_like_java(&self, index: usize) -> bool {
+        let Some(repo) = self.mods_route_mod_repo_at_index(index) else {
+            return false;
+        };
+        self.last_mods_directory_mod_metas
+            .iter()
+            .enumerate()
+            .any(|(other_index, meta)| {
+                other_index != index
+                    && meta
+                        .repo
+                        .as_deref()
+                        .is_some_and(|installed_repo| installed_repo == repo)
+            })
+    }
+
     fn filtered_mods_browser_indices(&self) -> Vec<usize> {
         let mut indices = self
             .last_mods_directory_mod_names
@@ -50935,11 +50956,19 @@ impl DesktopLauncher {
             "left",
         )];
         if self.mods_route_mod_repo_at_index(index).is_some() {
-            specs.push((
-                DesktopMenuRouteShellAction::ModsBrowserReinstall(index),
-                "@mods.browser.reinstall",
-                "download",
-            ));
+            let (install_action, install_label) =
+                if self.mods_browser_entry_installed_like_java(index) {
+                    (
+                        DesktopMenuRouteShellAction::ModsBrowserReinstall(index),
+                        "@mods.browser.reinstall",
+                    )
+                } else {
+                    (
+                        DesktopMenuRouteShellAction::ModsBrowserAdd(index),
+                        "@mods.browser.add",
+                    )
+                };
+            specs.push((install_action, install_label, "download"));
             specs.push((
                 DesktopMenuRouteShellAction::ModsBrowserOpenGithub(index),
                 "@mods.github.open",
@@ -51865,6 +51894,7 @@ impl DesktopLauncher {
                     .mods_route_mod_display_name_at_index(mod_index)
                     .unwrap_or("@mods.unknown");
                 let meta = self.mods_route_mod_meta_at_index(mod_index);
+                let installed = self.mods_browser_entry_installed_like_java(mod_index);
                 pass.push(RenderCommand::draw_sprite(
                     Self::settings_drawable_symbol("button"),
                     rect,
@@ -51872,6 +51902,14 @@ impl DesktopLauncher {
                     0.0,
                     Layer::END_PIXELED + 0.098 + visible_index as f32 * 0.001,
                 ));
+                if installed {
+                    pass.push(RenderCommand::stroke_rect(
+                        rect,
+                        [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.96],
+                        2.0,
+                        Layer::END_PIXELED + 0.0981 + visible_index as f32 * 0.001,
+                    ));
+                }
                 pass.push(RenderCommand::draw_sprite(
                     Self::settings_drawable_symbol("pane"),
                     icon,
@@ -51881,7 +51919,11 @@ impl DesktopLauncher {
                 ));
                 pass.push(RenderCommand::stroke_rect(
                     icon,
-                    [0.56, 0.72, 0.86, 0.90],
+                    if installed {
+                        [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.96]
+                    } else {
+                        [0.56, 0.72, 0.86, 0.90]
+                    },
                     1.0,
                     Layer::END_PIXELED + 0.0986 + visible_index as f32 * 0.001,
                 ));
@@ -69566,9 +69608,13 @@ version: "3.0.0"
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.settings_locale = "en".into();
         launcher.player_locale = "en".into();
-        launcher.last_mods_directory_mod_names = vec!["alpha".into(), "beta".into()];
-        launcher.last_mods_directory_mod_roots =
-            vec!["C:/mods/alpha pack".into(), "C:/mods/beta".into()];
+        launcher.last_mods_directory_mod_names =
+            vec!["alpha".into(), "beta".into(), "gamma".into()];
+        launcher.last_mods_directory_mod_roots = vec![
+            "C:/mods/alpha pack".into(),
+            "C:/mods/beta".into(),
+            "C:/mods/gamma".into(),
+        ];
         launcher.last_mods_directory_mod_metas = vec![
             ModMetadata::from_source_text(
                 "alpha",
@@ -69590,6 +69636,16 @@ author: "Beta Author"
 version: "2.0.0"
 "#,
             ),
+            ModMetadata::from_source_text(
+                "gamma",
+                Some("mod.hjson"),
+                r#"
+name: gamma
+displayName: "Gamma Multiplayer"
+author: "Gamma Author"
+version: "1.1.0"
+"#,
+            ),
         ];
         launcher.last_mods_directory_mod_states = vec![
             super::DesktopModsRouteModStateSnapshot {
@@ -69604,12 +69660,27 @@ version: "2.0.0"
                 dependencies: Vec::new(),
                 requires_reload: false,
             },
+            super::DesktopModsRouteModStateSnapshot {
+                enabled: true,
+                state: super::DesktopModsRouteModStateKind::Hidden,
+                dependencies: Vec::new(),
+                requires_reload: false,
+            },
         ];
         launcher.dispatch_menu_action(MenuButtonRole::Mods);
 
         assert!(launcher.mods_route_requires_reload());
         let alpha_summary = launcher.mods_route_mod_summary_at_index(0);
         assert!(alpha_summary.contains("Disabled"), "{alpha_summary}");
+        let gamma_summary = launcher.mods_route_mod_summary_at_index(2);
+        assert!(
+            gamma_summary.contains("Multiplayer Compatible"),
+            "{gamma_summary}"
+        );
+        assert!(
+            !gamma_summary.contains("Hidden"),
+            "Java ModsDialog maps hidden mods to @mod.multiplayer.compatible, not @server.hidden"
+        );
         assert!(launcher
             .mods_route_mod_state_details_at_index(0)
             .iter()
@@ -69641,6 +69712,9 @@ version: "2.0.0"
         assert!(texts.iter().any(|text| text.contains("Restart Required")));
         assert!(texts.iter().any(|text| text.contains("Disabled")));
         assert!(texts.iter().any(|text| text.contains("Content Errors")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("Multiplayer Compatible")));
 
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::OpenModsDetail(0),
@@ -70631,7 +70705,12 @@ repo: "Beta/Override"
             .iter()
             .any(|text| text.contains("Author") && text.contains("Beta Author")));
         assert!(texts.contains(&"Back"));
-        assert!(texts.contains(&"Reinstall"));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@mods.browser.add")
+                .as_str()
+        ));
+        assert!(!texts.contains(&"Reinstall"));
         assert!(texts.contains(&"Repo"));
         assert!(texts.contains(&"View Releases"));
 
@@ -70642,10 +70721,7 @@ repo: "Beta/Override"
                 0,
                 super::DesktopMenuRouteShellAction::CloseModsBrowserSelection,
             ),
-            (
-                1,
-                super::DesktopMenuRouteShellAction::ModsBrowserReinstall(0),
-            ),
+            (1, super::DesktopMenuRouteShellAction::ModsBrowserAdd(0)),
             (
                 2,
                 super::DesktopMenuRouteShellAction::ModsBrowserOpenGithub(0),
@@ -70668,6 +70744,170 @@ repo: "Beta/Override"
         assert_eq!(launcher.mods_browser_selected_mod_index, Some(0));
         assert!(launcher.mods_browser_dialog_open);
         assert_eq!(launcher.mods_browser_releases_dialog_index, None);
+    }
+
+    #[test]
+    fn desktop_launcher_mods_browser_selection_button_switches_between_add_and_reinstall_like_java()
+    {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.last_mods_directory_mod_names = vec![
+            "installed-beta".into(),
+            "remote-new".into(),
+            "remote-beta".into(),
+        ];
+        launcher.last_mods_directory_mod_metas = vec![
+            ModMetadata::from_source_text(
+                "installed-beta",
+                Some("mod.hjson"),
+                r#"
+name: installed-beta
+displayName: "Installed Beta"
+repo: "Team/Beta"
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "remote-new",
+                Some("mod.hjson"),
+                r#"
+name: remote-new
+displayName: "Remote New"
+repo: "Team/New"
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "remote-beta",
+                Some("mod.hjson"),
+                r#"
+name: remote-beta
+displayName: "Remote Beta"
+repo: "Team/Beta"
+"#,
+            ),
+        ];
+
+        let add_specs = launcher.mods_browser_selection_button_specs(1);
+        assert_eq!(
+            add_specs.get(1),
+            Some(&(
+                super::DesktopMenuRouteShellAction::ModsBrowserAdd(1),
+                "@mods.browser.add",
+                "download",
+            )),
+            "Java ModsDialog uses Add when no installed mod has the selected listing repo"
+        );
+
+        let reinstall_specs = launcher.mods_browser_selection_button_specs(2);
+        assert_eq!(
+            reinstall_specs.get(1),
+            Some(&(
+                super::DesktopMenuRouteShellAction::ModsBrowserReinstall(2),
+                "@mods.browser.reinstall",
+                "download",
+            )),
+            "Java ModsDialog uses Reinstall when mods.list() contains the same repo"
+        );
+
+        let mut platform = RecordingPlatform::default();
+        launcher
+            .dispatch_mods_browser_action_with_platform(
+                1,
+                super::DesktopModsBrowserActionKind::Add,
+                &mut platform,
+            )
+            .expect("uninstalled listing add should record import action");
+        assert_eq!(
+            launcher
+                .last_mods_browser_action
+                .as_ref()
+                .map(|action| (action.kind, action.repo.as_deref())),
+            Some((super::DesktopModsBrowserActionKind::Add, Some("Team/New")))
+        );
+        launcher
+            .dispatch_mods_browser_action_with_platform(
+                2,
+                super::DesktopModsBrowserActionKind::Reinstall,
+                &mut platform,
+            )
+            .expect("installed listing reinstall should record import action");
+        assert_eq!(
+            launcher
+                .last_mods_browser_action
+                .as_ref()
+                .map(|action| (action.kind, action.repo.as_deref())),
+            Some((
+                super::DesktopModsBrowserActionKind::Reinstall,
+                Some("Team/Beta")
+            ))
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_mods_browser_entry_renders_installed_badge_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.last_mods_directory_mod_names =
+            vec!["installed-beta".into(), "remote-beta".into()];
+        launcher.last_mods_directory_mod_metas = vec![
+            ModMetadata::from_source_text(
+                "installed-beta",
+                Some("mod.hjson"),
+                r#"
+name: installed-beta
+displayName: "Installed Beta"
+repo: "Team/Beta"
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "remote-beta",
+                Some("mod.hjson"),
+                r#"
+name: remote-beta
+displayName: "Remote Beta"
+repo: "Team/Beta"
+"#,
+            ),
+        ];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::OpenModsBrowser);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let dialog = DesktopLauncher::mods_browser_dialog_rect_for_panel(panel);
+        let list = DesktopLauncher::mods_browser_list_rect_for_dialog(dialog);
+        let remote_card = DesktopLauncher::mods_browser_entry_rect_for_list(list, 1);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods browser installed badge frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, .. } if text.contains("Installed")
+        )));
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::StrokeRect {
+                rect,
+                color,
+                thickness,
+                ..
+            } if *rect == remote_card
+                && (*thickness - 2.0).abs() < f32::EPSILON
+                && (color[0] - super::Pal::ACCENT.r).abs() < 0.001
+                && (color[1] - super::Pal::ACCENT.g).abs() < 0.001
+                && (color[2] - super::Pal::ACCENT.b).abs() < 0.001
+        )));
     }
 
     #[test]

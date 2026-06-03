@@ -17,6 +17,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 829. ModsDialog 隐藏状态与浏览器安装语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.60%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ModsDialog.java#getStateText(...)` 中 `item.meta.hidden` 映射到 `@mod.multiplayer.compatible`，不是 `@server.hidden`；
+  - 浏览器选择弹窗中 `found = mods.list().find(l -> mod.repo != null && mod.repo.equals(l.getRepo()))`，按钮按 found 结果在 `@mods.browser.add` 与 `@mods.browser.reinstall` 之间切换；
+  - 浏览器卡片中已安装 listing 需要呈现 installed 视觉身份，包括 `@mod.installed` 文本和 accent 边框。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopModsRouteModStateKind::Hidden` 的状态文本改为 `@mod.multiplayer.compatible`，并补 fallback `[gray]Multiplayer Compatible`；
+    - 新增 `mods_browser_entry_installed_like_java(...)`，按 repo 精确相等现场判断当前 browser listing 是否已有本地安装项；
+    - `mods_browser_selection_button_specs(...)` 改为未安装 repo 显示/派发 Add，已安装 repo 显示/派发 Reinstall；
+    - `mods_browser_entry_info_text_at_index(...)` 对 installed listing 追加 `@mod.installed`；
+    - `push_mods_browser_dialog(...)` 对 installed listing 增加整卡 accent stroke，并让 icon 边框使用 accent 色；
+    - 新增/调整回归测试覆盖 Hidden 状态文案、Add/Reinstall 切换、Installed badge 文本与 accent 边框。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_mods_ --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Browser 远程 listing 与本地 installed mods 仍共用过渡数据结构，后续需要拆成真实远程列表 + 本地 installed repo set；
+  - GitHub release 列表仍是 synthetic latest，后续需要接 Java `/releases` 行为；
+  - Browser thumbnail 仍是首字母占位，后续需要接 Java 的远程图标/缩略图缓存；
+  - View Content 仍需从文件列表过渡到真实 `UnlockableContent` 图标网格。
+
 ## 828. JoinDialog resize/refresh/社区组顺序对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
