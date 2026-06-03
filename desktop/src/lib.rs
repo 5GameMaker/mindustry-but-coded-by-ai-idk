@@ -1432,6 +1432,7 @@ const MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES: &[DesktopCustomRulesToggle] = 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopMapCardActionKind {
     OpenPlay,
+    Playtest,
     OpenEditorInfo,
     SelectPlayMode(Gamemode),
     PlaySelected,
@@ -3644,6 +3645,7 @@ pub enum DesktopMenuRouteShellAction {
     ConfirmEditorNewMap,
     CancelEditorNewMap,
     ImportEditorMap,
+    EditorPlaytest,
     ConfirmEditorImportOverwrite,
     CancelEditorImportOverwrite,
     OpenTechTreeSelect,
@@ -33830,6 +33832,16 @@ impl DesktopLauncher {
         )
     }
 
+    fn map_editor_playtest_button_rect(dialog: RenderRect, panel: RenderRect) -> RenderRect {
+        let preview = Self::map_editor_preview_rect(dialog, panel);
+        RenderRect::new(
+            preview.right() + 16.0,
+            dialog.y + 132.0,
+            preview.width,
+            54.0,
+        )
+    }
+
     fn map_editor_preview_size_for_panel(panel: RenderRect) -> f32 {
         if panel.height > panel.width {
             160.0
@@ -34000,6 +34012,49 @@ impl DesktopLauncher {
         self.clear_editor_new_map_dialog();
         self.clear_editor_import_map_dialog();
         self.last_menu_info_message = Some(format!("beginEditMap: {}", map.plain_name()));
+        true
+    }
+
+    fn current_editor_map_index(&self) -> Option<usize> {
+        let editor_map_file = self.game_state.map.file.trim();
+        if editor_map_file.is_empty() {
+            return None;
+        }
+        self.map_list_cards
+            .iter()
+            .position(|map| map.file.trim() == editor_map_file)
+    }
+
+    fn open_map_play_dialog_for_index(
+        &mut self,
+        index: usize,
+        playtesting: bool,
+        activate_editor_route: bool,
+    ) -> bool {
+        let Some(map) = self.map_list_cards.get(index) else {
+            return false;
+        };
+        if !self.map_play_selected_mode.valid(map) {
+            self.map_play_selected_mode = Self::map_play_first_valid_mode(map);
+        }
+        if let Some(map) = self.map_list_cards.get(index) {
+            self.map_play_rules = Some(Self::map_play_rules_for_mode(
+                map,
+                self.map_play_selected_mode,
+            ));
+        }
+        if activate_editor_route {
+            self.active_menu_route = Some(DesktopMenuRoute::Editor);
+        }
+        self.map_play_playtesting = playtesting;
+        self.map_play_dialog_index = Some(index);
+        self.editor_map_info_dialog_index = None;
+        self.map_play_mode_help_dialog_open = false;
+        self.map_play_customize_dialog_open = false;
+        self.map_play_rules_edit_dialog_open = false;
+        self.map_play_banned_content_dialog = None;
+        self.map_play_weather_dialog_open = false;
+        self.map_play_rules_error = None;
         true
     }
 
@@ -36128,6 +36183,13 @@ impl DesktopLauncher {
                 }
             }
             if let Some(index) = self.editor_map_info_dialog_index {
+                if self.game_state.rules.editor
+                    && Self::map_editor_playtest_button_rect(dialog, panel).contains_point(point)
+                {
+                    return Some(DesktopMenuRouteShellAction::MapCard(
+                        DesktopMapCardAction::new(index, DesktopMapCardActionKind::Playtest),
+                    ));
+                }
                 if Self::map_editor_action_button_rect(dialog, 0).contains_point(point) {
                     return Some(DesktopMenuRouteShellAction::MapCard(
                         DesktopMapCardAction::new(index, DesktopMapCardActionKind::OpenInEditor),
@@ -36162,6 +36224,11 @@ impl DesktopLauncher {
             }
             if Self::map_list_action_button_rect_for_panel(panel, 1).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::ImportEditorMap);
+            }
+            if self.game_state.rules.editor
+                && Self::map_list_action_button_rect_for_panel(panel, 2).contains_point(point)
+            {
+                return Some(DesktopMenuRouteShellAction::EditorPlaytest);
             }
         }
         if let Some(index) = self.map_list_card_index_at_point(panel, route, point) {
@@ -37994,32 +38061,10 @@ impl DesktopLauncher {
                     self.last_map_card_action = Some(action);
                     match action.kind {
                         DesktopMapCardActionKind::OpenPlay => {
-                            if !self
-                                .map_list_cards
-                                .get(action.index)
-                                .map(|map| self.map_play_selected_mode.valid(map))
-                                .unwrap_or(false)
-                            {
-                                if let Some(map) = self.map_list_cards.get(action.index) {
-                                    self.map_play_selected_mode =
-                                        Self::map_play_first_valid_mode(map);
-                                }
-                            }
-                            if let Some(map) = self.map_list_cards.get(action.index) {
-                                self.map_play_rules = Some(Self::map_play_rules_for_mode(
-                                    map,
-                                    self.map_play_selected_mode,
-                                ));
-                            }
-                            self.map_play_playtesting = false;
-                            self.map_play_dialog_index = Some(action.index);
-                            self.editor_map_info_dialog_index = None;
-                            self.map_play_mode_help_dialog_open = false;
-                            self.map_play_customize_dialog_open = false;
-                            self.map_play_rules_edit_dialog_open = false;
-                            self.map_play_banned_content_dialog = None;
-                            self.map_play_weather_dialog_open = false;
-                            self.map_play_rules_error = None;
+                            self.open_map_play_dialog_for_index(action.index, false, false);
+                        }
+                        DesktopMapCardActionKind::Playtest => {
+                            self.open_map_play_dialog_for_index(action.index, true, false);
                         }
                         DesktopMapCardActionKind::OpenEditorInfo => {
                             self.editor_map_info_dialog_index = Some(action.index);
@@ -38478,6 +38523,11 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::ImportEditorMap => {
                 let mut platform = DefaultPlatform;
                 let _ = self.dispatch_editor_import_map_with_platform(&mut platform);
+            }
+            DesktopMenuRouteShellAction::EditorPlaytest => {
+                if let Some(index) = self.current_editor_map_index() {
+                    self.open_map_play_dialog_for_index(index, true, false);
+                }
             }
             DesktopMenuRouteShellAction::ConfirmEditorImportOverwrite => {
                 let _ = self.confirm_editor_import_overwrite();
@@ -43120,6 +43170,15 @@ impl DesktopLauncher {
                 Some("upload"),
                 Layer::END_PIXELED + 0.026,
             );
+            if self.game_state.rules.editor {
+                self.push_settings_text_button(
+                    pass,
+                    Self::map_list_action_button_rect_for_panel(panel, 2),
+                    self.localize_bundle_markup_text_or("@editor.playtest", "Playtest"),
+                    Some("play"),
+                    Layer::END_PIXELED + 0.027,
+                );
+            }
         }
 
         let search = Self::map_list_search_rect_for_panel(panel, route);
@@ -43569,10 +43628,15 @@ impl DesktopLauncher {
                 Some(index) => (index, true),
                 None => return,
             },
-            DesktopMenuRoute::Editor => match self.editor_map_info_dialog_index {
-                Some(index) => (index, false),
-                None => return,
-            },
+            DesktopMenuRoute::Editor => {
+                if let Some(index) = self.map_play_dialog_index {
+                    (index, true)
+                } else if let Some(index) = self.editor_map_info_dialog_index {
+                    (index, false)
+                } else {
+                    return;
+                }
+            }
             _ => return,
         };
         let Some(map) = self.map_list_cards.get(index) else {
@@ -45150,6 +45214,15 @@ impl DesktopLauncher {
             Some("export"),
             Layer::END_PIXELED + 0.072,
         );
+        if self.game_state.rules.editor {
+            self.push_settings_text_button(
+                pass,
+                Self::map_editor_playtest_button_rect(dialog, panel),
+                self.localize_bundle_markup_text_or("@editor.playtest", "Playtest"),
+                Some("play"),
+                Layer::END_PIXELED + 0.0725,
+            );
+        }
         let secondary_enabled = Self::map_editor_secondary_action_kind(map).is_some();
         self.push_settings_text_button_enabled(
             pass,
@@ -48538,7 +48611,14 @@ impl DesktopLauncher {
                 "button: @editor.importmap Icon.upload".to_string(),
             ],
         );
+        if self.game_state.rules.editor {
+            lines.push("button: @editor.playtest Icon.play".into());
+        }
         lines.push("map click: @editor.mapinfo".into());
+        if self.map_play_dialog_index.is_some() {
+            lines.push("dialog: MapPlayDialog".into());
+            lines.push("button hierarchy: @customize > @play".into());
+        }
         if self.editor_new_map_dialog_open {
             lines.push(format!(
                 "dialog: ui.showTextInput @editor.newmap prompt=@editor.mapname text={} allowEmpty=false error={}",
@@ -73099,6 +73179,101 @@ repo: "Beta/Override"
             .editor_maps_route_lines()
             .iter()
             .any(|line| line.contains("event: beginEditMap current=Delete Me")));
+
+        let mut playtest_launcher = DesktopLauncher::new(Vec::new());
+        playtest_launcher.map_list_cards = vec![map_card("Playtest Me", 1, &[1, 2], false)];
+        playtest_launcher.dispatch_menu_action(MenuButtonRole::Editor);
+        playtest_launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::OpenEditorInfo,
+            )),
+        );
+        let playtest_viewport = playtest_launcher.default_render_viewport_for_surface(viewport);
+        let playtest_panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            playtest_viewport,
+            super::DesktopMenuRoute::Editor,
+        );
+        let playtest_dialog = DesktopLauncher::map_card_dialog_rect_for_panel(playtest_panel);
+        let playtest_open_in_center =
+            DesktopLauncher::map_editor_action_button_rect(playtest_dialog, 0).center();
+        assert_eq!(
+            playtest_launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                playtest_open_in_center.x,
+                playtest_open_in_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenInEditor,)
+            ))
+        );
+        playtest_launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::OpenInEditor,
+            )),
+        );
+        playtest_launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::OpenEditorInfo,
+            )),
+        );
+        assert!(
+            playtest_launcher
+                .editor_maps_route_lines()
+                .iter()
+                .any(|line| line.contains("@editor.playtest")),
+            "Java EditorMapsDialog should expose a playtest entry once editor rules are active"
+        );
+        let playtest_center =
+            DesktopLauncher::map_editor_playtest_button_rect(playtest_dialog, playtest_panel)
+                .center();
+        let playtest = super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::Playtest),
+        );
+        assert_eq!(
+            playtest_launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                playtest_center.x,
+                playtest_center.y
+            ),
+            Some(playtest)
+        );
+        playtest_launcher.dispatch_menu_route_shell_action(playtest);
+        assert!(playtest_launcher.map_play_playtesting);
+        assert_eq!(playtest_launcher.map_play_dialog_index, Some(0));
+        assert_eq!(playtest_launcher.editor_map_info_dialog_index, None);
+        let play_center = DesktopLauncher::map_play_primary_button_rect(playtest_dialog).center();
+        let play_selected = super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::PlaySelected),
+        );
+        assert_eq!(
+            playtest_launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                play_center.x,
+                play_center.y
+            ),
+            Some(play_selected)
+        );
+        playtest_launcher.dispatch_menu_route_shell_action(play_selected);
+        assert_eq!(
+            playtest_launcher
+                .runtime
+                .state
+                .playtesting_map
+                .as_ref()
+                .map(|map| map.plain_name()),
+            Some("Playtest Me".to_string())
+        );
+        assert_eq!(
+            playtest_launcher
+                .game_state
+                .playtesting_map
+                .as_ref()
+                .map(|map| map.plain_name()),
+            Some("Playtest Me".to_string())
+        );
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
             super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenEditorInfo),
         ));

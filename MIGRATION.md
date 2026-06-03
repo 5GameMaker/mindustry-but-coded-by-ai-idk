@@ -17,6 +17,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 801. Editor playtest 入口接入 MapPlayDialog
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.32%**，仍未达到完整可玩；继续优先前端/UI、编辑器/地图相关子菜单、黑屏/启动兼容、性能收口与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `MapEditorDialog.java` 顶部按钮 `@editor.playtest` 调用 `playtest()`；
+  - `playtest()` 保存当前编辑器 map 后调用 `MapPlayDialog.show(map, true)`；
+  - `MapPlayDialog` 的 Play 按钮再调用 `control.playMap(map, rules, playtesting)`；
+  - `Control.playMap(..., true)` 设置 `state.playtestingMap = map`，退出时 `PausedDialog.checkPlaytest()` 可回到编辑器。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopMapCardActionKind::Playtest` 与 `DesktopMenuRouteShellAction::EditorPlaytest`；
+    - 新增 `current_editor_map_index()` 与 `open_map_play_dialog_for_index(...)`，复用现有 `MapPlayDialog / PlaySelected` 链路；
+    - 在 editor route / 地图信息弹窗中加入 `@editor.playtest` 入口，仅在 `game_state.rules.editor == true` 时显示；
+    - `Editor` 路由下现在也可渲染 `map_play_dialog_index` 对应的 `MapPlayDialog`；
+    - 测试扩展 `desktop_launcher_map_card_dialog_buttons_dispatch_play_and_editor_actions`，覆盖 playtest 入口可见、点击后 `map_play_playtesting` 置真、Play 后 `runtime.state.playtesting_map` 与 `game_state.playtesting_map` 写入当前 map。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_card_dialog_buttons_dispatch_play_and_editor_actions --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_info_disables_builtin_delete_action --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_info_back_key_closes_child_before_route_like_java_dialog --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --release --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Java `MapEditorDialog.save()` 对编辑器当前 tile/rules/objectives 的完整保存链仍需继续迁移；当前 playtest 复用 Rust 现有 map descriptor/runtime 过渡状态；
+  - `PausedDialog.checkPlaytest()` 的“退出 playtest 后恢复编辑器”端到端 UI 仍需继续补测试和实现；
+  - Editor 的 `@editor.ingame`、workshop 发布、导出/导入细节仍需继续按本地 Java 参考迁移。
+
 ## 800. Settings 动态分类无描述分支与 back 行号修正
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
