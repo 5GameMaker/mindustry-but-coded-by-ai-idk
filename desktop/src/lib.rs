@@ -4119,6 +4119,7 @@ pub struct DesktopModsBrowserAction {
     pub kind: DesktopModsBrowserActionKind,
     pub repo: Option<String>,
     pub uri: Option<String>,
+    pub release_id: Option<String>,
     pub opened: Option<bool>,
 }
 
@@ -4136,6 +4137,7 @@ pub struct DesktopModsBrowserReleaseEntry {
     pub tag: String,
     pub html_url: String,
     pub api_url: String,
+    pub release_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38622,12 +38624,17 @@ impl DesktopLauncher {
                 let tag = Self::mods_browser_json_string_value(object, "tag_name")
                     .or_else(|| api_url.rsplit('/').next().map(str::to_string))
                     .unwrap_or_else(|| name.clone());
+                let release_id = api_url
+                    .rsplit('/')
+                    .find(|segment| !segment.trim().is_empty())
+                    .map(str::to_string);
                 Some(DesktopModsBrowserReleaseEntry {
                     name,
                     published_at,
                     tag,
                     html_url,
                     api_url,
+                    release_id,
                 })
             })
             .collect()
@@ -38667,6 +38674,7 @@ impl DesktopLauncher {
             html_url: html_url.clone(),
             api_url: html_url,
             tag,
+            release_id: None,
         }]
     }
 
@@ -38726,6 +38734,7 @@ impl DesktopLauncher {
         } else {
             self.mods_route_mod_repo_at_index(index).map(str::to_string)
         };
+        let mut release_id = None;
         let (uri, opened) = match kind {
             DesktopModsBrowserActionKind::OpenGithub => {
                 let uri = Self::mods_browser_repo_uri(repo.as_deref()?);
@@ -38739,11 +38748,13 @@ impl DesktopLauncher {
             }
             DesktopModsBrowserActionKind::OpenRelease => {
                 let entry = self.mods_browser_release_entries.get(index)?;
+                release_id = entry.release_id.clone();
                 let opened = platform.open_uri(&entry.html_url);
                 (Some(entry.html_url.clone()), Some(opened))
             }
             DesktopModsBrowserActionKind::InstallRelease => {
                 let entry = self.mods_browser_release_entries.get(index)?;
+                release_id = entry.release_id.clone();
                 (Some(entry.api_url.clone()), None)
             }
             DesktopModsBrowserActionKind::Add | DesktopModsBrowserActionKind::Reinstall => {
@@ -38755,6 +38766,7 @@ impl DesktopLauncher {
             kind,
             repo,
             uri,
+            release_id,
             opened,
         };
         self.last_mods_browser_action = Some(action.clone());
@@ -70703,6 +70715,7 @@ stars: 3
             release_page_action.uri.as_deref(),
             Some("https://github.com/Beta/Override/releases/tag/v2.0.0")
         );
+        assert_eq!(release_page_action.release_id, None);
         assert_eq!(release_page_action.opened, Some(true));
         let install_release_action = launcher
             .dispatch_mods_browser_action_with_platform(
@@ -70714,6 +70727,10 @@ stars: 3
         assert_eq!(
             install_release_action.uri.as_deref(),
             Some("https://github.com/Beta/Override/releases/tag/v2.0.0")
+        );
+        assert_eq!(
+            install_release_action.release_id, None,
+            "synthetic fetching entries are placeholders and do not carry a GitHub API release id"
         );
         assert_eq!(install_release_action.opened, None);
         assert!(launcher.apply_menu_back_key());
@@ -70952,6 +70969,13 @@ repo: "Beta/Override"
             launcher.mods_browser_release_entries[0].api_url,
             "https://api.github.com/repos/Beta/Override/releases/200"
         );
+        assert_eq!(
+            launcher.mods_browser_release_entries[0]
+                .release_id
+                .as_deref(),
+            Some("200"),
+            "Java ModsDialog installs releases by the final segment of the GitHub API release URL"
+        );
 
         let surface = DesktopSurfaceSize::new(1280, 720);
         let viewport = launcher.default_render_viewport_for_surface(surface);
@@ -71018,6 +71042,7 @@ repo: "Beta/Override"
             open_action.uri.as_deref(),
             Some("https://github.com/Beta/Override/releases/tag/v1.0.0")
         );
+        assert_eq!(open_action.release_id.as_deref(), Some("100"));
         let install_action = launcher
             .dispatch_mods_browser_action_with_platform(
                 1,
@@ -71029,6 +71054,7 @@ repo: "Beta/Override"
             install_action.uri.as_deref(),
             Some("https://api.github.com/repos/Beta/Override/releases/100")
         );
+        assert_eq!(install_action.release_id.as_deref(), Some("100"));
     }
 
     #[test]
