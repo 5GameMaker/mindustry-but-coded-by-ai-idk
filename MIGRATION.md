@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 832. ModsDialog Release ID 元数据闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.64%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ModsDialog.java` 的 release install 会从 GitHub API release URL 尾段截取 release id：`releaseUrl.substring(releaseUrl.lastIndexOf("/") + 1)`；
+  - `OpenRelease` 应继续打开 `html_url`，`InstallRelease` 应保留 API `url` 与 release id，供后续 Java/非 Java 下载分支使用。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopModsBrowserReleaseEntry` 新增 `release_id: Option<String>`；
+    - `DesktopModsBrowserAction` 新增 `release_id: Option<String>`；
+    - releases JSON parser 从 API `url` 尾段提取 release id；
+    - synthetic/fetching 占位 release entry 保持 `release_id: None`，不伪造真实 GitHub release id；
+    - `OpenRelease` / `InstallRelease` action 均把 entry 的 release id 带出；
+    - 扩展 Mods browser release 测试，锁定 JSON release id、action release id、synthetic 占位 entry 无 release id。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop mods_browser`
+- 仍未完成：
+  - 真实 HTTP 拉取 GitHub releases 仍未接入；当前多 release 仍通过本地 JSON 注入/fixture 进入前端；
+  - release 安装下载链仍需继续对齐 Java `dexed*.jar > *.jar` 与非 Java `zipball_url + Location redirect` 分支；
+  - browser 真实远端 listings 数据源、empty/error release dialog、依赖/冲突处理仍需继续迁移。
+
 ## 831. ModsDialog Releases JSON 字段闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
@@ -614,7 +637,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo fmt --all`
   - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries --lib -- --test-threads=1 --nocapture`
 - 仍未完成：
-  - releases 仍是 synthetic latest entry；真实 GitHub releases JSON 多条列表、empty/error dialog 与 Java `githubImportMod(..., releaseId)` 仍需继续迁移。
+  - synthetic latest entry 仅作为 fetching 占位保留；真实 HTTP 拉取、empty/error dialog 与 Java `githubImportMod(..., releaseId)` 下载链仍需继续迁移。
 
 ## 807. ModsDialog browser 兼容性字段与版本提示
 
@@ -705,7 +728,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries --lib -- --test-threads=1 --nocapture`
 - 仍未完成：
   - browser 真实远端 listings 拉取与 `lastUpdated` 日期解析/排序仍未完整接入；
-  - releases dialog 目前仍是 Rust 侧过渡的 latest/synthetic entry，尚未迁移完整 GitHub releases JSON 多条列表；
+  - releases dialog 已支持本地注入 GitHub releases JSON 多条列表与 release id；真实 HTTP 拉取、empty/error dialog 与下载链仍需继续迁移；
   - Java 的脚本/Java/ios/minGameVersion 过滤与 installed border/icon async cache 仍需继续对照迁移。
 
 ## 803. Editor export createDialog 前端入口
@@ -1023,7 +1046,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 仍未完成：
   - selection modal 的 portrait 两行按钮布局仍需继续贴近 Java `Core.graphics.isPortrait()` 分支；
   - browser listing 仍未接远端 `modJsonURLs`/stars/lastUpdated 数据；
-  - releases 仍未完成真实 GitHub API fetching、empty/error、多 release 下载链路。
+  - releases 已完成本地 JSON 多 release 列表与 release id 记录；真实 GitHub API fetching、empty/error、下载链路仍未完成。
 
 ## 792. Mods Browser Java 风格选择弹窗
 
@@ -1046,7 +1069,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo check -p mindustry-desktop --features opengl-native-runtime`
 - 仍未完成：
   - browser 数据源仍主要来自当前 mods snapshot，尚未接真实 GitHub listing/stars/date feed；
-  - releases 仍是内部合成/过渡 release entry，未完全实现 Java 的异步 fetching、empty/error、多 release 下载安装链路；
+  - releases 的内部合成 entry 只保留为 fetching 占位；本地 JSON 多 release 与 release id 已接入，Java 异步 fetching、empty/error、下载安装链路仍未完成；
   - 模组安装下载、依赖/冲突处理和真实联机可玩性仍需继续迁移。
 
 ## 791. Native OpenGL 菜单帧上传与状态缓存
@@ -1775,7 +1798,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo check -p mindustry-desktop --features opengl-native-runtime`
   - `git diff --check`
 - 仍未完成：
-  - releases 列表目前是离线 front-end stub，后续需要接入真实 GitHub releases JSON、空态 `@mods.browser.noreleases` 和 release 下载导入链；
+  - releases 列表目前仍是离线 front-end 注入路径，后续需要接入真实 GitHub releases HTTP 拉取、空态 `@mods.browser.noreleases` 和 release 下载导入链；
   - browser 列表的真实 stars/date 字段仍需从 Java `ModListing` 等价数据源补齐。
 
 ## 762. ModsDialog 浏览器搜索与排序语义对齐
