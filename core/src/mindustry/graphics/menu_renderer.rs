@@ -1025,6 +1025,27 @@ struct MenuUiRenderCommandGroups {
     submenu_buttons: Vec<RenderCommand>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MenuStaticWorldRenderCommandCacheKey {
+    world_width: usize,
+    world_height: usize,
+    tile_count: usize,
+    cache_floor_id: i32,
+    cache_wall_id: i32,
+    tile_size: f32,
+    camera_x: f32,
+    camera_y: f32,
+    camera_width: f32,
+    camera_height: f32,
+    scaling: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct MenuStaticWorldRenderCommandCache {
+    key: MenuStaticWorldRenderCommandCacheKey,
+    commands: Vec<RenderCommand>,
+}
+
 impl MenuUiPlan {
     pub fn with_hovered_role(mut self, hovered_role: Option<MenuButtonRole>) -> Self {
         for button in &mut self.buttons {
@@ -1559,6 +1580,13 @@ pub enum MenuRenderCommand {
 }
 
 impl MenuRenderCommand {
+    fn is_static_world_cache_command(&self) -> bool {
+        matches!(
+            self,
+            Self::DrawCache { .. } | Self::DrawShadowTexture { .. }
+        )
+    }
+
     pub fn to_render_commands(&self, world: &MenuWorldPlan, tile_size: f32) -> Vec<RenderCommand> {
         self.clone().into_render_commands(world, tile_size)
     }
@@ -1799,13 +1827,18 @@ pub struct MenuFramePlan {
     pub tile_size: f32,
     pub world: MenuWorldPlan,
     pub commands: Vec<MenuRenderCommand>,
+    pub static_world_render_commands: Option<Vec<RenderCommand>>,
     pub ui: MenuUiPlan,
     pub ui_render_commands: Vec<RenderCommand>,
 }
 
 impl MenuFramePlan {
     pub fn to_render_pass(&self) -> Option<RenderPass> {
-        if self.commands.is_empty() && self.ui_render_commands.is_empty() {
+        let static_commands_empty = self
+            .static_world_render_commands
+            .as_ref()
+            .map_or(true, Vec::is_empty);
+        if self.commands.is_empty() && self.ui_render_commands.is_empty() && static_commands_empty {
             return None;
         }
 
@@ -1827,12 +1860,35 @@ impl MenuFramePlan {
             self.camera_y - self.camera_height * 0.5,
             self.scaling,
         );
-        for command in &self.commands {
-            menu_extend_visible_render_commands(
-                &mut pass,
-                command.to_render_commands_with_transform(&self.world, self.tile_size, transform),
-                viewport,
-            );
+        if let Some(static_world_render_commands) = &self.static_world_render_commands {
+            pass.extend(static_world_render_commands.clone());
+            for command in self
+                .commands
+                .iter()
+                .filter(|command| !command.is_static_world_cache_command())
+            {
+                menu_extend_visible_render_commands(
+                    &mut pass,
+                    command.to_render_commands_with_transform(
+                        &self.world,
+                        self.tile_size,
+                        transform,
+                    ),
+                    viewport,
+                );
+            }
+        } else {
+            for command in &self.commands {
+                menu_extend_visible_render_commands(
+                    &mut pass,
+                    command.to_render_commands_with_transform(
+                        &self.world,
+                        self.tile_size,
+                        transform,
+                    ),
+                    viewport,
+                );
+            }
         }
         pass.extend(self.ui_render_commands.clone());
         Some(pass)
@@ -1848,11 +1904,15 @@ impl MenuFramePlan {
             tile_size,
             world,
             commands,
+            static_world_render_commands,
             ui: _,
             ui_render_commands,
         } = self;
 
-        if commands.is_empty() && ui_render_commands.is_empty() {
+        let static_commands_empty = static_world_render_commands
+            .as_ref()
+            .map_or(true, Vec::is_empty);
+        if commands.is_empty() && ui_render_commands.is_empty() && static_commands_empty {
             return None;
         }
 
@@ -1870,12 +1930,26 @@ impl MenuFramePlan {
             camera_y - camera_height * 0.5,
             scaling,
         );
-        for command in commands {
-            menu_extend_visible_render_commands(
-                &mut pass,
-                command.into_render_commands_with_transform(&world, tile_size, Some(transform)),
-                viewport,
-            );
+        if let Some(static_world_render_commands) = static_world_render_commands {
+            pass.extend(static_world_render_commands);
+            for command in commands
+                .into_iter()
+                .filter(|command| !command.is_static_world_cache_command())
+            {
+                menu_extend_visible_render_commands(
+                    &mut pass,
+                    command.into_render_commands_with_transform(&world, tile_size, Some(transform)),
+                    viewport,
+                );
+            }
+        } else {
+            for command in commands {
+                menu_extend_visible_render_commands(
+                    &mut pass,
+                    command.into_render_commands_with_transform(&world, tile_size, Some(transform)),
+                    viewport,
+                );
+            }
         }
         pass.extend(ui_render_commands);
         Some(pass)
@@ -1902,6 +1976,8 @@ pub struct MenuRendererState {
     pub ui_layout_cache_rebuilds: usize,
     ui_render_command_cache: Option<MenuUiRenderCommandCache>,
     pub ui_render_command_cache_rebuilds: usize,
+    static_world_render_command_cache: Option<MenuStaticWorldRenderCommandCache>,
+    pub static_world_render_command_cache_rebuilds: usize,
 }
 
 impl MenuRendererState {
@@ -1929,7 +2005,110 @@ impl MenuRendererState {
             ui_layout_cache_rebuilds: 0,
             ui_render_command_cache: None,
             ui_render_command_cache_rebuilds: 0,
+            static_world_render_command_cache: None,
+            static_world_render_command_cache_rebuilds: 0,
         }
+    }
+
+    fn static_world_render_command_cache_key(
+        &self,
+        camera_x: f32,
+        camera_y: f32,
+        camera_width: f32,
+        camera_height: f32,
+        scaling: f32,
+    ) -> MenuStaticWorldRenderCommandCacheKey {
+        MenuStaticWorldRenderCommandCacheKey {
+            world_width: self.world.width,
+            world_height: self.world.height,
+            tile_count: self.world.tiles.len(),
+            cache_floor_id: self.world.cache_floor_id,
+            cache_wall_id: self.world.cache_wall_id,
+            tile_size: self.config.tile_size,
+            camera_x,
+            camera_y,
+            camera_width,
+            camera_height,
+            scaling,
+        }
+    }
+
+    fn build_static_world_render_commands(
+        &self,
+        key: MenuStaticWorldRenderCommandCacheKey,
+    ) -> Vec<RenderCommand> {
+        let viewport = RenderViewport::new(
+            0.0,
+            0.0,
+            key.camera_width * key.scaling,
+            key.camera_height * key.scaling,
+        );
+        let transform = MenuScreenTransform::new(
+            key.camera_x - key.camera_width * 0.5,
+            key.camera_y - key.camera_height * 0.5,
+            key.scaling,
+        );
+        let commands = [
+            MenuRenderCommand::DrawCache {
+                cache_id: self.world.cache_floor_id,
+                label: "floor+overlay",
+            },
+            MenuRenderCommand::DrawShadowTexture {
+                x: key.camera_x - 4.0,
+                y: key.camera_y - 4.0,
+                width: self.world.width as f32 * key.tile_size,
+                height: -(self.world.height as f32 * key.tile_size),
+            },
+            MenuRenderCommand::DrawCache {
+                cache_id: self.world.cache_wall_id,
+                label: "wall",
+            },
+        ];
+        let mut render_commands = Vec::new();
+        for command in commands {
+            render_commands.extend(
+                command
+                    .into_render_commands_with_transform(
+                        &self.world,
+                        key.tile_size,
+                        Some(transform),
+                    )
+                    .into_iter()
+                    .filter(|command| menu_render_command_visible_in_viewport(command, viewport)),
+            );
+        }
+        render_commands
+    }
+
+    fn cached_static_world_render_commands(
+        &mut self,
+        camera_x: f32,
+        camera_y: f32,
+        camera_width: f32,
+        camera_height: f32,
+        scaling: f32,
+    ) -> Vec<RenderCommand> {
+        let key = self.static_world_render_command_cache_key(
+            camera_x,
+            camera_y,
+            camera_width,
+            camera_height,
+            scaling,
+        );
+        if self
+            .static_world_render_command_cache
+            .as_ref()
+            .map_or(true, |cache| cache.key != key)
+        {
+            let commands = self.build_static_world_render_commands(key);
+            self.static_world_render_command_cache =
+                Some(MenuStaticWorldRenderCommandCache { key, commands });
+            self.static_world_render_command_cache_rebuilds += 1;
+        }
+        self.static_world_render_command_cache
+            .as_ref()
+            .map(|cache| cache.commands.clone())
+            .unwrap_or_default()
     }
 
     pub fn render_plan(&mut self, input: MenuFrameInput) -> MenuFramePlan {
@@ -1971,6 +2150,13 @@ impl MenuRendererState {
             height: input.graphics_height,
         });
 
+        let static_world_render_commands = self.cached_static_world_render_commands(
+            camera_x,
+            camera_y,
+            camera_width,
+            camera_height,
+            scaling,
+        );
         let ui = self.cached_ui_plan(input);
         let ui_render_commands = self.cached_ui_render_commands(&ui);
 
@@ -1983,6 +2169,7 @@ impl MenuRendererState {
             tile_size: self.config.tile_size,
             world: self.world.clone(),
             commands,
+            static_world_render_commands: Some(static_world_render_commands),
             ui,
             ui_render_commands,
         }
@@ -4147,6 +4334,55 @@ mod tests {
             fully_visible.ui.to_render_commands()
         );
         assert_eq!(fully_visible.ui.submenu_alpha, 1.0);
+    }
+
+    #[test]
+    fn menu_renderer_state_reuses_static_world_render_commands_when_only_time_changes() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+        state.flyer_count = 1;
+        let input = |width, height, delta| MenuFrameInput {
+            graphics_width: width,
+            graphics_height: height,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
+            scl4: 4.0,
+            delta,
+        };
+
+        let first = state.render_plan(input(1280.0, 720.0, 1.0 / 60.0));
+        assert_eq!(state.static_world_render_command_cache_rebuilds, 1);
+        let first_static = first
+            .static_world_render_commands
+            .as_ref()
+            .expect("render_plan should cache static menu world commands");
+        assert!(
+            !first_static.is_empty(),
+            "Java MenuRenderer.cache() equivalent should pre-expand floor/shadow/wall commands"
+        );
+
+        let second = state.render_plan(input(1280.0, 720.0, 1.0 / 60.0));
+        assert_eq!(
+            state.static_world_render_command_cache_rebuilds, 1,
+            "time-only flyer/background animation should not rebuild static floor/shadow/wall commands"
+        );
+        assert_eq!(
+            first.static_world_render_commands,
+            second.static_world_render_commands
+        );
+        assert_ne!(
+            first.commands, second.commands,
+            "dynamic flyer commands should still advance with menu time"
+        );
+
+        let resized = state.render_plan(input(1024.0, 720.0, 1.0 / 60.0));
+        assert_eq!(
+            state.static_world_render_command_cache_rebuilds, 2,
+            "viewport changes should rebuild transformed static menu world commands"
+        );
+        assert_ne!(
+            second.static_world_render_commands,
+            resized.static_world_render_commands
+        );
     }
 
     #[test]

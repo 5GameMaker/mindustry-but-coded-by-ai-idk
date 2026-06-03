@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 819. MenuRenderer 静态世界命令缓存接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.50%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `MenuRenderer.cache()` 一次性生成 `cacheFloor/cacheWall` 与 shadows FBO；
+  - `MenuRenderer.render()` 每帧复用 floor/shadow/wall 静态缓存，只动态绘制 flyers 与 darkness；
+  - Rust 不能每帧反复扫描整张菜单世界 tile 来展开 floor/ore/wall/shadow 命令。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增 `MenuStaticWorldRenderCommandCacheKey` / `MenuStaticWorldRenderCommandCache`；
+    - `MenuRendererState` 持有 static world render command cache 与 rebuild 计数；
+    - `render_plan(...)` 预先构建并缓存当前 viewport/camera transform 下的 floor+overlay、shadow、wall 静态命令；
+    - `MenuFramePlan` 新增 `static_world_render_commands`，`to_render_pass()` / `into_render_pass()` 若存在缓存则直接复用，并只展开动态 `DrawFlyer` / `DrawDarkness`；
+    - 保留 `plan.commands` 中的 Java 语义顺序，测试和上层仍可看到 `DrawCache → Shadow → DrawCache → Flyers → Darkness`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_renderer_state_reuses_static_world_render_commands_when_only_time_changes --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_renderer --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 后续仍可继续把静态世界命令下沉到 OpenGL 持久 mesh/texture 级别，进一步接近 Java `SpriteCache`/FBO；
+  - fast synthetic background 仍是过渡 fallback，最终主菜单应继续向原版 `MenuRenderer` 真实资源表现靠拢。
+
 ## 818. Desktop finalized 菜单 UI 命令缓存接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
