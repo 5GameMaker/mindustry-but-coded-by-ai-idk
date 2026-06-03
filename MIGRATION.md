@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 830. ModsDialog View Content 点击接入内容详情
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.61%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ModsDialog.java` 的 View Content 来源是 `content.getContentMap()` 过滤 `c.minfo.mod == mod && c instanceof UnlockableContent && !c.isHidden()`；
+  - 点击内容格子会调用 `ui.content.show(c)` 打开内容详情，而不是只留下选中态；
+  - Rust 当前 `ContentLoader` 可按 `ContentType/name` 查内容，但还没有 Java `minfo.mod` 等价的 mod 归属索引。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopModsContentEntry` 增加 `content_type` 与 `content_name`，从 `content/<type>/<name>.hjson/json` 推导内容引用；
+    - 新增 content 子目录到 `ContentType` 的映射（blocks/items/liquids/units/status/weathers/sectors/planets）；
+    - View Content 弹窗不再把 raw 文件路径当主展示，改为显示内容名与本地化数据库分类；
+    - `OpenModsContentEntry` 点击后除记录 entry index 外，会设置 `last_database_content_opened = Some((ContentType, name))`，复用现有 ContentInfoDialog 状态；
+    - 回归测试断言 `content/blocks/router.hjson` 被识别为 `ContentType::Block/router`，渲染显示 `Blocks`，点击后打开等价内容详情状态。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_mods_route_opens_and_closes_detail_dialog --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_mods_ --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 还没有真正的 Java `c.minfo.mod` 等价 mod-content 归属索引；当前仍从 mod content 文件路径推导 `ContentType/name`；
+  - 还需要过滤真实 `UnlockableContent.isHidden()`，并让 mod 内容加载后进入 `ContentLoader`/registry；
+  - View Content 网格仍是 Rust 卡片式过渡布局，后续要进一步接近 Java 的 50f icon button + tooltip 网格。
+
 ## 829. ModsDialog 隐藏状态与浏览器安装语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。

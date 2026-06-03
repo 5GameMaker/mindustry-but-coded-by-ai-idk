@@ -4186,7 +4186,9 @@ impl Default for DesktopModsRouteModStateSnapshot {
 struct DesktopModsContentEntry {
     title: String,
     detail: String,
-    icon: &'static str,
+    icon: String,
+    content_type: Option<ContentType>,
+    content_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39879,8 +39881,15 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::OpenModsContentEntry(index) => {
                 if let Some(mod_index) = self.mods_content_dialog_index {
-                    if index < self.mods_content_entries_for_mod(mod_index).len() {
+                    let entries = self.mods_content_entries_for_mod(mod_index);
+                    if let Some(entry) = entries.get(index) {
                         self.last_mods_content_entry_index = Some(index);
+                        if let (Some(content_type), Some(content_name)) =
+                            (entry.content_type, entry.content_name.as_ref())
+                        {
+                            self.last_database_content_opened =
+                                Some((content_type, content_name.clone()));
+                        }
                     }
                 }
             }
@@ -51318,6 +51327,44 @@ impl DesktopLauncher {
         files
     }
 
+    fn mods_content_type_from_directory(directory: &str) -> Option<ContentType> {
+        match directory
+            .trim()
+            .to_ascii_lowercase()
+            .replace(['_', ' '], "-")
+            .as_str()
+        {
+            "block" | "blocks" => Some(ContentType::Block),
+            "item" | "items" => Some(ContentType::Item),
+            "liquid" | "liquids" => Some(ContentType::Liquid),
+            "unit" | "units" => Some(ContentType::Unit),
+            "status" | "statuses" | "status-effect" | "status-effects" => Some(ContentType::Status),
+            "weather" | "weathers" => Some(ContentType::Weather),
+            "sector" | "sectors" => Some(ContentType::Sector),
+            "planet" | "planets" => Some(ContentType::Planet),
+            _ => None,
+        }
+    }
+
+    fn mods_content_type_from_relative_path(relative: &Path) -> Option<ContentType> {
+        let directory = relative.components().next()?.as_os_str().to_str()?;
+        Self::mods_content_type_from_directory(directory)
+    }
+
+    fn mods_content_type_icon(content_type: Option<ContentType>) -> String {
+        match content_type {
+            Some(ContentType::Block) => "database".into(),
+            Some(ContentType::Item) => "box".into(),
+            Some(ContentType::Liquid) => "droplet".into(),
+            Some(ContentType::Unit) => "units".into(),
+            Some(ContentType::Status) => "effect".into(),
+            Some(ContentType::Weather) => "cloud".into(),
+            Some(ContentType::Sector) => "map".into(),
+            Some(ContentType::Planet) => "planet".into(),
+            _ => "fileText".into(),
+        }
+    }
+
     fn mods_route_mod_has_content_at_index(&self, index: usize) -> bool {
         self.mods_route_mod_content_dir_at_index(index)
             .is_some_and(|content_dir| {
@@ -51332,22 +51379,40 @@ impl DesktopLauncher {
         Self::mods_collect_content_file_paths(&content_dir, 64)
             .into_iter()
             .filter_map(|path| {
-                let title = path
+                let content_name = path
                     .file_stem()
                     .and_then(|name| name.to_str())
                     .map(str::trim)
                     .filter(|name| !name.is_empty())?
                     .to_string();
-                let detail = path
+                let relative = path
                     .strip_prefix(&content_dir)
                     .ok()
-                    .and_then(|relative| relative.to_str())
-                    .unwrap_or_else(|| path.to_str().unwrap_or(""))
-                    .replace('\\', "/");
+                    .unwrap_or(path.as_path());
+                let content_type = Self::mods_content_type_from_relative_path(relative);
+                let title = content_type
+                    .map(|content_type| {
+                        self.database_content_display_name(content_type, &content_name)
+                    })
+                    .unwrap_or_else(|| content_name.clone());
+                let detail = content_type
+                    .map(|content_type| {
+                        self.localize_bundle_markup_text(Self::database_category_label(
+                            content_type,
+                        ))
+                    })
+                    .or_else(|| {
+                        relative
+                            .to_str()
+                            .map(|relative| relative.replace('\\', "/"))
+                    })
+                    .unwrap_or_else(|| path.to_string_lossy().replace('\\', "/"));
                 Some(DesktopModsContentEntry {
                     title,
                     detail,
-                    icon: "fileText",
+                    icon: Self::mods_content_type_icon(content_type),
+                    content_type,
+                    content_name: content_type.map(|_| content_name),
                 })
             })
             .collect()
@@ -51570,7 +51635,7 @@ impl DesktopLauncher {
                 layer + 0.0001,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                desktop_ui_icon_glyph_or_label(entry.icon, entry.icon),
+                desktop_ui_icon_glyph_or_label(entry.icon.as_str(), entry.icon.as_str()),
                 RenderPoint::new(card.x + 24.0, card.center().y),
                 [0.78, 0.88, 0.96, 1.0],
                 16.0,
@@ -71150,7 +71215,10 @@ repo: "Beta/Override"
         assert!(content_texts.contains(&"View Content: Alpha Pack"));
         assert!(content_texts
             .iter()
-            .any(|text| text.contains("router") && text.contains("blocks/router.hjson")));
+            .any(|text| text.contains("router") && text.contains("Blocks")));
+        assert!(!content_texts
+            .iter()
+            .any(|text| text.contains("blocks/router.hjson")));
         assert!(!content_texts.contains(&"@none"));
         assert!(!content_texts.contains(&"@mods.contents.none"));
         assert!(!content_texts.contains(&"content entries: 0"));
@@ -71170,6 +71238,11 @@ repo: "Beta/Override"
             super::DesktopMenuRouteShellAction::OpenModsContentEntry(0),
         );
         assert_eq!(launcher.last_mods_content_entry_index, Some(0));
+        assert_eq!(
+            launcher.last_database_content_opened,
+            Some((ContentType::Block, "router".into())),
+            "Java ModsDialog content grid opens ContentInfoDialog for the clicked UnlockableContent"
+        );
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
