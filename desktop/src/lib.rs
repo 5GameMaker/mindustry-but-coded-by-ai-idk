@@ -815,14 +815,38 @@ pub enum DesktopCustomRulesToggle {
     Waves,
     WaveSending,
     WaveTimer,
+    WaitEnemies,
+    RandomWaveAi,
+    WavesSpawnAtCores,
+    AirUseSpawns,
+    AllowEditWorldProcessors,
     InfiniteResources,
+    OnlyDepositCore,
+    AllowCoreUnloaders,
+    DerelictRepair,
+    ReactorExplosions,
     SchematicsAllowed,
+    CoreIncinerates,
+    CleanupDeadTeams,
+    DisableWorldProcessors,
     HideBannedBlocks,
     BlockWhitelist,
+    UnitCapVariable,
+    UnitPayloadsExplode,
+    LogicUnitControl,
+    LogicUnitBuild,
+    LogicUnitDeconstruct,
     UnitWhitelist,
     AttackMode,
     Pvp,
     CoreCapture,
+    PlaceRangeCheck,
+    PolygonCoreProtection,
+    PauseDisabled,
+    DamageExplosions,
+    Fire,
+    Fog,
+    Lighting,
 }
 
 impl DesktopCustomRulesToggle {
@@ -831,14 +855,38 @@ impl DesktopCustomRulesToggle {
             Self::Waves => "@rules.waves",
             Self::WaveSending => "@rules.wavesending",
             Self::WaveTimer => "@rules.wavetimer",
+            Self::WaitEnemies => "@rules.waitForWaveToEnd",
+            Self::RandomWaveAi => "@rules.randomwaveai",
+            Self::WavesSpawnAtCores => "@rules.wavespawnatcores",
+            Self::AirUseSpawns => "@rules.airUseSpawns",
+            Self::AllowEditWorldProcessors => "@rules.alloweditworldprocessors",
             Self::InfiniteResources => "@rules.infiniteresources",
+            Self::OnlyDepositCore => "@rules.onlydepositcore",
+            Self::AllowCoreUnloaders => "@rules.coreunloaders",
+            Self::DerelictRepair => "@rules.derelictrepair",
+            Self::ReactorExplosions => "@rules.reactorexplosions",
             Self::SchematicsAllowed => "@rules.schematic",
+            Self::CoreIncinerates => "@rules.coreincinerates",
+            Self::CleanupDeadTeams => "@rules.cleanupdeadteams",
+            Self::DisableWorldProcessors => "@rules.disableworldprocessors",
             Self::HideBannedBlocks => "@rules.hidebannedblocks",
             Self::BlockWhitelist => "@bannedblocks.whitelist",
+            Self::UnitCapVariable => "@rules.unitcapvariable",
+            Self::UnitPayloadsExplode => "@rules.unitpayloadsexplode",
+            Self::LogicUnitControl => "@rules.logicunitcontrol",
+            Self::LogicUnitBuild => "@rules.logicunitbuild",
+            Self::LogicUnitDeconstruct => "@rules.logicunitdeconstruct",
             Self::UnitWhitelist => "@bannedunits.whitelist",
             Self::AttackMode => "@rules.attack",
             Self::Pvp => "@mode.pvp.name",
             Self::CoreCapture => "@rules.corecapture",
+            Self::PlaceRangeCheck => "@rules.placerangecheck",
+            Self::PolygonCoreProtection => "@rules.polygoncoreprotection",
+            Self::PauseDisabled => "@rules.pauseDisabled",
+            Self::DamageExplosions => "@rules.explosions",
+            Self::Fire => "@rules.fire",
+            Self::Fog => "@rules.fog",
+            Self::Lighting => "@rules.lighting",
         }
     }
 
@@ -847,20 +895,51 @@ impl DesktopCustomRulesToggle {
             Self::Waves => rules.waves,
             Self::WaveSending => rules.wave_sending,
             Self::WaveTimer => rules.wave_timer,
+            Self::WaitEnemies => rules.wait_enemies,
+            Self::RandomWaveAi => rules.random_wave_ai,
+            Self::WavesSpawnAtCores => rules.waves_spawn_at_cores,
+            Self::AirUseSpawns => rules.air_use_spawns,
+            Self::AllowEditWorldProcessors => rules.allow_edit_world_processors,
             Self::InfiniteResources => rules.infinite_resources,
+            Self::OnlyDepositCore => rules.only_deposit_core,
+            Self::AllowCoreUnloaders => rules.allow_core_unloaders,
+            Self::DerelictRepair => rules.derelict_repair,
+            Self::ReactorExplosions => rules.reactor_explosions,
             Self::SchematicsAllowed => rules.schematics_allowed,
+            Self::CoreIncinerates => rules.core_incinerates,
+            Self::CleanupDeadTeams => rules.cleanup_dead_teams,
+            Self::DisableWorldProcessors => rules.disable_world_processors,
             Self::HideBannedBlocks => rules.hide_banned_blocks,
             Self::BlockWhitelist => rules.block_whitelist,
+            Self::UnitCapVariable => rules.unit_cap_variable,
+            Self::UnitPayloadsExplode => rules.unit_payloads_explode,
+            Self::LogicUnitControl => rules.logic_unit_control,
+            Self::LogicUnitBuild => rules.logic_unit_build,
+            Self::LogicUnitDeconstruct => rules.logic_unit_deconstruct,
             Self::UnitWhitelist => rules.unit_whitelist,
             Self::AttackMode => rules.attack_mode,
             Self::Pvp => rules.pvp,
             Self::CoreCapture => rules.core_capture,
+            Self::PlaceRangeCheck => rules.place_range_check,
+            Self::PolygonCoreProtection => rules.polygon_core_protection,
+            Self::PauseDisabled => rules.pause_disabled,
+            Self::DamageExplosions => rules.damage_explosions,
+            Self::Fire => rules.fire,
+            Self::Fog => rules.fog,
+            Self::Lighting => rules.lighting,
         }
     }
 
     fn enabled(self, rules: &Rules) -> bool {
         match self {
-            Self::WaveSending | Self::WaveTimer => rules.waves,
+            Self::WaveSending
+            | Self::WaveTimer
+            | Self::RandomWaveAi
+            | Self::WavesSpawnAtCores
+            | Self::AirUseSpawns => rules.waves,
+            Self::WaitEnemies => rules.waves && rules.wave_timer,
+            Self::CleanupDeadTeams => rules.pvp,
+            Self::LogicUnitBuild | Self::LogicUnitDeconstruct => rules.logic_unit_control,
             _ => true,
         }
     }
@@ -870,14 +949,46 @@ impl DesktopCustomRulesToggle {
             Self::Waves => rules.waves = !rules.waves,
             Self::WaveSending => rules.wave_sending = !rules.wave_sending,
             Self::WaveTimer => rules.wave_timer = !rules.wave_timer,
+            Self::WaitEnemies => rules.wait_enemies = !rules.wait_enemies,
+            Self::RandomWaveAi => rules.random_wave_ai = !rules.random_wave_ai,
+            Self::WavesSpawnAtCores => rules.waves_spawn_at_cores = !rules.waves_spawn_at_cores,
+            Self::AirUseSpawns => rules.air_use_spawns = !rules.air_use_spawns,
+            Self::AllowEditWorldProcessors => {
+                rules.allow_edit_world_processors = !rules.allow_edit_world_processors
+            }
             Self::InfiniteResources => rules.infinite_resources = !rules.infinite_resources,
+            Self::OnlyDepositCore => rules.only_deposit_core = !rules.only_deposit_core,
+            Self::AllowCoreUnloaders => rules.allow_core_unloaders = !rules.allow_core_unloaders,
+            Self::DerelictRepair => rules.derelict_repair = !rules.derelict_repair,
+            Self::ReactorExplosions => rules.reactor_explosions = !rules.reactor_explosions,
             Self::SchematicsAllowed => rules.schematics_allowed = !rules.schematics_allowed,
+            Self::CoreIncinerates => rules.core_incinerates = !rules.core_incinerates,
+            Self::CleanupDeadTeams => rules.cleanup_dead_teams = !rules.cleanup_dead_teams,
+            Self::DisableWorldProcessors => {
+                rules.disable_world_processors = !rules.disable_world_processors
+            }
             Self::HideBannedBlocks => rules.hide_banned_blocks = !rules.hide_banned_blocks,
             Self::BlockWhitelist => rules.block_whitelist = !rules.block_whitelist,
+            Self::UnitCapVariable => rules.unit_cap_variable = !rules.unit_cap_variable,
+            Self::UnitPayloadsExplode => rules.unit_payloads_explode = !rules.unit_payloads_explode,
+            Self::LogicUnitControl => rules.logic_unit_control = !rules.logic_unit_control,
+            Self::LogicUnitBuild => rules.logic_unit_build = !rules.logic_unit_build,
+            Self::LogicUnitDeconstruct => {
+                rules.logic_unit_deconstruct = !rules.logic_unit_deconstruct
+            }
             Self::UnitWhitelist => rules.unit_whitelist = !rules.unit_whitelist,
             Self::AttackMode => rules.attack_mode = !rules.attack_mode,
             Self::Pvp => rules.pvp = !rules.pvp,
             Self::CoreCapture => rules.core_capture = !rules.core_capture,
+            Self::PlaceRangeCheck => rules.place_range_check = !rules.place_range_check,
+            Self::PolygonCoreProtection => {
+                rules.polygon_core_protection = !rules.polygon_core_protection
+            }
+            Self::PauseDisabled => rules.pause_disabled = !rules.pause_disabled,
+            Self::DamageExplosions => rules.damage_explosions = !rules.damage_explosions,
+            Self::Fire => rules.fire = !rules.fire,
+            Self::Fog => rules.fog = !rules.fog,
+            Self::Lighting => rules.lighting = !rules.lighting,
         }
     }
 }
@@ -1403,6 +1514,61 @@ impl DesktopBannedContentKind {
     }
 }
 
+const PAUSE_CUSTOM_RULE_WAVE_TOGGLES: &[DesktopCustomRulesToggle] = &[
+    DesktopCustomRulesToggle::Waves,
+    DesktopCustomRulesToggle::WaveSending,
+    DesktopCustomRulesToggle::WaveTimer,
+    DesktopCustomRulesToggle::WaitEnemies,
+    DesktopCustomRulesToggle::RandomWaveAi,
+    DesktopCustomRulesToggle::WavesSpawnAtCores,
+    DesktopCustomRulesToggle::AirUseSpawns,
+];
+const PAUSE_CUSTOM_RULE_RESOURCE_TOGGLES: &[DesktopCustomRulesToggle] = &[
+    DesktopCustomRulesToggle::AllowEditWorldProcessors,
+    DesktopCustomRulesToggle::InfiniteResources,
+    DesktopCustomRulesToggle::OnlyDepositCore,
+    DesktopCustomRulesToggle::AllowCoreUnloaders,
+    DesktopCustomRulesToggle::DerelictRepair,
+    DesktopCustomRulesToggle::ReactorExplosions,
+    DesktopCustomRulesToggle::SchematicsAllowed,
+    DesktopCustomRulesToggle::CoreIncinerates,
+    DesktopCustomRulesToggle::CleanupDeadTeams,
+    DesktopCustomRulesToggle::DisableWorldProcessors,
+];
+const PAUSE_CUSTOM_RULE_UNIT_TOGGLES: &[DesktopCustomRulesToggle] = &[
+    DesktopCustomRulesToggle::UnitCapVariable,
+    DesktopCustomRulesToggle::UnitPayloadsExplode,
+    DesktopCustomRulesToggle::LogicUnitControl,
+    DesktopCustomRulesToggle::LogicUnitBuild,
+    DesktopCustomRulesToggle::LogicUnitDeconstruct,
+];
+const PAUSE_CUSTOM_RULE_ENEMY_TOGGLES: &[DesktopCustomRulesToggle] = &[
+    DesktopCustomRulesToggle::AttackMode,
+    DesktopCustomRulesToggle::Pvp,
+    DesktopCustomRulesToggle::CoreCapture,
+    DesktopCustomRulesToggle::PlaceRangeCheck,
+    DesktopCustomRulesToggle::PolygonCoreProtection,
+];
+const PAUSE_CUSTOM_RULE_ENVIRONMENT_TOGGLES: &[DesktopCustomRulesToggle] = &[
+    DesktopCustomRulesToggle::PauseDisabled,
+    DesktopCustomRulesToggle::DamageExplosions,
+    DesktopCustomRulesToggle::Fire,
+    DesktopCustomRulesToggle::Fog,
+    DesktopCustomRulesToggle::Lighting,
+];
+const PAUSE_CUSTOM_RULE_TOGGLE_GROUPS: &[(&str, &[DesktopCustomRulesToggle])] = &[
+    ("@rules.title.waves", PAUSE_CUSTOM_RULE_WAVE_TOGGLES),
+    (
+        "@rules.title.resourcesbuilding",
+        PAUSE_CUSTOM_RULE_RESOURCE_TOGGLES,
+    ),
+    ("@rules.title.unit", PAUSE_CUSTOM_RULE_UNIT_TOGGLES),
+    ("@rules.title.enemy", PAUSE_CUSTOM_RULE_ENEMY_TOGGLES),
+    (
+        "@rules.title.environment",
+        PAUSE_CUSTOM_RULE_ENVIRONMENT_TOGGLES,
+    ),
+];
 const MAP_PLAY_CUSTOM_RULE_WAVE_TOGGLES: &[DesktopCustomRulesToggle] = &[
     DesktopCustomRulesToggle::Waves,
     DesktopCustomRulesToggle::WaveSending,
@@ -31226,7 +31392,7 @@ impl DesktopLauncher {
     ) -> Vec<(DesktopCustomRulesToggle, RenderRect)> {
         let mut y = content.y + content.height - 20.0;
         let mut rects = Vec::new();
-        for (_, toggles) in MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS {
+        for (_, toggles) in PAUSE_CUSTOM_RULE_TOGGLE_GROUPS {
             let visible_toggles = toggles
                 .iter()
                 .copied()
@@ -54399,7 +54565,7 @@ impl DesktopLauncher {
 
         let mut y = content.y + content.height - 20.0;
         let mut row_index = 0usize;
-        'categories: for (title_key, toggles) in MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS {
+        'categories: for (title_key, toggles) in PAUSE_CUSTOM_RULE_TOGGLE_GROUPS {
             let visible_toggles = toggles
                 .iter()
                 .copied()
@@ -75704,6 +75870,81 @@ repo: "Beta/Override"
             }],
         );
         assert!(launcher.pause_custom_rules_search.is_empty());
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_custom_rules_extended_checks_edit_rules() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.game_state.rules.allow_edit_rules = true;
+        launcher.game_state.rules.logic_unit_control = false;
+        launcher.game_state.rules.logic_unit_build = false;
+        launcher.game_state.rules.reactor_explosions = false;
+        launcher.runtime.state.rules = launcher.game_state.rules.copy();
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CustomRules);
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::TogglePauseCustomRule(
+                super::DesktopCustomRulesToggle::LogicUnitBuild,
+            ),
+        );
+        assert!(
+            !launcher
+                .pause_custom_rules_edit
+                .as_ref()
+                .unwrap()
+                .logic_unit_build,
+            "Java CustomRulesDialog disables logicunitbuild until logicunitcontrol is enabled"
+        );
+
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::TogglePauseCustomRule(
+                super::DesktopCustomRulesToggle::LogicUnitControl,
+            ),
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::TogglePauseCustomRule(
+                super::DesktopCustomRulesToggle::LogicUnitBuild,
+            ),
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::TogglePauseCustomRule(
+                super::DesktopCustomRulesToggle::ReactorExplosions,
+            ),
+        );
+        let edit = launcher.pause_custom_rules_edit.as_ref().unwrap();
+        assert!(edit.logic_unit_control);
+        assert!(edit.logic_unit_build);
+        assert!(edit.reactor_explosions);
+
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::FocusPauseCustomRulesSearch,
+        );
+        let reactor = launcher.localize_bundle_markup_text("@rules.reactorexplosions");
+        launcher.pause_custom_rules_search = reactor.clone();
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.iter().any(|text| text.contains(reactor.as_str())));
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CloseModal);
+        assert!(launcher.game_state.rules.logic_unit_control);
+        assert!(launcher.game_state.rules.logic_unit_build);
+        assert!(launcher.game_state.rules.reactor_explosions);
+        assert!(launcher.runtime.state.rules.logic_unit_control);
+        assert!(launcher.runtime.state.rules.logic_unit_build);
+        assert!(launcher.runtime.state.rules.reactor_explosions);
     }
 
     #[test]
