@@ -259,6 +259,7 @@ const MODS_ROUTE_MOD_CARD_WIDTH_MAX: f32 = 520.0;
 const MODS_ROUTE_MOD_CARD_HEIGHT: f32 = 110.0;
 const MODS_ROUTE_MOD_CARD_GAP: f32 = 8.0;
 const MODS_ROUTE_MOD_CARD_ACTION_SIZE: f32 = 50.0;
+#[cfg(test)]
 const MODS_ROUTE_MAIN_ACTION_COUNT: usize = 4;
 const MODS_BROWSER_MIN_JAVA_MOD_GAME_VERSION: f64 = 154.0;
 const PAUSE_OVERLAY_PANEL_WIDTH: f32 = 304.0;
@@ -37193,14 +37194,19 @@ impl DesktopLauncher {
             if Self::mods_route_search_rect_for_panel(panel).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::FocusModsSearch);
             }
-            if Self::mods_route_action_button_rect_for_panel(panel, 1).contains_point(point) {
-                return Some(DesktopMenuRouteShellAction::OpenModsDirectory);
-            }
-            if Self::mods_route_action_button_rect_for_panel(panel, 2).contains_point(point) {
-                return Some(DesktopMenuRouteShellAction::OpenModsImport);
-            }
-            if Self::mods_route_action_button_rect_for_panel(panel, 3).contains_point(point) {
-                return Some(DesktopMenuRouteShellAction::OpenModsBrowser);
+            let main_button_specs = self.mods_route_main_button_specs();
+            for (index, (action, _, _)) in main_button_specs.iter().enumerate() {
+                if let Some(action) = action {
+                    if Self::mods_route_action_button_rect_for_panel_with_count(
+                        panel,
+                        index,
+                        main_button_specs.len(),
+                    )
+                    .contains_point(point)
+                    {
+                        return Some(*action);
+                    }
+                }
             }
             if self.mods_selected_mod_index.is_none() {
                 if let Some(action) = self.mods_route_mod_card_action_at_point(panel, point) {
@@ -49696,9 +49702,22 @@ impl DesktopLauncher {
             })
     }
 
+    #[cfg(test)]
     fn mods_route_action_button_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
+        Self::mods_route_action_button_rect_for_panel_with_count(
+            panel,
+            index,
+            MODS_ROUTE_MAIN_ACTION_COUNT,
+        )
+    }
+
+    fn mods_route_action_button_rect_for_panel_with_count(
+        panel: RenderRect,
+        index: usize,
+        count: usize,
+    ) -> RenderRect {
         let gap = 8.0;
-        let count = MODS_ROUTE_MAIN_ACTION_COUNT as f32;
+        let count = count.max(1) as f32;
         let width = ((panel.width - 56.0 - gap * (count - 1.0)) / count).clamp(76.0, 180.0);
         let total = width * count + gap * (count - 1.0);
         RenderRect::new(
@@ -49707,6 +49726,34 @@ impl DesktopLauncher {
             width,
             44.0,
         )
+    }
+
+    fn mods_route_main_button_specs(
+        &self,
+    ) -> Vec<(
+        Option<DesktopMenuRouteShellAction>,
+        &'static str,
+        &'static str,
+    )> {
+        let mut specs = vec![(None, "@mods.guide", "link")];
+        if !self.menu_renderer_state.config.mobile {
+            specs.push((
+                Some(DesktopMenuRouteShellAction::OpenModsDirectory),
+                "@mods.openfolder",
+                "link",
+            ));
+        }
+        specs.push((
+            Some(DesktopMenuRouteShellAction::OpenModsImport),
+            "@mod.import",
+            "add",
+        ));
+        specs.push((
+            Some(DesktopMenuRouteShellAction::OpenModsBrowser),
+            "@mods.browser",
+            "menu",
+        ));
+        specs
     }
 
     fn mods_route_mod_root_at_index(&self, index: usize) -> Option<&str> {
@@ -50375,7 +50422,9 @@ impl DesktopLauncher {
             "@back",
             "left",
         )];
-        if self.mods_route_mod_root_at_index(index).is_some() {
+        if !self.menu_renderer_state.config.mobile
+            && self.mods_route_mod_root_at_index(index).is_some()
+        {
             specs.push((
                 DesktopMenuRouteShellAction::OpenModsFolder(index),
                 "@mods.openfolder",
@@ -51485,18 +51534,15 @@ impl DesktopLauncher {
             ));
         }
 
-        for (index, (label, icon)) in [
-            ("@mods.guide", "link"),
-            ("@mods.openfolder", "link"),
-            ("@mod.import", "add"),
-            ("@mods.browser", "menu"),
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        let main_button_specs = self.mods_route_main_button_specs();
+        for (index, (_, label, icon)) in main_button_specs.iter().enumerate() {
             self.push_settings_text_button(
                 pass,
-                Self::mods_route_action_button_rect_for_panel(panel, index),
+                Self::mods_route_action_button_rect_for_panel_with_count(
+                    panel,
+                    index,
+                    main_button_specs.len(),
+                ),
                 self.localize_bundle_markup_text(label),
                 Some(icon),
                 Layer::END_PIXELED + 0.026 + index as f32 * 0.001,
@@ -68423,6 +68469,117 @@ repo: "Beta/Override"
         );
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseRoute);
         assert_eq!(launcher.active_menu_route, None);
+    }
+
+    #[test]
+    fn desktop_launcher_mods_route_hides_open_folder_on_mobile_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
+        launcher.menu_renderer_state.config.mobile = true;
+        launcher.mods_directory_arg = Some("C:/mods directory".into());
+        launcher.last_mods_directory_mod_names = vec!["alpha".into()];
+        launcher.last_mods_directory_mod_roots = vec!["C:/mods/alpha pack".into()];
+        launcher.last_mods_directory_mod_metas = vec![ModMetadata::from_source_text(
+            "alpha",
+            Some("mod.hjson"),
+            r#"
+name: alpha
+displayName: "Alpha Pack"
+author: "Alpha Author"
+version: "1.0.0"
+description: "Alpha fixture mod."
+"#,
+        )];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mobile mods route should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"Import Mod"));
+        assert!(texts.contains(&"Mod Browser"));
+        assert!(
+            !texts.contains(&"Open Folder"),
+            "Java ModsDialog only adds @mods.openfolder when !mobile"
+        );
+
+        let main_specs = launcher.mods_route_main_button_specs();
+        assert!(!main_specs.iter().any(|(action, label, _)| {
+            matches!(
+                *action,
+                Some(super::DesktopMenuRouteShellAction::OpenModsDirectory)
+            ) || *label == "@mods.openfolder"
+        }));
+        let import_index = main_specs
+            .iter()
+            .position(|(action, _, _)| {
+                matches!(
+                    *action,
+                    Some(super::DesktopMenuRouteShellAction::OpenModsImport)
+                )
+            })
+            .expect("mobile mods route should keep import button");
+        let import = DesktopLauncher::mods_route_action_button_rect_for_panel_with_count(
+            panel,
+            import_index,
+            main_specs.len(),
+        )
+        .center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, import.x, import.y),
+            Some(super::DesktopMenuRouteShellAction::OpenModsImport)
+        );
+
+        let card = DesktopLauncher::mods_route_mod_card_rect_for_panel(panel, 0).center();
+        launcher.dispatch_menu_route_shell_action(
+            launcher
+                .active_menu_route_shell_action_at_surface_point(surface, card.x, card.y)
+                .expect("mobile mod card should open detail"),
+        );
+        assert_eq!(launcher.mods_selected_mod_index, Some(0));
+        let detail_specs = launcher.mods_route_detail_button_specs(0);
+        assert!(!detail_specs.iter().any(|(action, label, _)| {
+            matches!(
+                *action,
+                super::DesktopMenuRouteShellAction::OpenModsFolder(0)
+            ) || *label == "@mods.openfolder"
+        }));
+        let detail_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let detail_texts = detail_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mobile mods detail should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(detail_texts.contains(&"Mod: Alpha Pack"));
+        assert!(
+            !detail_texts.contains(&"Open Folder"),
+            "Java ModsDialog.showMod also hides @mods.openfolder when mobile"
+        );
     }
 
     #[test]

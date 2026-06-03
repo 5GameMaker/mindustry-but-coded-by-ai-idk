@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 820. ModsDialog mobile 隐藏 Open Folder
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.51%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ModsDialog.java` 主对话框按钮：`if(!mobile)` 才添加 `@mods.openfolder`；
+  - `ModsDialog.showMod(...)` 详情页按钮同样 `if(!mobile)` 才显示 `@mods.openfolder`；
+  - mobile 下不能留下空按钮槽位，也不能保留隐藏按钮的点击热区。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `mods_route_main_button_specs(...)`，按当前 mobile/desktop 生成主按钮列表；
+    - 主 Mods 页渲染与 hit-test 改为遍历实际可见 specs，mobile 下只保留 Guide / Import / Browser；
+    - `mods_route_detail_button_specs(...)` 在 mobile 下不再加入 `OpenModsFolder(index)`；
+    - 原桌面固定 4 按钮 rect helper 改为 test-only，生产路径统一走动态 count 布局；
+    - 新增 `desktop_launcher_mods_route_hides_open_folder_on_mobile_like_java`，覆盖主页面文本、主按钮命中、详情页按钮规格与详情页文本。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_hides_open_folder_on_mobile_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Mods browser 真实远端 listing/release fetch 仍是后续较大闭环；
+  - Settings/Mods/Editor 其余 mobile/desktop 差异仍需持续对照 Java 补齐。
+
 ## 819. MenuRenderer 静态世界命令缓存接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
