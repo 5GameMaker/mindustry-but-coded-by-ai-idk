@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 811. GameOverDialog playtest 返回编辑器接线
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.42%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `GameOverDialog.java` 非 pvp/attack 分支的 `@menu` 按钮执行：`hide(); if(!ui.paused.checkPlaytest()) logic.reset();`；
+  - `PausedDialog.checkPlaytest()` 在 `state.playtestingMap != null` 时 `logic.reset()` 并 `ui.editor.resumeAfterPlaytest(testing)`；
+  - Rust 已有 `check_playtest_and_resume_editor()`，本轮把 game-over menu UI 接到它。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopPausedOverlayAction` 新增 `GameOverMenu`；
+    - 新增 `game_over_dialog_rect_for_viewport(...)` 与 `game_over_menu_button_rect(...)`；
+    - `pause_overlay_action_at_surface_point(...)` 在 `game_state.game_over` 且无 active route/modal 时命中 `GameOverMenu`；
+    - `apply_menu_input_events(...)` 将 `game_over` 纳入 world overlay 可点击状态；
+    - `pause_overlay_render_pass(...)` 在 `game_state.game_over` 时渲染最小 `GameOverDialog` + `@menu` 按钮；
+    - 新增 `execute_game_over_menu_button()`：优先 `check_playtest_and_resume_editor()`，非 playtest 才回主菜单并清理 game_over；
+    - 新增 `desktop_launcher_game_over_menu_returns_to_editor_during_playtest`，覆盖 GameOverDialog 渲染、按钮命中、playtest map 恢复 editor、playtesting_map 清理。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_game_over_menu_returns_to_editor_during_playtest --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - GameOverDialog 的 pvp/attack victory/defeat stat UI、sector capture/lose 分支、difficulty guide、完整 Java 动画与统计表尚未迁移；
+  - 非 playtest 分支目前仅做最小回主菜单/清理 game_over，真实 `logic.reset()` 等价链路仍需继续细化。
+
 ## 810. Editor workshop publish/view 前端入口接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

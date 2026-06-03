@@ -3720,6 +3720,7 @@ pub enum DesktopMenuRouteShellAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DesktopPausedOverlayAction {
+    GameOverMenu,
     Back,
     Settings,
     Objective,
@@ -30142,6 +30143,21 @@ impl DesktopLauncher {
         )
     }
 
+    fn game_over_dialog_rect_for_viewport(viewport: RenderViewport) -> RenderRect {
+        let width = (viewport.width * 0.46).clamp(320.0, 520.0);
+        let height = 188.0;
+        RenderRect::new(
+            viewport.x + viewport.width * 0.5 - width * 0.5,
+            viewport.y + viewport.height * 0.5 - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn game_over_menu_button_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.center().x - 70.0, dialog.y + 28.0, 140.0, 60.0)
+    }
+
     fn pause_overlay_net_active(&self) -> bool {
         self.net_client
             .state()
@@ -30297,11 +30313,21 @@ impl DesktopLauncher {
             return None;
         }
         let viewport = self.default_render_viewport_for_surface(surface_size);
+        let point = RenderPoint::new(x, y);
+        if self.game_state.game_over
+            && self.active_menu_route.is_none()
+            && self.pause_overlay_modal.is_none()
+        {
+            let dialog = Self::game_over_dialog_rect_for_viewport(viewport);
+            if Self::game_over_menu_button_rect(dialog).contains_point(point) {
+                return Some(DesktopPausedOverlayAction::GameOverMenu);
+            }
+            return None;
+        }
         let button_specs = self.pause_overlay_button_specs();
         let button_count = button_specs.len();
         let panel =
             Self::pause_overlay_panel_for_viewport_with_button_count(viewport, button_count);
-        let point = RenderPoint::new(x, y);
         if self.pause_overlay_modal.is_some() {
             let dialog = Self::pause_overlay_modal_rect_for_panel(panel);
             if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::QuitConfirm)
@@ -39357,6 +39383,22 @@ impl DesktopLauncher {
         self.last_menu_guard_message = None;
     }
 
+    fn execute_game_over_menu_button(&mut self) {
+        if self.check_playtest_and_resume_editor() {
+            return;
+        }
+        self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CloseRoute);
+        self.game_state.set(GameStateState::Menu);
+        self.runtime.state.set(GameStateState::Menu);
+        self.game_state.game_over = false;
+        self.runtime.state.game_over = false;
+        self.menu_renderer_state.reset_desktop_root();
+        self.menu_mobile_terminal_open = false;
+        self.pause_overlay_modal = None;
+        self.last_menu_route_shell_action = None;
+        self.last_menu_guard_message = None;
+    }
+
     fn playtesting_map_for_resume(&self) -> Option<MapDescriptor> {
         self.game_state
             .playtesting_map
@@ -39379,9 +39421,9 @@ impl DesktopLauncher {
 
     fn dispatch_pause_overlay_action(&mut self, action: DesktopPausedOverlayAction) {
         let action_enabled = match action {
-            DesktopPausedOverlayAction::CloseModal | DesktopPausedOverlayAction::ConfirmQuit => {
-                true
-            }
+            DesktopPausedOverlayAction::GameOverMenu
+            | DesktopPausedOverlayAction::CloseModal
+            | DesktopPausedOverlayAction::ConfirmQuit => true,
             _ => self
                 .pause_overlay_button_specs()
                 .into_iter()
@@ -39393,6 +39435,9 @@ impl DesktopLauncher {
             return;
         }
         match action {
+            DesktopPausedOverlayAction::GameOverMenu => {
+                self.execute_game_over_menu_button();
+            }
             DesktopPausedOverlayAction::CloseModal => {
                 self.close_pause_overlay_modal();
             }
@@ -47673,7 +47718,9 @@ impl DesktopLauncher {
         input_events: &[DesktopInputTickEvent],
     ) -> bool {
         let world_overlay_visible = self.has_renderable_world_for_default_frame()
-            && (self.game_state.is_paused() || self.active_menu_route.is_some());
+            && (self.game_state.is_paused()
+                || self.game_state.game_over
+                || self.active_menu_route.is_some());
         if self.has_renderable_world_for_default_frame() && !world_overlay_visible {
             return false;
         }
@@ -52349,7 +52396,9 @@ impl DesktopLauncher {
 
     fn pause_overlay_render_pass(&self, viewport: RenderViewport) -> Option<RenderPass> {
         if !self.has_renderable_world_for_default_frame()
-            || (!self.game_state.is_paused() && self.active_menu_route.is_none())
+            || (!self.game_state.is_paused()
+                && !self.game_state.game_over
+                && self.active_menu_route.is_none())
         {
             return None;
         }
@@ -52366,6 +52415,43 @@ impl DesktopLauncher {
 
         if self.active_menu_route.is_some() {
             self.push_active_menu_route_shell(&mut pass, viewport);
+            return Some(pass);
+        }
+
+        if self.game_state.game_over {
+            let dialog = Self::game_over_dialog_rect_for_viewport(viewport);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("pane"),
+                dialog,
+                [1.0, 1.0, 1.0, 0.97],
+                0.0,
+                Layer::END_PIXELED + 0.141,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                dialog,
+                [0.52, 0.68, 0.82, 0.95],
+                2.0,
+                Layer::END_PIXELED + 0.142,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                "GameOverDialog",
+                RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 34.0),
+                [0.94, 0.98, 1.0, 1.0],
+                15.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.143,
+            ));
+            self.push_settings_text_button(
+                &mut pass,
+                Self::game_over_menu_button_rect(dialog),
+                self.localize_bundle_markup_text("@menu"),
+                Some("left"),
+                Layer::END_PIXELED + 0.145,
+            );
             return Some(pass);
         }
 
@@ -72488,6 +72574,81 @@ repo: "Beta/Override"
         assert_eq!(
             launcher.last_menu_info_message.as_deref(),
             Some("beginEditMap: Playtest Resume")
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_game_over_menu_returns_to_editor_during_playtest() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), "Game Over Resume".to_string());
+        tags.insert("author".to_string(), "Mapper".to_string());
+        let mut map = MapDescriptor::new(
+            "maps/custom/game-over-resume.msav",
+            160,
+            160,
+            tags,
+            true,
+            1,
+            158,
+        );
+        map.spawns = 3;
+        launcher.map_list_cards = vec![map.clone()];
+        launcher.game_state.world.resize(16, 16);
+        launcher.runtime.state.world.resize(16, 16);
+        launcher.game_state.map = map.clone();
+        launcher.runtime.state.map = map.clone();
+        launcher.game_state.playtesting_map = Some(map.clone());
+        launcher.runtime.state.playtesting_map = Some(map.clone());
+        launcher.map_play_playtesting = true;
+        launcher.game_state.set(GameStateState::Playing);
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.game_state.game_over = true;
+        launcher.runtime.state.game_over = true;
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let pass = launcher
+            .pause_overlay_render_pass(viewport)
+            .expect("game over dialog should render");
+        let texts = pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"GameOverDialog"));
+        assert!(texts.iter().any(|text| {
+            let lower = text.to_ascii_lowercase();
+            lower.contains("menu") || text.contains('菜')
+        }));
+
+        let dialog = DesktopLauncher::game_over_dialog_rect_for_viewport(viewport);
+        let menu = DesktopLauncher::game_over_menu_button_rect(dialog).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, menu.x, menu.y),
+            Some(super::DesktopPausedOverlayAction::GameOverMenu)
+        );
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::GameOverMenu);
+
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Editor)
+        );
+        assert!(launcher.game_state.is_menu());
+        assert!(launcher.game_state.is_editor());
+        assert!(launcher.runtime.state.is_menu());
+        assert!(launcher.runtime.state.is_editor());
+        assert_eq!(launcher.game_state.map.plain_name(), "Game Over Resume");
+        assert_eq!(launcher.runtime.state.map.plain_name(), "Game Over Resume");
+        assert!(launcher.game_state.playtesting_map.is_none());
+        assert!(launcher.runtime.state.playtesting_map.is_none());
+        assert!(!launcher.map_play_playtesting);
+        assert_eq!(
+            launcher.last_menu_info_message.as_deref(),
+            Some("beginEditMap: Game Over Resume")
         );
     }
 
