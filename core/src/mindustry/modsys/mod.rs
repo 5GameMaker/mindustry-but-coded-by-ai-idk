@@ -6,8 +6,8 @@
 
 use crate::mindustry::core::{AssetFile, FileTree};
 use crate::mindustry::graphics::{
-    png_dimensions_from_path, MultiPackerPlan, PageType, RegionRequest, TextureAtlasRegionSource,
-    TextureScale,
+    png_dimensions_from_bytes, png_dimensions_from_path, MultiPackerPlan, PageType, RegionRequest,
+    TextureAtlasRegionSource, TextureScale,
 };
 use flate2::read::DeflateDecoder;
 use std::{
@@ -345,21 +345,24 @@ fn mod_file_tree_from_archive_entries(entries: &[ModArchiveEntry]) -> FileTree {
     tree
 }
 
-fn scan_mod_sprite_paths_from_archive_entries(entries: &[ModArchiveEntry]) -> Vec<String> {
+fn scan_mod_sprite_paths_from_archive_entries(
+    entries: &[ModArchiveEntry],
+) -> Vec<(String, Option<(u32, u32)>)> {
     let prefix = mod_archive_root_prefix(entries);
     let mut paths = entries
         .iter()
         .filter(|entry| !entry.directory)
-        .filter_map(|entry| mod_archive_relative_name(entry, &prefix))
-        .map(|relative| normalize_mod_resource_path(relative.to_string()))
-        .filter(|relative| {
-            relative.to_ascii_lowercase().ends_with(".png")
-                && relative
+        .filter_map(|entry| {
+            let relative = mod_archive_relative_name(entry, &prefix)?;
+            let path = normalize_mod_resource_path(relative.to_string());
+            let is_sprite = path.to_ascii_lowercase().ends_with(".png")
+                && path
                     .split('/')
-                    .any(|segment| matches!(segment, "sprites" | "sprites-override"))
+                    .any(|segment| matches!(segment, "sprites" | "sprites-override"));
+            is_sprite.then(|| (path, png_dimensions_from_bytes(&entry.data)))
         })
         .collect::<Vec<_>>();
-    paths.sort();
+    paths.sort_by(|left, right| left.0.cmp(&right.0));
     paths
 }
 
@@ -433,6 +436,7 @@ pub struct SpritePackRequest {
     pub page_hint: String,
     pub r#override: bool,
     pub texture_scale: TextureScale,
+    pub dimensions: Option<(u32, u32)>,
 }
 
 impl SpritePackRequest {
@@ -443,6 +447,7 @@ impl SpritePackRequest {
             page_hint: String::new(),
             r#override: false,
             texture_scale: TextureScale::default(),
+            dimensions: None,
         }
     }
 
@@ -458,6 +463,11 @@ impl SpritePackRequest {
 
     pub fn with_texture_scale(mut self, texture_scale: f32) -> Self {
         self.texture_scale = TextureScale::new(texture_scale);
+        self
+    }
+
+    pub fn with_dimensions(mut self, dimensions: Option<(u32, u32)>) -> Self {
+        self.dimensions = dimensions;
         self
     }
 
@@ -478,7 +488,10 @@ impl SpritePackRequest {
     /// 当没有真实图片尺寸时，`width` / `height` 可以作为占位 metadata，
     /// 默认值为 `1x1`。
     pub fn to_region_request(&self) -> RegionRequest<TextureAtlasRegionSource<bool>> {
-        let (width, height) = png_dimensions_from_path(&self.source_path).unwrap_or((1, 1));
+        let (width, height) = self
+            .dimensions
+            .or_else(|| png_dimensions_from_path(&self.source_path))
+            .unwrap_or((1, 1));
         self.to_region_request_with_size(width, height)
     }
 
@@ -596,6 +609,7 @@ pub struct ModSpritePackSource {
     pub mod_name: String,
     pub source_path: String,
     pub prefix_with_mod_name: bool,
+    pub dimensions: Option<(u32, u32)>,
 }
 
 impl ModSpritePackSource {
@@ -608,6 +622,7 @@ impl ModSpritePackSource {
             mod_name: mod_name.into(),
             source_path: source_path.into(),
             prefix_with_mod_name,
+            dimensions: None,
         }
     }
 
@@ -623,6 +638,11 @@ impl ModSpritePackSource {
         mod_sprite_atlas_name(&self.mod_name, &self.source_path, self.prefix_with_mod_name)
     }
 
+    pub fn with_dimensions(mut self, dimensions: Option<(u32, u32)>) -> Self {
+        self.dimensions = dimensions;
+        self
+    }
+
     pub fn page_hint(&self) -> &'static str {
         if self.prefix_with_mod_name {
             "sprites"
@@ -636,7 +656,8 @@ impl ModSpritePackSource {
         Some(
             SpritePackRequest::new(self.source_path.clone(), atlas_name)
                 .with_page_hint(self.page_hint())
-                .with_override(!self.prefix_with_mod_name),
+                .with_override(!self.prefix_with_mod_name)
+                .with_dimensions(self.dimensions),
         )
     }
 
@@ -662,6 +683,15 @@ impl ModSpritePackSource {
         }
 
         saw_sprites.then(|| Self::sprite(mod_name, source_path))
+    }
+
+    pub fn from_scanned_path_with_dimensions(
+        mod_name: impl Into<String>,
+        source_path: impl Into<String>,
+        dimensions: Option<(u32, u32)>,
+    ) -> Option<Self> {
+        Self::from_scanned_path(mod_name, source_path)
+            .map(|source| source.with_dimensions(dimensions))
     }
 }
 
@@ -719,14 +749,29 @@ impl ModResourcePlan {
         headless: bool,
         paths: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
+        Self::from_file_paths_with_dimensions(
+            mod_name,
+            headless,
+            paths.into_iter().map(|path| (path.into(), None)),
+        )
+    }
+
+    pub fn from_file_paths_with_dimensions(
+        mod_name: impl Into<String>,
+        headless: bool,
+        paths: impl IntoIterator<Item = (String, Option<(u32, u32)>)>,
+    ) -> Self {
         let mod_name = mod_name.into();
         let mut regular_sources = Vec::new();
         let mut override_sources = Vec::new();
 
-        for source in paths
-            .into_iter()
-            .filter_map(|path| ModSpritePackSource::from_scanned_path(mod_name.clone(), path))
-        {
+        for source in paths.into_iter().filter_map(|(path, dimensions)| {
+            ModSpritePackSource::from_scanned_path_with_dimensions(
+                mod_name.clone(),
+                path,
+                dimensions,
+            )
+        }) {
             if source.prefix_with_mod_name {
                 regular_sources.push(source);
             } else {
@@ -809,8 +854,11 @@ impl ModResourceDirectoryPlan {
         let meta = mod_metadata_from_archive_entries(&mod_name, &entries)?;
         let file_tree = mod_file_tree_from_archive_entries(&entries);
         let sprite_paths = scan_mod_sprite_paths_from_archive_entries(&entries);
-        let resource_plan =
-            ModResourcePlan::from_file_paths(mod_name.clone(), headless, sprite_paths);
+        let resource_plan = ModResourcePlan::from_file_paths_with_dimensions(
+            mod_name.clone(),
+            headless,
+            sprite_paths,
+        );
 
         Ok(Self {
             mod_name,
@@ -1505,6 +1553,7 @@ mod tests {
                     page_hint: "sprites".into(),
                     r#override: false,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
                 SpritePackRequest {
                     source_path: "sprites-override/ui/icon.png".into(),
@@ -1512,6 +1561,7 @@ mod tests {
                     page_hint: "sprites-override".into(),
                     r#override: true,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
             ]
         );
@@ -1560,6 +1610,7 @@ mod tests {
                     page_hint: "sprites".into(),
                     r#override: false,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
                 SpritePackRequest {
                     source_path: "mods/example/sprites/blocks/environment/ore.png".into(),
@@ -1567,6 +1618,7 @@ mod tests {
                     page_hint: "sprites".into(),
                     r#override: false,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
                 SpritePackRequest {
                     source_path: "mods/example/sprites-override/ui/icon.png".into(),
@@ -1574,6 +1626,7 @@ mod tests {
                     page_hint: "sprites-override".into(),
                     r#override: true,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
             ]
         );
@@ -1620,6 +1673,7 @@ mod tests {
                     page_hint: "sprites".into(),
                     r#override: false,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
                 SpritePackRequest {
                     source_path: "mods/example/sprites-override/ui/icon.png".into(),
@@ -1627,6 +1681,7 @@ mod tests {
                     page_hint: "sprites-override".into(),
                     r#override: true,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
             ]
         );
@@ -1662,6 +1717,7 @@ mod tests {
                     page_hint: "sprites".into(),
                     r#override: false,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
                 SpritePackRequest {
                     source_path: "mods/example/sprites/router.png".into(),
@@ -1669,6 +1725,7 @@ mod tests {
                     page_hint: "sprites".into(),
                     r#override: false,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
                 SpritePackRequest {
                     source_path: "mods/example/sprites/ui/badge.png".into(),
@@ -1676,6 +1733,7 @@ mod tests {
                     page_hint: "sprites".into(),
                     r#override: false,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
                 SpritePackRequest {
                     source_path: "mods/example/sprites-override/router.png".into(),
@@ -1683,6 +1741,7 @@ mod tests {
                     page_hint: "sprites-override".into(),
                     r#override: true,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
                 SpritePackRequest {
                     source_path: "mods/example/sprites-override/rubble/crack.png".into(),
@@ -1690,6 +1749,7 @@ mod tests {
                     page_hint: "sprites-override".into(),
                     r#override: true,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
             ]
         );
@@ -1913,6 +1973,7 @@ steamID: "1234567890"
                     page_hint: "sprites".into(),
                     r#override: false,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
                 SpritePackRequest {
                     source_path: "sprites/router.png".into(),
@@ -1920,6 +1981,7 @@ steamID: "1234567890"
                     page_hint: "sprites".into(),
                     r#override: false,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
                 SpritePackRequest {
                     source_path: "sprites-override/ui/icon.png".into(),
@@ -1927,6 +1989,7 @@ steamID: "1234567890"
                     page_hint: "sprites-override".into(),
                     r#override: true,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
             ]
         );
@@ -2069,6 +2132,7 @@ steamID: "1234567890"
                     page_hint: "sprites".into(),
                     r#override: false,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
                 SpritePackRequest {
                     source_path: "sprites-override/ui/icon.png".into(),
@@ -2076,6 +2140,7 @@ steamID: "1234567890"
                     page_hint: "sprites-override".into(),
                     r#override: true,
                     texture_scale: TextureScale::default(),
+                    dimensions: None,
                 },
             ]
         );
@@ -2098,6 +2163,7 @@ steamID: "1234567890"
                 page_hint: "sprites-override".into(),
                 r#override: true,
                 texture_scale: TextureScale::default(),
+                dimensions: None,
             }]
         );
 
@@ -2156,6 +2222,7 @@ repo: "Anon/archive"
                     page_hint: "sprites".into(),
                     r#override: false,
                     texture_scale: TextureScale::default(),
+                    dimensions: Some((16, 16)),
                 },
                 SpritePackRequest {
                     source_path: "sprites-override/ui/icon.png".into(),
@@ -2163,6 +2230,7 @@ repo: "Anon/archive"
                     page_hint: "sprites-override".into(),
                     r#override: true,
                     texture_scale: TextureScale::default(),
+                    dimensions: Some((32, 32)),
                 },
             ]
         );

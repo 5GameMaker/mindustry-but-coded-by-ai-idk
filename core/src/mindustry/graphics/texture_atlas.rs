@@ -222,6 +222,7 @@ pub struct TextureAtlasSpriteSourceDescriptor {
     pub r#override: bool,
     pub texture_scale: TextureScale,
     pub pack_hints: TextureAtlasPackHints,
+    pub dimensions: Option<(u32, u32)>,
 }
 
 impl TextureAtlasSpriteSourceDescriptor {
@@ -233,6 +234,7 @@ impl TextureAtlasSpriteSourceDescriptor {
             r#override: false,
             texture_scale: TextureScale::default(),
             pack_hints: TextureAtlasPackHints::default(),
+            dimensions: None,
         }
     }
 
@@ -261,6 +263,7 @@ impl TextureAtlasSpriteSourceDescriptor {
             r#override,
             texture_scale: TextureScale::default(),
             pack_hints: TextureAtlasPackHints::default(),
+            dimensions: None,
         }
     }
 
@@ -281,6 +284,11 @@ impl TextureAtlasSpriteSourceDescriptor {
 
     pub fn with_pack_hints(mut self, pack_hints: TextureAtlasPackHints) -> Self {
         self.pack_hints = pack_hints;
+        self
+    }
+
+    pub fn with_dimensions(mut self, dimensions: Option<(u32, u32)>) -> Self {
+        self.dimensions = dimensions;
         self
     }
 
@@ -313,7 +321,10 @@ impl TextureAtlasSpriteSourceDescriptor {
     }
 
     pub fn to_region_request(&self) -> RegionRequest<TextureAtlasRegionSource<bool>> {
-        let (width, height) = png_dimensions_from_path(&self.source_path).unwrap_or((1, 1));
+        let (width, height) = self
+            .dimensions
+            .or_else(|| png_dimensions_from_path(&self.source_path))
+            .unwrap_or((1, 1));
         self.to_region_request_with_size(width, height)
     }
 
@@ -336,6 +347,11 @@ impl TextureAtlasSpriteSourceDescriptor {
 pub fn png_dimensions_from_path(path: impl AsRef<Path>) -> Option<(u32, u32)> {
     let mut file = File::open(path.as_ref()).ok()?;
     png_dimensions_from_reader(&mut file)
+}
+
+pub fn png_dimensions_from_bytes(bytes: &[u8]) -> Option<(u32, u32)> {
+    let mut cursor = Cursor::new(bytes);
+    png_dimensions_from_reader(&mut cursor)
 }
 
 pub fn sprite_atlas_page_source_paths_from_path(path: impl AsRef<Path>) -> io::Result<Vec<String>> {
@@ -1798,6 +1814,24 @@ mod tests {
         assert_eq!(region.height, 16);
 
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn texture_atlas_sprite_source_descriptor_can_use_precomputed_png_dimensions() {
+        let bytes = minimal_png_bytes(40, 12);
+        assert_eq!(png_dimensions_from_bytes(&bytes), Some((40, 12)));
+
+        let plan =
+            TextureAtlasPlan::from_sprite_sources([TextureAtlasSpriteSourceDescriptor::new(
+                "archive.zip!/sprites/router.png",
+                "router",
+            )
+            .with_page_hint("sprites")
+            .with_dimensions(Some((40, 12)))]);
+        let region = plan.lookup("router").unwrap().region;
+        assert_eq!(region.width, 40);
+        assert_eq!(region.height, 12);
+        assert_eq!(region.source_path, "archive.zip!/sprites/router.png");
     }
 
     #[test]

@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 867. Mods archive sprite 预计算尺寸接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **93.99%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - 新增 `png_dimensions_from_bytes(bytes: &[u8]) -> Option<(u32, u32)>`，让 archive 内 PNG 可以不落地到真实文件也能读取 IHDR 宽高；
+    - `TextureAtlasSpriteSourceDescriptor` 增加 `dimensions`，并提供 `with_dimensions(...)`；
+    - `to_region_request()` 优先使用预计算尺寸，其次尝试真实路径 PNG，最后才退回 `1x1`，避免 zip/jar sprite 在 atlas metadata 中失真。
+  - `core/src/mindustry/modsys/mod.rs`
+    - 对照 Java archive/`ZipFi` 资源读取路径，`SpritePackRequest` 与 `ModSpritePackSource` 增加 `dimensions`；
+    - archive sprite scanner 现在从 zip/jar entry bytes 直接提取 PNG 尺寸，并随 `from_file_paths_with_dimensions(...)` 接入 `ModResourcePlan` 主链路；
+    - archive-backed `sprites/**` 与 `sprites-override/**` 不再只携带虚拟路径，也会携带源图宽高。
+  - `desktop/src/lib.rs`
+    - `merge_mod_resource_plan_into_texture_atlas(...)` 将 `request.dimensions` 传给 atlas descriptor；
+    - 桌面贯通测试验证 zip 内 `40x12` sprite 合并进 atlas 后 region 保持真实宽高。
+- 已验证：
+  - `RUSTFLAGS='-C debuginfo=0' cargo check -j 1 -p mindustry-core --lib`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_archive_discovery_reads_zip_metadata_like_java_mods_load -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop mods -- --nocapture`
+- 后续不可漏：
+  - 真实 archive-backed texture bytes 上传/读取还未完成；本轮先保证 archive sprite 的 atlas metadata 尺寸正确，后续必须继续把 zip/jar entry bytes 接到纹理加载/上传链路，而不是停留在尺寸 metadata。
+
 ## 866. Mods archive-backed discovery 接入 zip/jar
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
