@@ -52526,10 +52526,11 @@ impl DesktopLauncher {
             return Some(DesktopMenuRouteShellAction::CloseModsContent);
         }
         let grid = Self::mods_content_grid_rect_for_dialog(dialog);
+        let capacity = Self::mods_content_visible_entry_capacity_for_grid(grid);
         for (entry_index, _) in self
             .mods_content_entries_for_mod(self.mods_content_dialog_index?)
             .iter()
-            .take(8)
+            .take(capacity)
             .enumerate()
         {
             if Self::mods_content_entry_rect_for_grid(grid, entry_index).contains_point(point) {
@@ -52561,18 +52562,27 @@ impl DesktopLauncher {
     }
 
     fn mods_content_entry_rect_for_grid(grid: RenderRect, index: usize) -> RenderRect {
-        let columns = 2usize;
+        let columns = Self::mods_content_entry_columns_for_grid(grid);
         let gap = 8.0;
-        let card_height = 58.0;
-        let card_width = ((grid.width - gap) / columns as f32).max(120.0);
+        let card_size = 50.0;
         let row = index / columns;
         let column = index % columns;
         RenderRect::new(
-            grid.x + column as f32 * (card_width + gap),
-            grid.y + grid.height - card_height - row as f32 * (card_height + gap),
-            card_width,
-            card_height,
+            grid.x + column as f32 * (card_size + gap),
+            grid.y + grid.height - card_size - row as f32 * (card_size + gap),
+            card_size,
+            card_size,
         )
+    }
+
+    fn mods_content_entry_columns_for_grid(grid: RenderRect) -> usize {
+        ((grid.width + 8.0) / 58.0).floor().clamp(1.0, 14.0) as usize
+    }
+
+    fn mods_content_visible_entry_capacity_for_grid(grid: RenderRect) -> usize {
+        let columns = Self::mods_content_entry_columns_for_grid(grid);
+        let rows = ((grid.height + 8.0) / 58.0).floor().max(1.0) as usize;
+        columns * rows
     }
 
     fn mods_route_mod_content_dir_at_index(&self, index: usize) -> Option<PathBuf> {
@@ -52891,12 +52901,13 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.090,
             ));
         }
-        for (entry_index, entry) in entries.iter().take(8).enumerate() {
+        let capacity = Self::mods_content_visible_entry_capacity_for_grid(grid);
+        for (entry_index, entry) in entries.iter().take(capacity).enumerate() {
             let card = Self::mods_content_entry_rect_for_grid(grid, entry_index);
             let layer = Layer::END_PIXELED + 0.090 + entry_index as f32 * 0.001;
             let selected = self.last_mods_content_entry_index == Some(entry_index);
             pass.push(RenderCommand::draw_sprite(
-                Self::settings_image_button_symbol("defaulti", selected, false),
+                Self::settings_image_button_symbol("flati", selected, false),
                 card,
                 [1.0, 1.0, 1.0, if selected { 0.98 } else { 0.88 }],
                 0.0,
@@ -52914,9 +52925,9 @@ impl DesktopLauncher {
             ));
             pass.push(RenderCommand::draw_text_styled(
                 desktop_ui_icon_glyph_or_label(entry.icon.as_str(), entry.icon.as_str()),
-                RenderPoint::new(card.x + 24.0, card.center().y),
+                card.center(),
                 [0.78, 0.88, 0.96, 1.0],
-                16.0,
+                20.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
                     .with_font(RenderFontId::Icon)
@@ -52924,29 +52935,6 @@ impl DesktopLauncher {
                     .with_integer_position(true)
                     .with_outline(true),
                 layer + 0.0002,
-            ));
-            pass.push(RenderCommand::draw_text_styled(
-                format!("{} {}", entry.title, entry.detail),
-                RenderPoint::new(card.x + 48.0, card.center().y + 9.0),
-                [0.88, 0.96, 1.0, 1.0],
-                10.5,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Start)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true)
-                    .with_outline(true),
-                layer + 0.0003,
-            ));
-            pass.push(RenderCommand::draw_text_styled(
-                self.localize_bundle_markup_text("@mods.viewcontent"),
-                RenderPoint::new(card.x + 48.0, card.center().y - 11.0),
-                [0.56, 0.68, 0.76, 1.0],
-                8.5,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Start)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
-                layer + 0.0004,
             ));
         }
         self.push_settings_text_button(
@@ -73360,7 +73348,7 @@ repo: "Beta/Override"
             })
             .collect::<Vec<_>>();
         assert!(content_texts.contains(&"View Content: Alpha Pack"));
-        assert!(content_texts
+        assert!(!content_texts
             .iter()
             .any(|text| text.contains("router") && text.contains("Blocks")));
         assert!(!content_texts
@@ -73371,8 +73359,10 @@ repo: "Beta/Override"
         assert!(!content_texts.contains(&"content entries: 0"));
         let content_dialog = DesktopLauncher::mods_content_dialog_rect_for_panel(panel);
         let grid = DesktopLauncher::mods_content_grid_rect_for_dialog(content_dialog);
-        let first_content_entry =
-            DesktopLauncher::mods_content_entry_rect_for_grid(grid, 0).center();
+        let first_content_entry_rect = DesktopLauncher::mods_content_entry_rect_for_grid(grid, 0);
+        assert_eq!(first_content_entry_rect.width, 50.0);
+        assert_eq!(first_content_entry_rect.height, 50.0);
+        let first_content_entry = first_content_entry_rect.center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,

@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 844. ModsDialog View Content icon grid 对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.76%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ModsDialog.showMod()` 中 `@mods.viewcontent` 打开独立 `BaseDialog(mod.meta.displayName)`；
+  - 内容列表里每个 `UnlockableContent` 是 `Styles.flati` 的 50x50 icon button；
+  - 条目名称通过 tooltip/ContentInfoDialog 展示，不是在 grid 内画大文本卡片。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `mods_content_entry_rect_for_grid(...)` 从双列大卡片改为 50x50 icon grid；
+    - 新增 content grid column/capacity 计算，按当前 grid 宽高显示更多 icon button；
+    - `push_mods_content_dialog(...)` 删除 entry title/detail 文本，改为 `flati` icon-only button；
+    - 命中映射仍保持点击 entry 后进入对应 content info；
+    - 更新 Mods 详情/content 回归测试，锁定 50x50 icon button 与无 entry 文字卡片。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods`
+- 仍未完成：
+  - content grid 仍需继续补 tooltip/hover 亮度与更完整的真实 `UnlockableContent` 图标来源；
+  - browser/release ScrollPane 视觉滚动条仍需继续贴近 Java；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 843. ModsDialog browser/release 列表滚动接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
