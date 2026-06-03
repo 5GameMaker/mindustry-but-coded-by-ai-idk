@@ -1012,7 +1012,7 @@ struct MenuUiLayoutCache {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct MenuUiRenderCommandCache {
+pub struct MenuUiRenderCommandCache {
     plan: MenuUiPlan,
     groups: MenuUiRenderCommandGroups,
 }
@@ -1210,6 +1210,32 @@ impl MenuUiRenderCommandGroups {
             );
         }
         commands
+    }
+}
+
+impl MenuUiRenderCommandCache {
+    pub fn render_commands_for_plan(
+        cache: &mut Option<Self>,
+        ui: &MenuUiPlan,
+        rebuilds: &mut usize,
+    ) -> Vec<RenderCommand> {
+        let cache_plan = ui.normalized_render_command_cache_plan();
+        let should_rebuild = cache
+            .as_ref()
+            .map_or(true, |cache| cache.plan != cache_plan);
+        if should_rebuild {
+            *cache = Some(Self {
+                groups: cache_plan.to_normalized_render_command_groups(),
+                plan: cache_plan,
+            });
+            *rebuilds += 1;
+        }
+        let groups = cache
+            .as_ref()
+            .expect("menu UI render command cache should be populated before use")
+            .groups
+            .clone();
+        groups.into_render_commands(ui.submenu_alpha)
     }
 }
 
@@ -2086,25 +2112,11 @@ impl MenuRendererState {
     }
 
     fn cached_ui_render_commands(&mut self, ui: &MenuUiPlan) -> Vec<RenderCommand> {
-        let cache_plan = ui.normalized_render_command_cache_plan();
-        let should_rebuild = self
-            .ui_render_command_cache
-            .as_ref()
-            .map_or(true, |cache| cache.plan != cache_plan);
-        if should_rebuild {
-            self.ui_render_command_cache = Some(MenuUiRenderCommandCache {
-                groups: cache_plan.to_normalized_render_command_groups(),
-                plan: cache_plan,
-            });
-            self.ui_render_command_cache_rebuilds += 1;
-        }
-        let groups = self
-            .ui_render_command_cache
-            .as_ref()
-            .expect("menu UI render command cache should be populated before use")
-            .groups
-            .clone();
-        groups.into_render_commands(ui.submenu_alpha)
+        MenuUiRenderCommandCache::render_commands_for_plan(
+            &mut self.ui_render_command_cache,
+            ui,
+            &mut self.ui_render_command_cache_rebuilds,
+        )
     }
 
     pub fn hit_test_ui(&self, input: MenuFrameInput, x: f32, y: f32) -> Option<MenuButtonRole> {

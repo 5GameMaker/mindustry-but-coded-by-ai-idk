@@ -60,20 +60,20 @@ use mindustry_core::mindustry::graphics::{
     GraphicsFrameBundle, GraphicsFrameStats, Layer, LightCommand, LightPrimitive,
     LightRendererPlan, LightRendererState, LoadFrameInput, LoadFramePlan, LoadRendererState,
     MenuButtonRole, MenuFrameInput, MenuFramePlan, MenuRendererConfig, MenuRendererState,
-    MinimapCamera, MinimapFogLayer, MinimapOverlayCommand, MinimapOverlayInput, MinimapOverlayPlan,
-    MinimapRect, MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize,
-    OverlayRendererPlan, OverlayRendererState, PageSpec, PageType, Pal, PixelatorCamera,
-    PixelatorFramePlan, PixelatorInput, PixelatorState, PngRgba8888DecodeError, PngRgba8888Image,
-    RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera,
-    RenderCommand, RenderEngineState, RenderFontId, RenderFramePlan, RenderPass, RenderPassKind,
-    RenderPoint, RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget,
-    RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderTextureSampleFlip,
-    RenderTextureSamplePlan, RenderUvRect, RenderViewport, ShaderApplyContext,
-    ShaderApplyOperation, ShaderApplyPlan, ShaderCamera, ShaderCatalog, ShaderDispatchFrame,
-    ShaderId, ShaderLoadPlan, ShaderLoadTask, ShaderParameters, ShaderReloadAction,
-    ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan, TextureAtlasRegion,
-    TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord, UniformValue,
-    Viewport as FloorViewport,
+    MenuUiRenderCommandCache, MinimapCamera, MinimapFogLayer, MinimapOverlayCommand,
+    MinimapOverlayInput, MinimapOverlayPlan, MinimapRect, MinimapRendererState,
+    MinimapTextureFramePlan, MinimapWorldSize, OverlayRendererPlan, OverlayRendererState, PageSpec,
+    PageType, Pal, PixelatorCamera, PixelatorFramePlan, PixelatorInput, PixelatorState,
+    PngRgba8888DecodeError, PngRgba8888Image, RenderBackendFlushBoundary, RenderBlendFactor,
+    RenderBlendMode, RenderBridge, RenderCamera, RenderCommand, RenderEngineState, RenderFontId,
+    RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderProperty, RenderRect,
+    RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign, RenderTextStyle,
+    RenderTextVerticalAlign, RenderTextureSampleFlip, RenderTextureSamplePlan, RenderUvRect,
+    RenderViewport, ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan, ShaderCamera,
+    ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderLoadPlan, ShaderLoadTask, ShaderParameters,
+    ShaderReloadAction, ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
+    TextureAtlasRegion, TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord,
+    UniformValue, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -18172,6 +18172,8 @@ pub struct DesktopLauncher {
     pub fog_renderer_state: FogRendererState,
     pub minimap_renderer_state: MinimapRendererState,
     pub menu_renderer_state: MenuRendererState,
+    finalized_menu_ui_render_command_cache: Option<MenuUiRenderCommandCache>,
+    finalized_menu_ui_render_command_cache_rebuilds: usize,
     pub last_menu_cursor: Option<RenderPoint>,
     pub last_menu_hovered_button: Option<MenuButtonRole>,
     pub last_menu_pressed_button: Option<MenuButtonRole>,
@@ -19373,6 +19375,8 @@ impl DesktopLauncher {
                 false,
                 desktop_default_menu_seed(),
             )),
+            finalized_menu_ui_render_command_cache: None,
+            finalized_menu_ui_render_command_cache_rebuilds: 0,
             last_menu_cursor: None,
             last_menu_hovered_button: None,
             last_menu_pressed_button: None,
@@ -20823,8 +20827,17 @@ impl DesktopLauncher {
             .clone()
             .with_hovered_role(self.last_menu_hovered_button)
             .with_pressed_role(self.active_menu_pressed_button_for_visuals());
-        plan.ui_render_commands = plan.ui.to_render_commands();
+        plan.ui_render_commands = MenuUiRenderCommandCache::render_commands_for_plan(
+            &mut self.finalized_menu_ui_render_command_cache,
+            &plan.ui,
+            &mut self.finalized_menu_ui_render_command_cache_rebuilds,
+        );
         self.apply_menu_visual_pressed_frame_decay();
+    }
+
+    #[cfg(test)]
+    fn finalized_menu_ui_render_command_cache_rebuilds(&self) -> usize {
+        self.finalized_menu_ui_render_command_cache_rebuilds
     }
 
     fn localize_menu_frame_plan(&self, plan: &mut MenuFramePlan) {
@@ -55192,6 +55205,7 @@ mod tests {
     use mindustry_core::mindustry::ctype::{Content, ContentId};
     use mindustry_core::mindustry::entities::comp::{DecalColor, FireComp};
     use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
+    use mindustry_core::mindustry::graphics::menu_renderer::MENU_SUBMENU_FADE_IN_SECONDS;
     use mindustry_core::mindustry::graphics::{
         BlockDrawStage, BlockRendererBlockParticlePlan, BlockRendererPlan, CacheLayer,
         Env as GraphicsEnv, Layer, LightPrimitive, LoadFrameInput, LoadStage, MenuButtonRole,
@@ -91168,6 +91182,81 @@ repo: "Beta/Override"
                 panic!("menu frame must not use load payload");
             }
         }
+    }
+
+    #[test]
+    fn desktop_launcher_reuses_finalized_menu_ui_render_command_cache_when_unchanged() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let input = MenuFrameInput::new(1280.0, 720.0, 4.0, 1.0 / 60.0);
+
+        let first = launcher.menu_frame_for_render(input);
+        let DesktopFramePayload::Menu(first_plan) = first.payload else {
+            panic!("menu_frame_for_render should return menu payload");
+        };
+        assert_eq!(
+            launcher.finalized_menu_ui_render_command_cache_rebuilds(),
+            1
+        );
+        assert_eq!(
+            first_plan.ui_render_commands,
+            first_plan.ui.to_render_commands()
+        );
+
+        let second = launcher.menu_frame_for_render(input);
+        let DesktopFramePayload::Menu(second_plan) = second.payload else {
+            panic!("menu_frame_for_render should return menu payload");
+        };
+        assert_eq!(
+            launcher.finalized_menu_ui_render_command_cache_rebuilds(),
+            1,
+            "time-only menu frames should reuse the localized/hover-finalized UI render command cache"
+        );
+        assert_eq!(
+            first_plan.ui_render_commands,
+            second_plan.ui_render_commands
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_keeps_finalized_menu_ui_render_command_cache_during_submenu_fade() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        assert!(launcher
+            .menu_renderer_state
+            .select_desktop_root(MenuButtonRole::Play));
+
+        let input = |delta| MenuFrameInput::new(1280.0, 720.0, 4.0, delta);
+        let opened = launcher.menu_frame_for_render(input(0.0));
+        let DesktopFramePayload::Menu(opened_plan) = opened.payload else {
+            panic!("menu_frame_for_render should return menu payload");
+        };
+        assert_eq!(
+            launcher.finalized_menu_ui_render_command_cache_rebuilds(),
+            1
+        );
+        assert_eq!(opened_plan.ui.submenu_alpha, 0.0);
+        assert_eq!(
+            opened_plan.ui_render_commands,
+            opened_plan.ui.to_render_commands()
+        );
+
+        let fading = launcher.menu_frame_for_render(input(MENU_SUBMENU_FADE_IN_SECONDS * 0.5));
+        let DesktopFramePayload::Menu(fading_plan) = fading.payload else {
+            panic!("menu_frame_for_render should return menu payload");
+        };
+        assert_eq!(
+            launcher.finalized_menu_ui_render_command_cache_rebuilds(),
+            1,
+            "desktop-localized submenu alpha changes should reuse cached command groups"
+        );
+        assert!((fading_plan.ui.submenu_alpha - 0.5).abs() < 0.0001);
+        assert_eq!(
+            fading_plan.ui_render_commands,
+            fading_plan.ui.to_render_commands()
+        );
+        assert_ne!(
+            opened_plan.ui_render_commands, fading_plan.ui_render_commands,
+            "frame output should still reflect current submenu fade alpha"
+        );
     }
 
     #[test]

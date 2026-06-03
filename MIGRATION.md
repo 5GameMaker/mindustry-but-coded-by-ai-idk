@@ -17,6 +17,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 818. Desktop finalized 菜单 UI 命令缓存接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.49%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 问题判断：
+  - 817 已把 core `MenuRendererState` 的 submenu fade command cache 拆开，但 desktop 端 `finalize_menu_frame_plan_for_desktop_visuals(...)` 会在本地化/hover/pressed 后直接 `plan.ui.to_render_commands()`；
+  - 这导致真实客户端主菜单仍会在 finalized UI 路径每帧重建按钮、label、icon 命令，和 Java `MenuFragment` 常驻 Scene/table 的 retained-mode 行为不一致。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuUiRenderCommandCache` 改为 public API，字段保持私有；
+    - 新增 `MenuUiRenderCommandCache::render_commands_for_plan(...)`，统一处理归一化 cache plan、rebuild 计数与当前帧 submenu alpha 输出。
+  - `core/src/mindustry/graphics/mod.rs`
+    - re-export `MenuUiRenderCommandCache`。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 finalized menu UI render command cache；
+    - `finalize_menu_frame_plan_for_desktop_visuals(...)` 在本地化和 hover/pressed 状态落定后走 cache 输出；
+    - 新增测试覆盖：普通连续 menu frame 不重建 finalized cache；submenu fade alpha 变化不重建 finalized cache，但输出命令仍随当前 alpha 改变。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop finalized_menu_ui_render_command_cache --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_renderer --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 菜单世界背景 `DrawCache` / shadow 仍需要继续向 Java `SpriteCache`/`FrameBuffer` 静态缓存靠拢；
+  - 前端 UI 仍需继续补齐 Settings/Mods/Editor/其他子菜单的原版表现。
+
 ## 817. MenuRenderer 子菜单 fade UI 命令缓存拆分
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
