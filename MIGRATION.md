@@ -17,6 +17,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 834. Settings Data 文件选择结果接入真实 I/O
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.66%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `SettingsMenuDialog` 的 `@data.export` / `@data.import` / `@crash.export` 都是先打开 chooser，再用 chooser 的文件路径执行真实导出/导入；
+  - save-mode chooser 会补齐目标扩展名，open-mode chooser 保留选择路径。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `complete_settings_data_export_selection(...)`，使用 `last_settings_data_export_request.selected_result(...)` 后调用 `export_settings_data_to(...)`；
+    - 新增 `complete_settings_data_import_selection(...)`，使用 `last_settings_data_import_request.selected_result(...)` 后调用 `import_settings_data_from(...)`；
+    - 新增 `complete_settings_crash_export_selection(...)`，使用 `last_settings_crash_export_request.selected_result(...)` 后调用 `export_settings_crash_logs_to(...)`；
+    - 新增 `desktop_launcher_settings_data_file_selection_completes_real_io_like_java`，覆盖 ExportData/ImportData/ExportCrashLogs 三条 chooser→真实 I/O 路径。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings_data_file_selection`
+  - `cargo test -p mindustry-desktop settings_crash_export`
+  - `cargo test -p mindustry-desktop settings_export`
+  - `cargo test -p mindustry-desktop settings_import`
+- 仍未完成：
+  - 具体桌面/移动平台的 native file picker 回调仍需把真实选择结果调用到这些 completion 方法；
+  - Java iOS `shareFile(...)` 分支与桌面后端真实 `open_folder` 行为仍需继续接具体平台实现；
+  - 导入成功后 Java 会 `resetSave()`、重置 state 并退出，Rust 侧仍需继续对齐完整重启/状态重载语义。
+
 ## 833. Settings Data 崩溃日志导出 helper
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
@@ -39,9 +63,8 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo test -p mindustry-desktop settings_export`
   - `cargo test -p mindustry-desktop settings_import`
 - 仍未完成：
-  - `ExportCrashLogs` 的 chooser request 已有，但选择结果回调→`export_settings_crash_logs_to(...)` 的平台接线仍需继续补；
-  - `ExportData` / `ImportData` 的 chooser 结果回调→真实 zip helper 接线仍需继续补；
-  - Java iOS `shareFile(...)` 分支与桌面后端真实 `open_folder` 行为仍需继续接具体平台实现。
+  - chooser 选择结果到 `export_settings_crash_logs_to(...)` / zip helper 的 Rust completion 方法已由 834 接入；
+  - 具体平台 native picker 回调、Java iOS `shareFile(...)` 分支与桌面后端真实 `open_folder` 行为仍需继续接具体平台实现。
 
 ## 832. ModsDialog Release ID 元数据闭环
 

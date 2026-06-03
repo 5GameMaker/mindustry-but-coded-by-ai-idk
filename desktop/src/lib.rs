@@ -26169,6 +26169,39 @@ impl DesktopLauncher {
         Ok(result)
     }
 
+    pub fn complete_settings_data_export_selection(
+        &mut self,
+        selected: impl AsRef<str>,
+    ) -> io::Result<DesktopSettingsDataArchiveResult> {
+        let request = self
+            .last_settings_data_export_request
+            .clone()
+            .unwrap_or_else(|| FileChooserRequest::new(false, "@data.export", "zip"));
+        self.export_settings_data_to(request.selected_result(selected.as_ref()))
+    }
+
+    pub fn complete_settings_data_import_selection(
+        &mut self,
+        selected: impl AsRef<str>,
+    ) -> io::Result<DesktopSettingsDataArchiveResult> {
+        let request = self
+            .last_settings_data_import_request
+            .clone()
+            .unwrap_or_else(|| FileChooserRequest::new(true, "@data.import", "zip"));
+        self.import_settings_data_from(request.selected_result(selected.as_ref()))
+    }
+
+    pub fn complete_settings_crash_export_selection(
+        &mut self,
+        selected: impl AsRef<str>,
+    ) -> io::Result<DesktopSettingsCrashExportResult> {
+        let request = self
+            .last_settings_crash_export_request
+            .clone()
+            .unwrap_or_else(|| FileChooserRequest::new(false, "@crash.export", "txt"));
+        self.export_settings_crash_logs_to(request.selected_result(selected.as_ref()))
+    }
+
     fn set_settings_locale(&mut self, code: &'static str) -> bool {
         let locale = Self::settings_closest_locale_code(code);
         if self.settings_locale == locale {
@@ -87937,6 +87970,106 @@ repo: "Beta/Override"
             "crash-a.txt\n\ncrash A\ncrash-b.txt\n\ncrash B\n\nlast log:\nlast log text",
             "Java SettingsMenuDialog.getLogs() writes each crash filename/content, then appends last_log.txt"
         );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_settings_data_file_selection_completes_real_io_like_java() {
+        let root = temp_desktop_path("settings-data-selection-complete");
+        let maps = root.join("maps");
+        let saves = root.join("saves");
+        let mods = root.join("mods");
+        let schematics = root.join("schematics");
+        std::fs::create_dir_all(&maps).expect("maps fixture dir should be writable");
+        std::fs::create_dir_all(&saves).expect("saves fixture dir should be writable");
+        std::fs::create_dir_all(&mods).expect("mods fixture dir should be writable");
+        std::fs::create_dir_all(&schematics).expect("schematics fixture dir should be writable");
+        std::fs::write(root.join("settings.bin"), b"settings")
+            .expect("settings fixture should write");
+        std::fs::write(saves.join("old.msav"), b"old").expect("old save fixture should write");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.data_dir = root.display().to_string();
+        launcher.client.context.paths.map_dir = maps.display().to_string();
+        launcher.client.context.paths.save_dir = saves.display().to_string();
+        launcher.client.context.paths.mod_dir = mods.display().to_string();
+        launcher.client.context.paths.schematic_dir = schematics.display().to_string();
+        let mut platform = RecordingPlatform::default();
+
+        launcher.dispatch_settings_action_with_platform(
+            super::DesktopSettingsAction::ExportData,
+            &mut platform,
+        );
+        let export_selected = root.join("selected-export");
+        let export_result = launcher
+            .complete_settings_data_export_selection(export_selected.display().to_string())
+            .expect("export selection should write a zip");
+        let export_zip = root.join("selected-export.zip");
+        assert_eq!(
+            export_result.file,
+            export_zip.display().to_string().replace('\\', "/")
+        );
+        assert!(export_zip.exists());
+
+        let import_zip = root.join("selected-import.zip");
+        let import_bytes = super::desktop_settings_data_zip_bytes(&[
+            super::DesktopSettingsDataArchiveEntry {
+                name: "settings.bin".into(),
+                data: Some(b"imported-settings".to_vec()),
+            },
+            super::DesktopSettingsDataArchiveEntry {
+                name: "saves/".into(),
+                data: None,
+            },
+            super::DesktopSettingsDataArchiveEntry {
+                name: "saves/imported.msav".into(),
+                data: Some(b"imported-save".to_vec()),
+            },
+        ])
+        .expect("import zip fixture should encode");
+        std::fs::write(&import_zip, import_bytes).expect("import zip fixture should write");
+        launcher.dispatch_settings_action_with_platform(
+            super::DesktopSettingsAction::ImportData,
+            &mut platform,
+        );
+        let import_result = launcher
+            .complete_settings_data_import_selection(import_zip.display().to_string())
+            .expect("import selection should read zip");
+        assert_eq!(
+            import_result.file,
+            import_zip.display().to_string().replace('\\', "/")
+        );
+        assert_eq!(
+            std::fs::read(root.join("settings.bin")).unwrap(),
+            b"imported-settings"
+        );
+        assert!(!saves.join("old.msav").exists());
+        assert_eq!(
+            std::fs::read(saves.join("imported.msav")).unwrap(),
+            b"imported-save"
+        );
+
+        let crashes = root.join("crashes");
+        std::fs::create_dir_all(&crashes).expect("crashes fixture dir should be writable");
+        std::fs::write(crashes.join("crash.txt"), b"crash").expect("crash fixture should write");
+        std::fs::write(root.join("last_log.txt"), b"last").expect("last log fixture should write");
+        launcher.dispatch_settings_action_with_platform(
+            super::DesktopSettingsAction::ExportCrashLogs,
+            &mut platform,
+        );
+        let crash_selected = root.join("selected-crashes");
+        let crash_result = launcher
+            .complete_settings_crash_export_selection(crash_selected.display().to_string())
+            .expect("crash export selection should write txt");
+        let crash_txt = root.join("selected-crashes.txt");
+        assert_eq!(
+            crash_result.file,
+            crash_txt.display().to_string().replace('\\', "/")
+        );
+        assert!(std::fs::read_to_string(&crash_txt)
+            .unwrap()
+            .contains("last log:\nlast"));
 
         std::fs::remove_dir_all(root).ok();
     }
