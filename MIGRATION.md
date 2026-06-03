@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 843. ModsDialog browser/release 列表滚动接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.75%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ModsDialog.rebuildBrowser()` 的 browser listing 位于 `pane(...)`，不是固定 4 条硬截断；
+  - releases 列表同样位于 `downloads.cont.pane(...)`，应能访问全部 release entry；
+  - 滚动后点击命中必须映射到真实 listing/release index。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `mods_browser_scroll_offset` 与 `mods_browser_releases_scroll_offset`，接入打开/关闭/搜索/排序/release JSON 状态重置；
+    - 新增 browser/release 可见容量、max scroll 与滚轮 delta 处理；
+    - browser card 渲染与 hit-test 从固定 `take(4)` 改为 `skip(offset).take(capacity)`；
+    - releases entry 渲染与按钮 hit-test 从固定前 4 条改为按 release scroll offset 映射真实 release index；
+    - 新增 browser 主列表滚动命中与 releases 列表滚动按钮命中回归测试。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser`
+- 仍未完成：
+  - browser/release ScrollPane 的视觉滚动条样式仍需继续贴近 Java；
+  - ModsDialog 内容子窗仍需继续向 Java icon grid 样式靠拢；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 842. ModsDialog releases loading 与空态回归
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。

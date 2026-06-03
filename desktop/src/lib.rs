@@ -19045,8 +19045,10 @@ pub struct DesktopLauncher {
     pub mods_search_focused: bool,
     pub mods_browser_search: String,
     pub mods_browser_sort_date: bool,
+    pub mods_browser_scroll_offset: usize,
     pub mods_browser_selected_mod_index: Option<usize>,
     pub mods_browser_releases_dialog_index: Option<usize>,
+    pub mods_browser_releases_scroll_offset: usize,
     pub mods_browser_release_entries: Vec<DesktopModsBrowserReleaseEntry>,
     pub last_mods_import_action: Option<DesktopModsImportAction>,
     pub last_mods_browser_action: Option<DesktopModsBrowserAction>,
@@ -20262,8 +20264,10 @@ impl DesktopLauncher {
             mods_search_focused: false,
             mods_browser_search: String::new(),
             mods_browser_sort_date: true,
+            mods_browser_scroll_offset: 0,
             mods_browser_selected_mod_index: None,
             mods_browser_releases_dialog_index: None,
+            mods_browser_releases_scroll_offset: 0,
             mods_browser_release_entries: Vec::new(),
             last_mods_import_action: None,
             last_mods_browser_action: None,
@@ -39283,6 +39287,7 @@ impl DesktopLauncher {
             return false;
         }
         self.mods_browser_releases_dialog_index = Some(index);
+        self.mods_browser_releases_scroll_offset = 0;
         self.mods_browser_release_entries.clear();
         self.mods_browser_dialog_open = true;
         self.mods_search_focused = false;
@@ -39300,11 +39305,13 @@ impl DesktopLauncher {
             self.mods_browser_selected_mod_index = Some(index);
             self.mods_browser_dialog_open = true;
             self.mods_search_focused = false;
+            self.mods_browser_releases_scroll_offset = 0;
             self.last_menu_info_message = Some("@mods.browser.noreleases".into());
             return 0;
         }
         self.mods_browser_releases_dialog_index = Some(index);
         self.mods_browser_release_entries = entries;
+        self.mods_browser_releases_scroll_offset = 0;
         self.mods_browser_dialog_open = true;
         self.mods_search_focused = false;
         self.last_menu_info_message = None;
@@ -39313,6 +39320,7 @@ impl DesktopLauncher {
 
     fn close_mods_browser_releases_dialog(&mut self) {
         self.mods_browser_releases_dialog_index = None;
+        self.mods_browser_releases_scroll_offset = 0;
         self.mods_browser_release_entries.clear();
     }
 
@@ -39320,6 +39328,7 @@ impl DesktopLauncher {
         self.mods_browser_dialog_open = false;
         self.mods_browser_selected_mod_index = None;
         self.close_mods_browser_releases_dialog();
+        self.mods_browser_scroll_offset = 0;
     }
 
     fn dispatch_mods_browser_action_with_platform<P: Platform>(
@@ -40565,6 +40574,8 @@ impl DesktopLauncher {
                 self.mods_search_focused = false;
                 self.mods_browser_selected_mod_index = None;
                 self.mods_browser_releases_dialog_index = None;
+                self.mods_browser_scroll_offset = 0;
+                self.mods_browser_releases_scroll_offset = 0;
                 self.mods_browser_release_entries.clear();
             }
             DesktopMenuRouteShellAction::CloseModsBrowser => {
@@ -40586,10 +40597,12 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::ClearModsBrowserSearch => {
                 self.mods_browser_search.clear();
+                self.mods_browser_scroll_offset = 0;
                 self.mods_browser_dialog_open = true;
             }
             DesktopMenuRouteShellAction::ToggleModsBrowserSort => {
                 self.mods_browser_sort_date = !self.mods_browser_sort_date;
+                self.mods_browser_scroll_offset = 0;
                 self.mods_browser_dialog_open = true;
             }
             DesktopMenuRouteShellAction::ModsBrowserAdd(index) => {
@@ -49893,6 +49906,7 @@ impl DesktopLauncher {
                     } else {
                         self.mods_browser_search.clear();
                     }
+                    self.mods_browser_scroll_offset = 0;
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
@@ -50543,6 +50557,12 @@ impl DesktopLauncher {
                     if self.apply_about_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
+                    if self.apply_mods_browser_releases_scroll_delta(surface_size, *delta_y) {
+                        continue;
+                    }
+                    if self.apply_mods_browser_scroll_delta(surface_size, *delta_y) {
+                        continue;
+                    }
                     if self.apply_map_play_banned_content_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
@@ -50735,6 +50755,7 @@ impl DesktopLauncher {
                     {
                         self.mods_browser_search
                             .extend(text.chars().filter(|ch| !ch.is_control()));
+                        self.mods_browser_scroll_offset = 0;
                     }
                 }
                 _ => {}
@@ -51999,6 +52020,56 @@ impl DesktopLauncher {
         )
     }
 
+    fn mods_browser_visible_entry_capacity_for_list(list: RenderRect) -> usize {
+        ((list.height - 16.0 + 6.0) / 78.0).floor().max(1.0) as usize
+    }
+
+    fn max_mods_browser_scroll_offset(&self, list: RenderRect) -> usize {
+        self.filtered_mods_browser_indices()
+            .len()
+            .saturating_sub(Self::mods_browser_visible_entry_capacity_for_list(list))
+    }
+
+    fn apply_mods_browser_scroll_delta(
+        &mut self,
+        surface_size: DesktopSurfaceSize,
+        delta_y: f32,
+    ) -> bool {
+        if self.active_menu_route != Some(DesktopMenuRoute::Mods)
+            || !self.mods_browser_dialog_open
+            || self.mods_browser_selected_mod_index.is_some()
+            || self.mods_browser_releases_dialog_index.is_some()
+        {
+            return false;
+        }
+        let Some(cursor) = self.last_menu_cursor else {
+            return false;
+        };
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel = Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Mods);
+        let dialog = Self::mods_browser_dialog_rect_for_panel(panel);
+        let list = Self::mods_browser_list_rect_for_dialog(dialog);
+        if !list.contains_point(cursor) {
+            return false;
+        }
+        let max = self.max_mods_browser_scroll_offset(list);
+        if max == 0 {
+            return false;
+        }
+        let current = self.mods_browser_scroll_offset.min(max);
+        let rows = delta_y.abs().ceil().max(1.0) as isize;
+        let step = if delta_y < 0.0 {
+            rows
+        } else if delta_y > 0.0 {
+            -rows
+        } else {
+            0
+        };
+        let next = (current as isize + step).clamp(0, max as isize) as usize;
+        self.mods_browser_scroll_offset = next;
+        next != current
+    }
+
     fn mods_browser_entry_matches_search(&self, index: usize) -> bool {
         let query = self.mods_browser_search.trim().to_ascii_lowercase();
         if query.is_empty() {
@@ -52091,6 +52162,55 @@ impl DesktopLauncher {
         )
     }
 
+    fn mods_browser_release_visible_entry_capacity_for_dialog(dialog: RenderRect) -> usize {
+        ((dialog.height - 100.0) / 84.0).floor().max(1.0) as usize
+    }
+
+    fn max_mods_browser_releases_scroll_offset(&self, dialog: RenderRect) -> usize {
+        self.mods_browser_release_entries
+            .len()
+            .saturating_sub(Self::mods_browser_release_visible_entry_capacity_for_dialog(dialog))
+    }
+
+    fn apply_mods_browser_releases_scroll_delta(
+        &mut self,
+        surface_size: DesktopSurfaceSize,
+        delta_y: f32,
+    ) -> bool {
+        if self.active_menu_route != Some(DesktopMenuRoute::Mods)
+            || !self.mods_browser_dialog_open
+            || self.mods_browser_releases_dialog_index.is_none()
+        {
+            return false;
+        }
+        let Some(cursor) = self.last_menu_cursor else {
+            return false;
+        };
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel = Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Mods);
+        let browser = Self::mods_browser_dialog_rect_for_panel(panel);
+        let dialog = Self::mods_browser_releases_dialog_rect_for_browser(browser);
+        if !dialog.contains_point(cursor) {
+            return false;
+        }
+        let max = self.max_mods_browser_releases_scroll_offset(dialog);
+        if max == 0 {
+            return false;
+        }
+        let current = self.mods_browser_releases_scroll_offset.min(max);
+        let rows = delta_y.abs().ceil().max(1.0) as isize;
+        let step = if delta_y < 0.0 {
+            rows
+        } else if delta_y > 0.0 {
+            -rows
+        } else {
+            0
+        };
+        let next = (current as isize + step).clamp(0, max as isize) as usize;
+        self.mods_browser_releases_scroll_offset = next;
+        next != current
+    }
+
     fn mods_browser_release_button_rect(entry: RenderRect, index: usize) -> RenderRect {
         let width = 142.0;
         let gap = 8.0;
@@ -52156,8 +52276,15 @@ impl DesktopLauncher {
         if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::ModsBrowserCloseReleases);
         }
-        for (release_index, _) in self.mods_browser_release_entries.iter().take(4).enumerate() {
-            let entry = Self::mods_browser_release_entry_rect_for_dialog(dialog, release_index);
+        let capacity = Self::mods_browser_release_visible_entry_capacity_for_dialog(dialog);
+        let start = self
+            .mods_browser_releases_scroll_offset
+            .min(self.max_mods_browser_releases_scroll_offset(dialog));
+        for (visible_index, release_index) in (start..self.mods_browser_release_entries.len())
+            .take(capacity)
+            .enumerate()
+        {
+            let entry = Self::mods_browser_release_entry_rect_for_dialog(dialog, visible_index);
             if Self::mods_browser_release_button_rect(entry, 0).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::ModsBrowserOpenRelease(
                     release_index,
@@ -52219,7 +52346,11 @@ impl DesktopLauncher {
         for (visible_index, mod_index) in self
             .filtered_mods_browser_indices()
             .into_iter()
-            .take(4)
+            .skip(
+                self.mods_browser_scroll_offset
+                    .min(self.max_mods_browser_scroll_offset(list)),
+            )
+            .take(Self::mods_browser_visible_entry_capacity_for_list(list))
             .enumerate()
         {
             let entry = Self::mods_browser_entry_rect_for_list(list, visible_index);
@@ -53098,7 +53229,15 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.0995,
             ));
         } else {
-            for (visible_index, mod_index) in indices.into_iter().take(4).enumerate() {
+            let scroll_offset = self
+                .mods_browser_scroll_offset
+                .min(self.max_mods_browser_scroll_offset(list));
+            for (visible_index, mod_index) in indices
+                .into_iter()
+                .skip(scroll_offset)
+                .take(Self::mods_browser_visible_entry_capacity_for_list(list))
+                .enumerate()
+            {
                 let rect = Self::mods_browser_entry_rect_for_list(list, visible_index);
                 let icon = RenderRect::new(rect.x + 10.0, rect.y + 10.0, 52.0, 52.0);
                 let text_x = icon.right() + 12.0;
@@ -53354,22 +53493,31 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.115,
             ));
         } else {
-            for (release_index, release) in
-                self.mods_browser_release_entries.iter().take(4).enumerate()
+            let scroll_offset = self
+                .mods_browser_releases_scroll_offset
+                .min(self.max_mods_browser_releases_scroll_offset(dialog));
+            let capacity = Self::mods_browser_release_visible_entry_capacity_for_dialog(dialog);
+            for (visible_index, (release_index, release)) in self
+                .mods_browser_release_entries
+                .iter()
+                .enumerate()
+                .skip(scroll_offset)
+                .take(capacity)
+                .enumerate()
             {
-                let entry = Self::mods_browser_release_entry_rect_for_dialog(dialog, release_index);
+                let entry = Self::mods_browser_release_entry_rect_for_dialog(dialog, visible_index);
                 pass.push(RenderCommand::draw_sprite(
                     "whiteui",
                     entry,
                     [0.10, 0.12, 0.15, 0.92],
                     0.0,
-                    Layer::END_PIXELED + 0.115 + release_index as f32 * 0.001,
+                    Layer::END_PIXELED + 0.115 + visible_index as f32 * 0.001,
                 ));
                 pass.push(RenderCommand::stroke_rect(
                     entry,
                     [0.34, 0.48, 0.58, 0.86],
                     1.0,
-                    Layer::END_PIXELED + 0.116 + release_index as f32 * 0.001,
+                    Layer::END_PIXELED + 0.116 + visible_index as f32 * 0.001,
                 ));
                 pass.push(RenderCommand::draw_text_styled(
                     if release_index == 0 {
@@ -53389,7 +53537,7 @@ impl DesktopLauncher {
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_integer_position(true)
                         .with_outline(true),
-                    Layer::END_PIXELED + 0.117 + release_index as f32 * 0.001,
+                    Layer::END_PIXELED + 0.117 + visible_index as f32 * 0.001,
                 ));
                 pass.push(RenderCommand::draw_text_styled(
                     release.published_at.clone(),
@@ -53400,7 +53548,7 @@ impl DesktopLauncher {
                     RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_integer_position(true),
-                    Layer::END_PIXELED + 0.1175 + release_index as f32 * 0.001,
+                    Layer::END_PIXELED + 0.1175 + visible_index as f32 * 0.001,
                 ));
                 for (button_index, (label, icon)) in [
                     ("@mods.github.open-release", "link"),
@@ -53416,7 +53564,7 @@ impl DesktopLauncher {
                         Some(icon),
                         Layer::END_PIXELED
                             + 0.118
-                            + release_index as f32 * 0.001
+                            + visible_index as f32 * 0.001
                             + button_index as f32 * 0.0001,
                     );
                 }
@@ -72136,6 +72284,204 @@ repo: "Beta/Override"
             !texts.contains(&"Fetching Releases..."),
             "Java hides the loading dialog and returns to selection on an empty releases response"
         );
+    }
+
+    #[test]
+    fn desktop_launcher_mods_browser_scrolls_all_matching_cards_like_java_scrollpane() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        for index in 0..6 {
+            let name = format!("mod-{index}");
+            let source = format!(
+                r#"
+name: mod-{index}
+displayName: "Mod {index}"
+author: "Author {index}"
+"#
+            );
+            launcher.last_mods_directory_mod_names.push(name.clone());
+            launcher
+                .last_mods_directory_mod_metas
+                .push(ModMetadata::from_source_text(
+                    name,
+                    Some("mod.hjson"),
+                    &source,
+                ));
+        }
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::OpenModsBrowser);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let dialog = DesktopLauncher::mods_browser_dialog_rect_for_panel(panel);
+        let list = DesktopLauncher::mods_browser_list_rect_for_dialog(dialog);
+        assert!(
+            DesktopLauncher::mods_browser_visible_entry_capacity_for_list(list) < 6,
+            "test assumes the default browser pane cannot show all six rows at once"
+        );
+
+        let before = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let before_texts = before
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods browser frame should render before scrolling")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(before_texts.contains(&"Mod 0"));
+        assert!(
+            !before_texts.contains(&"Mod 4"),
+            "before scrolling only the first visible Java ScrollPane rows should be drawn"
+        );
+
+        let cursor = list.center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: cursor.x,
+                    y: cursor.y,
+                },
+                DesktopInputTickEvent::Scroll {
+                    delta_x: 0.0,
+                    delta_y: -1.0,
+                },
+            ],
+        );
+        assert_eq!(launcher.mods_browser_scroll_offset, 1);
+
+        let first_visible = DesktopLauncher::mods_browser_entry_rect_for_list(list, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                first_visible.x,
+                first_visible.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::OpenModsBrowserSelection(1)),
+            "scrolling the Java-style browser pane must keep hit testing mapped to the underlying listing index"
+        );
+
+        let after = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let after_texts = after
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods browser frame should render after scrolling")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(after_texts.contains(&"Mod 4"));
+    }
+
+    #[test]
+    fn desktop_launcher_mods_browser_releases_scrolls_hitboxes_like_java_scrollpane() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.last_mods_directory_mod_names = vec!["beta".into()];
+        launcher.last_mods_directory_mod_metas = vec![ModMetadata::from_source_text(
+            "beta",
+            Some("mod.hjson"),
+            r#"
+name: beta
+displayName: "Beta Override"
+repo: "Beta/Override"
+"#,
+        )];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::OpenModsBrowser);
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsBrowserSelection(0),
+        );
+        let json = r#"[
+            {"name":"Release 0","tag_name":"v0","published_at":"2026-06-01T00:00:00Z","html_url":"https://github.com/Beta/Override/releases/tag/v0","url":"https://api.github.com/repos/Beta/Override/releases/0"},
+            {"name":"Release 1","tag_name":"v1","published_at":"2026-06-02T00:00:00Z","html_url":"https://github.com/Beta/Override/releases/tag/v1","url":"https://api.github.com/repos/Beta/Override/releases/1"},
+            {"name":"Release 2","tag_name":"v2","published_at":"2026-06-03T00:00:00Z","html_url":"https://github.com/Beta/Override/releases/tag/v2","url":"https://api.github.com/repos/Beta/Override/releases/2"},
+            {"name":"Release 3","tag_name":"v3","published_at":"2026-06-04T00:00:00Z","html_url":"https://github.com/Beta/Override/releases/tag/v3","url":"https://api.github.com/repos/Beta/Override/releases/3"},
+            {"name":"Release 4","tag_name":"v4","published_at":"2026-06-05T00:00:00Z","html_url":"https://github.com/Beta/Override/releases/tag/v4","url":"https://api.github.com/repos/Beta/Override/releases/4"},
+            {"name":"Release 5","tag_name":"v5","published_at":"2026-06-06T00:00:00Z","html_url":"https://github.com/Beta/Override/releases/tag/v5","url":"https://api.github.com/repos/Beta/Override/releases/5"}
+        ]"#;
+        assert_eq!(
+            launcher.apply_mods_browser_releases_json_for_mod(0, json),
+            6
+        );
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let browser = DesktopLauncher::mods_browser_dialog_rect_for_panel(panel);
+        let dialog = DesktopLauncher::mods_browser_releases_dialog_rect_for_browser(browser);
+        assert!(
+            DesktopLauncher::mods_browser_release_visible_entry_capacity_for_dialog(dialog) < 6,
+            "test assumes the default releases pane cannot show all six rows at once"
+        );
+
+        let cursor = dialog.center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: cursor.x,
+                    y: cursor.y,
+                },
+                DesktopInputTickEvent::Scroll {
+                    delta_x: 0.0,
+                    delta_y: -1.0,
+                },
+            ],
+        );
+        assert_eq!(launcher.mods_browser_releases_scroll_offset, 1);
+
+        let first_visible = DesktopLauncher::mods_browser_release_entry_rect_for_dialog(dialog, 0);
+        let release_page =
+            DesktopLauncher::mods_browser_release_button_rect(first_visible, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                release_page.x,
+                release_page.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ModsBrowserOpenRelease(
+                1
+            )),
+            "scrolling the releases pane must keep release buttons mapped to the underlying release index"
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods browser releases frame should render after scrolling")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!texts.contains(&"Release 0 [lightgray][Latest]"));
+        assert!(texts.contains(&"Release 4"));
     }
 
     #[test]
