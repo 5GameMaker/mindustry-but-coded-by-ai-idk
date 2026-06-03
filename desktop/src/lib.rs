@@ -3975,6 +3975,9 @@ enum DesktopPausedOverlayAction {
     Abandon,
     SaveGame,
     LoadGame,
+    Database,
+    Research,
+    PlanetMap,
     HostServer,
     WorldProcessors,
     Quit,
@@ -30880,6 +30883,7 @@ impl DesktopLauncher {
         let net_active = self.pause_overlay_net_active();
         let is_campaign = self.game_state.is_campaign();
         let is_editor = self.game_state.is_editor();
+        let is_mobile = self.menu_renderer_state.config.mobile;
         let mut specs = Vec::new();
 
         if is_campaign {
@@ -30911,6 +30915,55 @@ impl DesktopLauncher {
             icon: Some("settings"),
             enabled: true,
         });
+
+        if is_mobile {
+            if !is_campaign && !is_editor {
+                specs.push(DesktopPausedOverlayButtonSpec {
+                    action: DesktopPausedOverlayAction::SaveGame,
+                    label: "@save",
+                    icon: Some("save"),
+                    enabled: true,
+                });
+                specs.push(DesktopPausedOverlayButtonSpec {
+                    action: if net_active {
+                        DesktopPausedOverlayAction::Database
+                    } else {
+                        DesktopPausedOverlayAction::LoadGame
+                    },
+                    label: if net_active { "@database" } else { "@load" },
+                    icon: Some(if net_active { "book" } else { "download" }),
+                    enabled: true,
+                });
+            } else if is_campaign {
+                specs.push(DesktopPausedOverlayButtonSpec {
+                    action: DesktopPausedOverlayAction::Research,
+                    label: "@research",
+                    icon: Some("tree"),
+                    enabled: true,
+                });
+                specs.push(DesktopPausedOverlayButtonSpec {
+                    action: DesktopPausedOverlayAction::PlanetMap,
+                    label: "@planetmap",
+                    icon: Some("map"),
+                    enabled: true,
+                });
+            }
+
+            specs.push(DesktopPausedOverlayButtonSpec {
+                action: DesktopPausedOverlayAction::HostServer,
+                label: "@hostserver.mobile",
+                icon: Some("host"),
+                enabled: !net_active,
+            });
+            specs.push(DesktopPausedOverlayButtonSpec {
+                action: DesktopPausedOverlayAction::Quit,
+                label: "@quit",
+                icon: Some("exit"),
+                enabled: true,
+            });
+
+            return specs;
+        }
 
         if !is_campaign && !is_editor {
             specs.push(DesktopPausedOverlayButtonSpec {
@@ -40533,6 +40586,22 @@ impl DesktopLauncher {
             }
             DesktopPausedOverlayAction::LoadGame => {
                 self.open_pause_overlay_route(DesktopMenuRoute::LoadGame);
+            }
+            DesktopPausedOverlayAction::Database => {
+                self.open_pause_overlay_route(DesktopMenuRoute::Database);
+            }
+            DesktopPausedOverlayAction::Research => {
+                self.open_pause_overlay_route(DesktopMenuRoute::TechTree);
+            }
+            DesktopPausedOverlayAction::PlanetMap => {
+                self.active_menu_route = Some(DesktopMenuRoute::Campaign);
+                self.campaign_planet_dialog = Some(CampaignPlanetDialogState::look(
+                    &self.content_loader,
+                    &self.game_state,
+                ));
+                self.pause_overlay_modal = None;
+                self.last_menu_guard_message = None;
+                self.last_menu_route_shell_action = None;
             }
             DesktopPausedOverlayAction::HostServer => {
                 if self.pause_overlay_host_invites_friends() {
@@ -74226,6 +74295,86 @@ repo: "Beta/Override"
         server_launcher
             .dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::HostServer);
         assert_eq!(server_launcher.active_menu_route, None);
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_renders_mobile_branch_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_renderer_state.config.mobile = true;
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+
+        let specs = launcher.pause_overlay_button_specs();
+        let labels = specs.iter().map(|spec| spec.label).collect::<Vec<_>>();
+        assert_eq!(
+            labels,
+            vec![
+                "@back",
+                "@settings",
+                "@save",
+                "@load",
+                "@hostserver.mobile",
+                "@quit"
+            ],
+            "Java PausedDialog mobile branch uses @save/@load row labels, not @savegame/@loadgame"
+        );
+        assert!(specs.iter().any(|spec| spec.action
+            == super::DesktopPausedOverlayAction::LoadGame
+            && spec.icon == Some("download")
+            && spec.enabled));
+        assert!(!specs.iter().any(|spec| spec.label == "@savegame"));
+        assert!(!specs.iter().any(|spec| spec.label == "@loadgame"));
+
+        launcher.net_client.state().lock().unwrap().connected = true;
+        let net_specs = launcher.pause_overlay_button_specs();
+        assert!(net_specs.iter().any(|spec| spec.action
+            == super::DesktopPausedOverlayAction::Database
+            && spec.label == "@database"
+            && spec.icon == Some("book")
+            && spec.enabled));
+        assert!(net_specs.iter().any(|spec| spec.action
+            == super::DesktopPausedOverlayAction::HostServer
+            && !spec.enabled));
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::Database);
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Database)
+        );
+
+        let mut campaign = DesktopLauncher::new(Vec::new());
+        campaign.menu_renderer_state.config.mobile = true;
+        campaign.game_state.world.resize(16, 16);
+        campaign.game_state.set(GameStateState::Paused);
+        campaign.game_state.set_sector(Some(Sector::new(173)));
+        let campaign_specs = campaign.pause_overlay_button_specs();
+        assert!(campaign_specs.iter().any(|spec| spec.action
+            == super::DesktopPausedOverlayAction::Research
+            && spec.label == "@research"
+            && spec.icon == Some("tree")));
+        assert!(campaign_specs.iter().any(|spec| spec.action
+            == super::DesktopPausedOverlayAction::PlanetMap
+            && spec.label == "@planetmap"
+            && spec.icon == Some("map")));
+        assert!(!campaign_specs.iter().any(|spec| matches!(
+            spec.action,
+            super::DesktopPausedOverlayAction::SaveGame
+                | super::DesktopPausedOverlayAction::LoadGame
+        )));
+
+        campaign.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::Research);
+        assert_eq!(
+            campaign.active_menu_route,
+            Some(super::DesktopMenuRoute::TechTree)
+        );
+        campaign.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::PlanetMap);
+        assert_eq!(
+            campaign.active_menu_route,
+            Some(super::DesktopMenuRoute::Campaign)
+        );
+        assert!(
+            campaign.campaign_planet_dialog.is_some(),
+            "Java mobile @planetmap opens PlanetDialog"
+        );
     }
 
     #[test]
