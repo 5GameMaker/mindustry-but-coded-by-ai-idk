@@ -30334,11 +30334,22 @@ impl DesktopLauncher {
     }
 
     fn pause_overlay_net_active(&self) -> bool {
+        if self.runtime.network_context.active {
+            return true;
+        }
         self.net_client
             .state()
             .lock()
             .map(|state| state.connected || state.connecting)
             .unwrap_or(false)
+    }
+
+    fn pause_overlay_net_server(&self) -> bool {
+        self.runtime.network_context.server
+    }
+
+    fn pause_overlay_host_invites_friends(&self) -> bool {
+        self.host_steam_enabled() && self.pause_overlay_net_server()
     }
 
     fn pause_overlay_has_objective(&self) -> bool {
@@ -30402,13 +30413,15 @@ impl DesktopLauncher {
 
         specs.push(DesktopPausedOverlayButtonSpec {
             action: DesktopPausedOverlayAction::HostServer,
-            label: if is_editor {
+            label: if self.pause_overlay_host_invites_friends() {
+                "@invitefriends"
+            } else if is_editor {
                 "@hostserver.mobile"
             } else {
                 "@hostserver"
             },
             icon: Some("host"),
-            enabled: !net_active,
+            enabled: self.pause_overlay_host_invites_friends() || !net_active,
         });
 
         if is_editor {
@@ -39660,7 +39673,11 @@ impl DesktopLauncher {
         self.begin_edit_map(testing)
     }
 
-    fn dispatch_pause_overlay_action(&mut self, action: DesktopPausedOverlayAction) {
+    fn dispatch_pause_overlay_action_with_platform<P: Platform>(
+        &mut self,
+        action: DesktopPausedOverlayAction,
+        platform: &mut P,
+    ) {
         let action_enabled = match action {
             DesktopPausedOverlayAction::GameOverMenu
             | DesktopPausedOverlayAction::GameOverContinue
@@ -39725,7 +39742,11 @@ impl DesktopLauncher {
                 self.open_pause_overlay_route(DesktopMenuRoute::LoadGame);
             }
             DesktopPausedOverlayAction::HostServer => {
-                self.open_pause_overlay_route(DesktopMenuRoute::Host);
+                if self.pause_overlay_host_invites_friends() {
+                    platform.invite_friends();
+                } else {
+                    self.open_pause_overlay_route(DesktopMenuRoute::Host);
+                }
             }
             DesktopPausedOverlayAction::WorldProcessors => {
                 self.pause_overlay_modal = Some(DesktopPausedOverlayModal::WorldProcessors);
@@ -39736,6 +39757,11 @@ impl DesktopLauncher {
                 self.last_pause_quit_result = Some(DesktopPauseQuitResult::Shown);
             }
         }
+    }
+
+    fn dispatch_pause_overlay_action(&mut self, action: DesktopPausedOverlayAction) {
+        let mut platform = DefaultPlatform;
+        self.dispatch_pause_overlay_action_with_platform(action, &mut platform);
     }
 
     fn campaign_sector_preset_by_id(
@@ -52639,17 +52665,19 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.163,
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            subtitle,
-            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 50.0),
-            [0.56, 0.68, 0.78, 1.0],
-            9.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.164,
-        ));
+        if desktop_show_upstream_route_debug() {
+            pass.push(RenderCommand::draw_text_styled(
+                subtitle,
+                RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 50.0),
+                [0.56, 0.68, 0.78, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.164,
+            ));
+        }
         pass.push(RenderCommand::draw_text_styled(
             self.localize_bundle_markup_text(&body),
             RenderPoint::new(dialog.center().x, dialog.center().y + 4.0),
@@ -52856,7 +52884,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.142,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "PausedDialog",
+            self.localize_bundle_markup_text("@menu"),
             RenderPoint::new(panel.center().x, panel.y + panel.height - 25.0),
             [0.94, 0.98, 1.0, 1.0],
             13.0,
@@ -55365,11 +55393,16 @@ mod tests {
         viewed_listing_ids: Vec<String>,
         viewed_listings: Vec<String>,
         published: Vec<String>,
+        invited_friends: usize,
         clipboard_texts: Vec<String>,
         clipboard_read: Option<String>,
     }
 
     impl Platform for RecordingPlatform {
+        fn invite_friends(&mut self) {
+            self.invited_friends += 1;
+        }
+
         fn open_uri(&mut self, uri: &str) -> bool {
             self.opened_uris.push(uri.to_string());
             self.open_result
@@ -72711,7 +72744,7 @@ repo: "Beta/Override"
             })
             .collect::<Vec<_>>();
 
-        assert!(texts.contains(&"PausedDialog"));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@menu").as_str()));
         assert!(texts.contains(&"upstream: PausedDialog"));
         assert!(texts.contains(&launcher.localize_bundle_markup_text("@back").as_str()));
         assert!(texts.contains(&launcher.localize_bundle_markup_text("@settings").as_str()));
@@ -72861,6 +72894,76 @@ repo: "Beta/Override"
         assert!(processor_texts
             .iter()
             .any(|text| text.contains("processors: 0")));
+
+        let mut server_launcher = DesktopLauncher::new(Vec::new());
+        server_launcher.game_state.world.resize(16, 16);
+        server_launcher.game_state.set(GameStateState::Paused);
+        server_launcher
+            .runtime
+            .set_network_context(GameRuntimeNetworkContext::server());
+        let server_panel = DesktopLauncher::pause_overlay_panel_for_viewport(viewport);
+        let server_host =
+            DesktopLauncher::pause_overlay_button_rect_for_panel(server_panel, 4).center();
+        assert_eq!(
+            server_launcher.pause_overlay_action_at_surface_point(
+                surface,
+                server_host.x,
+                server_host.y
+            ),
+            None,
+            "Java PausedDialog disables host while net.active() unless steam server invite is available"
+        );
+        server_launcher
+            .dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::HostServer);
+        assert_eq!(server_launcher.active_menu_route, None);
+    }
+
+    #[test]
+    fn desktop_launcher_paused_host_button_invites_friends_for_steam_server_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher
+            .runtime
+            .set_network_context(GameRuntimeNetworkContext::server());
+        launcher.set_setting_override("platform", "steam", "true");
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::pause_overlay_panel_for_viewport(viewport);
+        let host_center = DesktopLauncher::pause_overlay_button_rect_for_panel(panel, 4).center();
+
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, host_center.x, host_center.y),
+            Some(super::DesktopPausedOverlayAction::HostServer)
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@invitefriends")
+                .as_str()
+        ));
+        assert!(!texts.contains(&launcher.localize_bundle_markup_text("@hostserver").as_str()));
+
+        let mut platform = RecordingPlatform::default();
+        launcher.dispatch_pause_overlay_action_with_platform(
+            super::DesktopPausedOverlayAction::HostServer,
+            &mut platform,
+        );
+        assert_eq!(platform.invited_friends, 1);
+        assert_eq!(launcher.active_menu_route, None);
     }
 
     #[test]

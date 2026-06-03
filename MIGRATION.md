@@ -17,6 +17,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 822. PausedDialog Steam 服务端邀请好友分支
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.53%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `PausedDialog.java` 桌面分支中 Host 按钮启用条件为 `(steam && net.server()) || !net.active()`；
+  - 当 `net.server() && steam` 时按钮文本更新为 `@invitefriends`，点击后调用 `platform.inviteFriends()`；
+  - `PausedDialog` 标题来自 `BaseDialog("@menu")`，正式 UI 不应直接显示实现类名。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `pause_overlay_net_server()` 与 `pause_overlay_host_invites_friends()`；
+    - Pause overlay Host 按钮在 Steam 服务端状态下显示 `@invitefriends`，并在平台分发路径调用 `Platform::invite_friends()`；
+    - `pause_overlay_net_active()` 同步覆盖 runtime network context，避免非 Steam server active 时仍可打开 Host/Load；
+    - `dispatch_pause_overlay_action(...)` 拆出 `dispatch_pause_overlay_action_with_platform(...)`，保留默认平台 wrapper，便于测试真实平台动作；
+    - 暂停面板标题从硬编码 `PausedDialog` 改为本地化 `@menu`，`FullTextDialog`/`MapProcessorsDialog`/`PausedDialog.showQuitConfirm` 等实现类名只在 upstream 调试模式下绘制。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_paused --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - `PausedDialog` 的规则自定义 book 按钮、mobile `@research/@planetmap` 分支、完整退出保存/Autosave 与更多 HUD pause banner 仍需继续按 Java 对照迁移；
+  - Settings data 页真实 export/import/open-folder/crash-log 动作、Editor Shift playtest 快捷分支可作为后续小闭环。
+
 ## 821. ModsDialog Guide 按钮打开官方 modding 文档
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
