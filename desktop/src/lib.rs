@@ -4324,6 +4324,14 @@ enum DesktopPausedOverlayAction {
     RemovePauseWeather(usize),
     TogglePauseWeatherAlways(usize),
     AdjustPauseWeatherNumber(usize, DesktopWeatherNumber, i32),
+    OpenPauseTeamRules,
+    ClosePauseTeamRules,
+    TogglePauseAllowEditRules,
+    SelectPauseDefaultTeam(usize),
+    SelectPauseWaveTeam(usize),
+    TogglePauseTeamRuleSection(usize),
+    TogglePauseTeamRule(usize, DesktopTeamRuleToggle),
+    AdjustPauseTeamRuleNumber(usize, DesktopTeamRuleNumber, i32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18825,6 +18833,8 @@ pub struct DesktopLauncher {
     pause_custom_rules_weather_dialog_open: bool,
     pause_custom_rules_weather_scroll_offset: usize,
     pause_custom_rules_weather_add_dialog_open: bool,
+    pause_custom_rules_team_rules_dialog_open: bool,
+    pause_custom_rules_team_rules_selected_team: Option<usize>,
     last_pause_custom_rules_clipboard_text: Option<String>,
     pause_custom_rules_error: Option<String>,
     last_pause_quit_result: Option<DesktopPauseQuitResult>,
@@ -20056,6 +20066,8 @@ impl DesktopLauncher {
             pause_custom_rules_weather_dialog_open: false,
             pause_custom_rules_weather_scroll_offset: 0,
             pause_custom_rules_weather_add_dialog_open: false,
+            pause_custom_rules_team_rules_dialog_open: false,
+            pause_custom_rules_team_rules_selected_team: None,
             last_pause_custom_rules_clipboard_text: None,
             pause_custom_rules_error: None,
             last_pause_quit_result: None,
@@ -31903,6 +31915,74 @@ impl DesktopLauncher {
                     }
                     return None;
                 }
+                if self.pause_custom_rules_team_rules_dialog_open {
+                    let team_dialog = Self::map_play_team_rules_dialog_rect(dialog);
+                    if Self::map_play_team_rules_close_rect(team_dialog).contains_point(point) {
+                        return Some(DesktopPausedOverlayAction::ClosePauseTeamRules);
+                    }
+                    if Self::map_play_team_rules_allow_edit_rect(team_dialog).contains_point(point)
+                    {
+                        return Some(DesktopPausedOverlayAction::TogglePauseAllowEditRules);
+                    }
+                    let rules = self.pause_custom_rules_current_rules();
+                    let teams = Self::map_play_team_options();
+                    for (team_index, (team_id, _, _)) in teams.iter().enumerate() {
+                        if Self::map_play_team_rules_selector_rect(team_dialog, 0, team_index)
+                            .contains_point(point)
+                        {
+                            return Some(DesktopPausedOverlayAction::SelectPauseDefaultTeam(
+                                *team_id,
+                            ));
+                        }
+                        if Self::map_play_team_rules_selector_rect(team_dialog, 1, team_index)
+                            .contains_point(point)
+                        {
+                            return Some(DesktopPausedOverlayAction::SelectPauseWaveTeam(*team_id));
+                        }
+                        if Self::map_play_team_rules_section_rect(team_dialog, team_index)
+                            .contains_point(point)
+                        {
+                            return Some(DesktopPausedOverlayAction::TogglePauseTeamRuleSection(
+                                *team_id,
+                            ));
+                        }
+                    }
+                    let selected_team = self
+                        .pause_custom_rules_team_rules_selected_team
+                        .unwrap_or(rules.default_team.max(0) as usize);
+                    for (field_index, toggle) in DesktopTeamRuleToggle::ALL.into_iter().enumerate()
+                    {
+                        let row = Self::map_play_team_rules_field_rect(team_dialog, field_index);
+                        if Self::map_play_team_rules_field_toggle_rect(row).contains_point(point) {
+                            return Some(DesktopPausedOverlayAction::TogglePauseTeamRule(
+                                selected_team,
+                                toggle,
+                            ));
+                        }
+                    }
+                    let offset = DesktopTeamRuleToggle::ALL.len();
+                    for (number_index, number) in DesktopTeamRuleNumber::ALL.into_iter().enumerate()
+                    {
+                        let row = Self::map_play_team_rules_field_rect(
+                            team_dialog,
+                            offset + number_index,
+                        );
+                        for (increase, direction) in [(false, -1), (true, 1)] {
+                            if Self::map_play_team_rules_number_button_rect(row, increase)
+                                .contains_point(point)
+                            {
+                                return Some(
+                                    DesktopPausedOverlayAction::AdjustPauseTeamRuleNumber(
+                                        selected_team,
+                                        number,
+                                        direction,
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    return None;
+                }
                 if self.pause_custom_rules_edit_dialog_open {
                     let edit = Self::map_play_rules_edit_dialog_rect(dialog);
                     for (button_index, action) in [
@@ -31952,6 +32032,11 @@ impl DesktopLauncher {
                     .contains_point(point)
                 {
                     return Some(DesktopPausedOverlayAction::OpenPauseWeather);
+                }
+                if Self::pause_overlay_custom_rules_child_button_rect(dialog, 3)
+                    .contains_point(point)
+                {
+                    return Some(DesktopPausedOverlayAction::OpenPauseTeamRules);
                 }
                 if Self::pause_overlay_modal_close_rect(dialog).contains_point(point) {
                     return Some(DesktopPausedOverlayAction::CloseModal);
@@ -35497,6 +35582,7 @@ impl DesktopLauncher {
             || self.pause_custom_rules_edit_dialog_open
             || self.pause_custom_rules_banned_content_dialog.is_some()
             || self.pause_custom_rules_weather_dialog_open
+            || self.pause_custom_rules_team_rules_dialog_open
         {
             return false;
         }
@@ -35805,6 +35891,41 @@ impl DesktopLauncher {
         direction: i32,
     ) {
         self.update_map_play_rules_for_team(index, |rules| {
+            number.adjust(rules.teams.get_or_insert(team_id), direction);
+        });
+    }
+
+    fn update_pause_rules_for_team(&mut self, update: impl FnOnce(&mut Rules)) {
+        let rules = self.ensure_pause_custom_rules_edit_rules();
+        update(rules);
+        self.pause_custom_rules_error = None;
+    }
+
+    fn select_pause_default_team(&mut self, team_id: usize) {
+        self.update_pause_rules_for_team(|rules| {
+            rules.default_team = team_id as i32;
+        });
+    }
+
+    fn select_pause_wave_team(&mut self, team_id: usize) {
+        self.update_pause_rules_for_team(|rules| {
+            rules.wave_team = team_id as i32;
+        });
+    }
+
+    fn toggle_pause_team_rule(&mut self, team_id: usize, toggle: DesktopTeamRuleToggle) {
+        self.update_pause_rules_for_team(|rules| {
+            toggle.toggle(rules.teams.get_or_insert(team_id));
+        });
+    }
+
+    fn adjust_pause_team_rule_number(
+        &mut self,
+        team_id: usize,
+        number: DesktopTeamRuleNumber,
+        direction: i32,
+    ) {
+        self.update_pause_rules_for_team(|rules| {
             number.adjust(rules.teams.get_or_insert(team_id), direction);
         });
     }
@@ -41724,6 +41845,8 @@ impl DesktopLauncher {
         self.pause_custom_rules_weather_dialog_open = false;
         self.pause_custom_rules_weather_scroll_offset = 0;
         self.pause_custom_rules_weather_add_dialog_open = false;
+        self.pause_custom_rules_team_rules_dialog_open = false;
+        self.pause_custom_rules_team_rules_selected_team = None;
         self.pause_custom_rules_error = None;
         self.pause_overlay_modal = None;
     }
@@ -41869,7 +41992,15 @@ impl DesktopLauncher {
             | DesktopPausedOverlayAction::AddPauseWeather(_)
             | DesktopPausedOverlayAction::RemovePauseWeather(_)
             | DesktopPausedOverlayAction::TogglePauseWeatherAlways(_)
-            | DesktopPausedOverlayAction::AdjustPauseWeatherNumber(_, _, _) => {
+            | DesktopPausedOverlayAction::AdjustPauseWeatherNumber(_, _, _)
+            | DesktopPausedOverlayAction::OpenPauseTeamRules
+            | DesktopPausedOverlayAction::ClosePauseTeamRules
+            | DesktopPausedOverlayAction::TogglePauseAllowEditRules
+            | DesktopPausedOverlayAction::SelectPauseDefaultTeam(_)
+            | DesktopPausedOverlayAction::SelectPauseWaveTeam(_)
+            | DesktopPausedOverlayAction::TogglePauseTeamRuleSection(_)
+            | DesktopPausedOverlayAction::TogglePauseTeamRule(_, _)
+            | DesktopPausedOverlayAction::AdjustPauseTeamRuleNumber(_, _, _) => {
                 self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
                     && self.pause_overlay_custom_rules_visible()
             }
@@ -41911,6 +42042,8 @@ impl DesktopLauncher {
                 self.pause_custom_rules_weather_dialog_open = false;
                 self.pause_custom_rules_weather_scroll_offset = 0;
                 self.pause_custom_rules_weather_add_dialog_open = false;
+                self.pause_custom_rules_team_rules_dialog_open = false;
+                self.pause_custom_rules_team_rules_selected_team = None;
                 self.pause_custom_rules_error = None;
                 self.last_menu_guard_message = None;
             }
@@ -41927,6 +42060,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_banned_content_search_focused = false;
                 self.pause_custom_rules_weather_dialog_open = false;
                 self.pause_custom_rules_weather_add_dialog_open = false;
+                self.pause_custom_rules_team_rules_dialog_open = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseCustomRulesEdit => {
@@ -41963,6 +42097,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_search_focused = false;
                 self.pause_custom_rules_weather_dialog_open = false;
                 self.pause_custom_rules_weather_add_dialog_open = false;
+                self.pause_custom_rules_team_rules_dialog_open = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseBannedContent => {
@@ -42016,6 +42151,7 @@ impl DesktopLauncher {
                 self.pause_custom_rules_banned_content_search_focused = false;
                 self.pause_custom_rules_edit_dialog_open = false;
                 self.pause_custom_rules_search_focused = false;
+                self.pause_custom_rules_team_rules_dialog_open = false;
                 self.pause_custom_rules_error = None;
             }
             DesktopPausedOverlayAction::ClosePauseWeather => {
@@ -42050,6 +42186,54 @@ impl DesktopLauncher {
                 self.adjust_pause_weather_number(weather_index, number, direction);
                 self.pause_custom_rules_weather_dialog_open = true;
             }
+            DesktopPausedOverlayAction::OpenPauseTeamRules => {
+                self.pause_custom_rules_team_rules_dialog_open = true;
+                self.pause_custom_rules_banned_content_dialog = None;
+                self.pause_custom_rules_banned_content_search_focused = false;
+                self.pause_custom_rules_weather_dialog_open = false;
+                self.pause_custom_rules_weather_add_dialog_open = false;
+                self.pause_custom_rules_edit_dialog_open = false;
+                self.pause_custom_rules_search_focused = false;
+                self.pause_custom_rules_error = None;
+            }
+            DesktopPausedOverlayAction::ClosePauseTeamRules => {
+                self.pause_custom_rules_team_rules_dialog_open = false;
+            }
+            DesktopPausedOverlayAction::TogglePauseAllowEditRules => {
+                self.update_pause_rules_for_team(|rules| {
+                    rules.allow_edit_rules = !rules.allow_edit_rules;
+                });
+                self.pause_custom_rules_team_rules_dialog_open = true;
+            }
+            DesktopPausedOverlayAction::SelectPauseDefaultTeam(team_id) => {
+                self.select_pause_default_team(team_id);
+                self.pause_custom_rules_team_rules_selected_team = Some(team_id);
+                self.pause_custom_rules_team_rules_dialog_open = true;
+            }
+            DesktopPausedOverlayAction::SelectPauseWaveTeam(team_id) => {
+                self.select_pause_wave_team(team_id);
+                self.pause_custom_rules_team_rules_selected_team = Some(team_id);
+                self.pause_custom_rules_team_rules_dialog_open = true;
+            }
+            DesktopPausedOverlayAction::TogglePauseTeamRuleSection(team_id) => {
+                self.pause_custom_rules_team_rules_selected_team =
+                    if self.pause_custom_rules_team_rules_selected_team == Some(team_id) {
+                        None
+                    } else {
+                        Some(team_id)
+                    };
+                self.pause_custom_rules_team_rules_dialog_open = true;
+            }
+            DesktopPausedOverlayAction::TogglePauseTeamRule(team_id, toggle) => {
+                self.toggle_pause_team_rule(team_id, toggle);
+                self.pause_custom_rules_team_rules_selected_team = Some(team_id);
+                self.pause_custom_rules_team_rules_dialog_open = true;
+            }
+            DesktopPausedOverlayAction::AdjustPauseTeamRuleNumber(team_id, number, direction) => {
+                self.adjust_pause_team_rule_number(team_id, number, direction);
+                self.pause_custom_rules_team_rules_selected_team = Some(team_id);
+                self.pause_custom_rules_team_rules_dialog_open = true;
+            }
             DesktopPausedOverlayAction::Back => {
                 if self.pause_overlay_modal.is_some() {
                     if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
@@ -42069,6 +42253,12 @@ impl DesktopLauncher {
                         && self.pause_custom_rules_weather_dialog_open
                     {
                         self.pause_custom_rules_weather_dialog_open = false;
+                        return;
+                    }
+                    if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::CustomRules)
+                        && self.pause_custom_rules_team_rules_dialog_open
+                    {
+                        self.pause_custom_rules_team_rules_dialog_open = false;
                         return;
                     }
                     self.close_pause_overlay_modal();
@@ -56042,6 +56232,231 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_pause_team_rules_dialog(
+        &self,
+        pass: &mut RenderPass,
+        dialog_parent: RenderRect,
+        rules: &Rules,
+    ) {
+        let layer = Layer::END_PIXELED + 0.232;
+        let dialog = Self::map_play_team_rules_dialog_rect(dialog_parent);
+        let teams = Self::map_play_team_options();
+        let selected_team = self
+            .pause_custom_rules_team_rules_selected_team
+            .unwrap_or(rules.default_team.max(0) as usize);
+        let selected_rule = rules.teams.get_or_default(selected_team);
+        pass.push(RenderCommand::fill_rect(
+            dialog_parent,
+            [0.0, 0.0, 0.0, 0.52],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.62, 0.82, 1.0, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@rules.title.teams"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 26.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.004,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_team_rules_allow_edit_rect(dialog),
+            format!(
+                "{} {}",
+                if rules.allow_edit_rules { "✓" } else { "□" },
+                self.localize_bundle_markup_text("@rules.allowedit")
+            ),
+            None,
+            layer + 0.005,
+        );
+        for (row_index, (label, active_team)) in [
+            ("@rules.playerteam", rules.default_team),
+            ("@rules.enemyteam", rules.wave_team),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text(label),
+                RenderPoint::new(
+                    dialog.x + 24.0,
+                    dialog.y + dialog.height - 67.0 - row_index as f32 * 42.0,
+                ),
+                [0.88, 0.95, 1.0, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.006 + row_index as f32 * 0.001,
+            ));
+            for (team_index, (team_id, name, color)) in teams.iter().enumerate() {
+                let rect = Self::map_play_team_rules_selector_rect(dialog, row_index, team_index);
+                let mut tint = rgba8888_to_render_color(*color, 1.0);
+                tint[3] = if active_team == *team_id as i32 {
+                    0.98
+                } else {
+                    0.42
+                };
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_drawable_symbol("button"),
+                    rect,
+                    tint,
+                    0.0,
+                    layer + 0.008 + row_index as f32 * 0.001 + team_index as f32 * 0.0001,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    name.clone(),
+                    rect.center(),
+                    [0.96, 0.98, 1.0, 1.0],
+                    8.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    layer + 0.009 + row_index as f32 * 0.001 + team_index as f32 * 0.0001,
+                ));
+            }
+        }
+        for (team_index, (team_id, name, color)) in teams.iter().enumerate() {
+            let rect = Self::map_play_team_rules_section_rect(dialog, team_index);
+            let mut tint = rgba8888_to_render_color(*color, 1.0);
+            tint[3] = if selected_team == *team_id {
+                0.74
+            } else {
+                0.30
+            };
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("button"),
+                rect,
+                tint,
+                0.0,
+                layer + 0.030 + team_index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                name.clone(),
+                RenderPoint::new(rect.x + 10.0, rect.center().y),
+                [0.94, 0.98, 1.0, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.031 + team_index as f32 * 0.001,
+            ));
+        }
+        let selected_name = teams
+            .iter()
+            .find(|(team_id, _, _)| *team_id == selected_team)
+            .map(|(_, name, _)| name.as_str())
+            .unwrap_or("team");
+        pass.push(RenderCommand::draw_text_styled(
+            selected_name.to_string(),
+            RenderPoint::new(dialog.x + 220.0, dialog.y + dialog.height - 146.0),
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.040,
+        ));
+        for (field_index, toggle) in DesktopTeamRuleToggle::ALL.into_iter().enumerate() {
+            let row = Self::map_play_team_rules_field_rect(dialog, field_index);
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text(toggle.label_key()),
+                RenderPoint::new(row.x + 6.0, row.center().y),
+                [0.84, 0.92, 1.0, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.050 + field_index as f32 * 0.001,
+            ));
+            self.push_settings_text_button(
+                pass,
+                Self::map_play_team_rules_field_toggle_rect(row),
+                if toggle.value(&selected_rule) {
+                    "✓"
+                } else {
+                    "□"
+                },
+                None,
+                layer + 0.051 + field_index as f32 * 0.001,
+            );
+        }
+        let offset = DesktopTeamRuleToggle::ALL.len();
+        for (number_index, number) in DesktopTeamRuleNumber::ALL.into_iter().enumerate() {
+            let row = Self::map_play_team_rules_field_rect(dialog, offset + number_index);
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text(number.label_key()),
+                RenderPoint::new(row.x + 6.0, row.center().y),
+                [0.84, 0.92, 1.0, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.070 + number_index as f32 * 0.001,
+            ));
+            self.push_settings_text_button(
+                pass,
+                Self::map_play_team_rules_number_button_rect(row, false),
+                "-",
+                None,
+                layer + 0.071 + number_index as f32 * 0.001,
+            );
+            self.push_settings_text_button(
+                pass,
+                Self::map_play_team_rules_number_button_rect(row, true),
+                "+",
+                None,
+                layer + 0.072 + number_index as f32 * 0.001,
+            );
+            pass.push(RenderCommand::draw_text_styled(
+                number.value_text(&selected_rule),
+                RenderPoint::new(row.right() - 58.0, row.center().y),
+                [0.94, 0.98, 1.0, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.073 + number_index as f32 * 0.001,
+            ));
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_team_rules_close_rect(dialog),
+            self.localize_bundle_markup_text("@back"),
+            Some("left"),
+            layer + 0.090,
+        );
+        self.push_map_play_team_rules_hover_tooltip(pass, dialog_parent, dialog, layer + 0.110);
+    }
+
     fn push_pause_overlay_custom_rules_modal(&self, pass: &mut RenderPass, panel: RenderRect) {
         let dialog = Self::pause_overlay_custom_rules_modal_rect_for_panel(panel);
         let content = Self::pause_overlay_custom_rules_content_rect(dialog);
@@ -56289,6 +56704,10 @@ impl DesktopLauncher {
                 "@rules.weather",
                 self.pause_custom_rules_weather_dialog_open,
             ),
+            (
+                "@rules.title.teams",
+                self.pause_custom_rules_team_rules_dialog_open,
+            ),
         ]
         .into_iter()
         .enumerate()
@@ -56324,6 +56743,9 @@ impl DesktopLauncher {
         }
         if self.pause_custom_rules_weather_dialog_open {
             self.push_pause_weather_dialog(pass, dialog, rules);
+        }
+        if self.pause_custom_rules_team_rules_dialog_open {
+            self.push_pause_team_rules_dialog(pass, dialog, rules);
         }
     }
 
@@ -78372,6 +78794,212 @@ displayName: "Alpha Pack"
                 .first()
                 .map(|entry| (entry.weather.as_str(), entry.always)),
             Some((candidate_name.as_str(), true))
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_custom_rules_team_rules_child_dialog_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.game_state.rules.allow_edit_rules = true;
+        launcher.game_state.rules.default_team = 1;
+        launcher.game_state.rules.wave_team = 2;
+        launcher.runtime.state.rules = launcher.game_state.rules.copy();
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CustomRules);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = launcher.pause_overlay_panel_for_current_state(viewport);
+        let dialog = DesktopLauncher::pause_overlay_custom_rules_modal_rect_for_panel(panel);
+        let teams_center =
+            DesktopLauncher::pause_overlay_custom_rules_child_button_rect(dialog, 3).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, teams_center.x, teams_center.y),
+            Some(super::DesktopPausedOverlayAction::OpenPauseTeamRules)
+        );
+        launcher
+            .dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::OpenPauseTeamRules);
+        assert!(launcher.pause_custom_rules_team_rules_dialog_open);
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            texts
+                .iter()
+                .any(|text| text
+                    .contains(&launcher.localize_bundle_markup_text("@rules.title.teams")))
+        );
+        assert!(texts
+            .iter()
+            .any(|text| text.contains(&launcher.localize_bundle_markup_text("@rules.playerteam"))));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains(&launcher.localize_bundle_markup_text("@rules.enemyteam"))));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains(&launcher.localize_bundle_markup_text("@rules.allowedit"))));
+
+        let team_dialog = DesktopLauncher::map_play_team_rules_dialog_rect(dialog);
+        let teams = DesktopLauncher::map_play_team_options();
+        let (target_index, (target_team, _, _)) = teams
+            .iter()
+            .enumerate()
+            .find(|(_, (team_id, _, _))| *team_id != 1)
+            .expect("vanilla base teams should contain a non-default team");
+        let default_selector =
+            DesktopLauncher::map_play_team_rules_selector_rect(team_dialog, 0, target_index)
+                .center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                default_selector.x,
+                default_selector.y
+            ),
+            Some(super::DesktopPausedOverlayAction::SelectPauseDefaultTeam(
+                *target_team
+            ))
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::SelectPauseDefaultTeam(*target_team),
+        );
+        assert_eq!(
+            launcher
+                .pause_custom_rules_edit
+                .as_ref()
+                .map(|rules| rules.default_team),
+            Some(*target_team as i32)
+        );
+        assert_eq!(launcher.game_state.rules.default_team, 1);
+
+        let section =
+            DesktopLauncher::map_play_team_rules_section_rect(team_dialog, target_index).center();
+        launcher.dispatch_pause_overlay_action(
+            launcher
+                .pause_overlay_action_at_surface_point(surface, section.x, section.y)
+                .expect("team section should be clickable"),
+        );
+        assert_eq!(
+            launcher.pause_custom_rules_team_rules_selected_team,
+            None,
+            "clicking the currently selected team section should collapse it like map-play CustomRulesDialog"
+        );
+
+        let toggle = super::DesktopTeamRuleToggle::ProtectCores;
+        let toggle_row = DesktopLauncher::map_play_team_rules_field_rect(team_dialog, 0);
+        let toggle_center =
+            DesktopLauncher::map_play_team_rules_field_toggle_rect(toggle_row).center();
+        let protect_before = launcher
+            .pause_custom_rules_edit
+            .as_ref()
+            .map(|rules| rules.teams.get_or_default(*target_team).protect_cores)
+            .unwrap_or(false);
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                toggle_center.x,
+                toggle_center.y
+            ),
+            Some(super::DesktopPausedOverlayAction::TogglePauseTeamRule(
+                *target_team,
+                toggle
+            ))
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::TogglePauseTeamRule(*target_team, toggle),
+        );
+        let protect_after = launcher
+            .pause_custom_rules_edit
+            .as_ref()
+            .map(|rules| rules.teams.get_or_default(*target_team).protect_cores)
+            .unwrap_or(protect_before);
+        assert_ne!(
+            protect_after, protect_before,
+            "pause team rules should toggle nested TeamRules fields in pending edit rules"
+        );
+
+        let number = super::DesktopTeamRuleNumber::BlockHealthMultiplier;
+        let number_row = DesktopLauncher::map_play_team_rules_field_rect(
+            team_dialog,
+            super::DesktopTeamRuleToggle::ALL.len(),
+        );
+        let increase =
+            DesktopLauncher::map_play_team_rules_number_button_rect(number_row, true).center();
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, increase.x, increase.y),
+            Some(
+                super::DesktopPausedOverlayAction::AdjustPauseTeamRuleNumber(
+                    *target_team,
+                    number,
+                    1
+                )
+            )
+        );
+        launcher.dispatch_pause_overlay_action(
+            super::DesktopPausedOverlayAction::AdjustPauseTeamRuleNumber(*target_team, number, 1),
+        );
+        assert!(launcher
+            .pause_custom_rules_edit
+            .as_ref()
+            .map(|rules| {
+                rules
+                    .teams
+                    .get_or_default(*target_team)
+                    .block_health_multiplier
+                    > 1.0
+            })
+            .unwrap_or(false));
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::Back);
+        assert!(!launcher.pause_custom_rules_team_rules_dialog_open);
+        assert_eq!(
+            launcher.pause_overlay_modal,
+            Some(super::DesktopPausedOverlayModal::CustomRules)
+        );
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::CloseModal);
+        assert_eq!(launcher.game_state.rules.default_team, *target_team as i32);
+        assert_eq!(
+            launcher.runtime.state.rules.default_team,
+            *target_team as i32
+        );
+        assert_eq!(
+            launcher
+                .game_state
+                .rules
+                .teams
+                .get_or_default(*target_team)
+                .protect_cores,
+            protect_after
+        );
+        assert_eq!(
+            launcher
+                .runtime
+                .state
+                .rules
+                .teams
+                .get_or_default(*target_team)
+                .protect_cores,
+            protect_after
+        );
+        assert!(
+            launcher
+                .runtime
+                .state
+                .rules
+                .teams
+                .get_or_default(*target_team)
+                .block_health_multiplier
+                > 1.0
         );
     }
 
