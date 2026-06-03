@@ -17,6 +17,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 855. Menu 前端测试基线与本地化/label sprite 收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只处理本地前端测试基线。
+- 本轮总体进度更新：约 **93.87%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 背景：
+  - 并行 worker 确认菜单 visible fallback 链路已有实现与测试，但 `cargo test -p mindustry-desktop menu` 暴露 2 个既有失败；
+  - 失败原因不是 fallback 实现缺失，而是测试基线仍按旧英文裸文本/默认英文 route line 断言。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `desktop_launcher_default_surface_frame_bridges_menu_plan_without_world` 兼容 Java 风格菜单 label sprite / 本地化文本，不再强制要求裸英文 `Play`；
+    - `desktop_launcher_pending_menu_routes_use_upstream_dialog_structure` 固定英文 locale，保持其检查英文 route shell line 的原始意图，避免默认中文 locale 误伤。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_without_world`
+  - `cargo test -p mindustry-desktop desktop_launcher_pending_menu_routes_use_upstream_dialog_structure`
+  - `cargo test -p mindustry-desktop menu`
+- 仍未完成：
+  - 这轮只收口测试基线；菜单/UI 仍需继续对照 Java 做完整 Settings/Mods 对话框、ScrollPane、真实文本输入与缓存/性能优化。
+
 ## 854. CustomRules limitarea/map area 子流接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。

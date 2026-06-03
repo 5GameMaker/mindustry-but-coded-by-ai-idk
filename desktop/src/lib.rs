@@ -78644,9 +78644,18 @@ displayName: "Alpha Pack"
             .commands
             .iter()
             .any(|command| matches!(command, RenderCommand::FillRect { .. })));
-        assert!(menu_pass.commands.iter().any(
-            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "Play")
-        ));
+        let localized_play_text = launcher.localize_bundle_markup_text("@play");
+        assert!(
+            menu_pass.commands.iter().any(|command| match command {
+                RenderCommand::DrawText { text, .. } =>
+                    text == "Play"
+                        || text.as_str() == localized_play_text.as_str()
+                        || text == "开始游戏",
+                RenderCommand::DrawSprite { symbol, .. } => symbol == "menu-label-zh-play",
+                _ => false,
+            }),
+            "menu pass should render the Java MenuFragment play button as text or label sprite"
+        );
         assert!(menu_pass.commands.iter().all(
             |command| !matches!(command, RenderCommand::DrawText { text, .. } if text == "Campaign")
         ));
@@ -82047,7 +82056,8 @@ displayName: "Alpha Pack"
 
     #[test]
     fn desktop_launcher_pending_menu_routes_use_upstream_dialog_structure() {
-        let launcher = DesktopLauncher::new(Vec::new());
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
         let expectations: &[(super::DesktopMenuRoute, &[&str])] = &[
             (
                 super::DesktopMenuRoute::CustomGame,
