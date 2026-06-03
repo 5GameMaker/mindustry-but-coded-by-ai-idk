@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 842. ModsDialog releases loading 与空态回归
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.74%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ModsDialog.rebuildBrowser()` 中 `@mods.browser.view-releases` 先显示 loading dialog；
+  - releases JSON 为空时调用 `ui.showInfo("@mods.browser.noreleases")`，不进入 releases 列表；
+  - releases 弹窗显示期间 selection dialog 被隐藏，返回后才重新显示。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `open_mods_browser_releases_dialog(...)` 不再制造 synthetic release row，而是进入空 entries 的 loading 状态；
+    - `apply_mods_browser_releases_json_for_mod(...)` 对空数组关闭 releases、保留 selection，并写入 `@mods.browser.noreleases` info 消息；
+    - releases modal 打开时不再渲染 selection 后层文本；
+    - 删除本轮变成未使用的 synthetic release helper；
+    - 新增空 releases JSON 回到 selection/info 的回归测试，并调整 View Releases loading 测试。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser`
+- 仍未完成：
+  - releases 列表仍需继续补完整滚动/全量显示；
+  - browser 主列表仍需继续向 Java 的滚动全量 pane 靠拢；
+  - 前端/UI 仍未达到完整原版还原，不能宣告完整可玩。
+
 ## 841. ModsDialog browser selection 弹窗正文对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，只对照本地参考仓库。

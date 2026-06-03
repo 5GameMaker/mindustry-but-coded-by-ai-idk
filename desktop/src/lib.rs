@@ -39147,13 +39147,6 @@ impl DesktopLauncher {
         format!("https://api.github.com/repos/{repo}")
     }
 
-    fn mods_browser_releases_uri(repo: &str) -> String {
-        format!(
-            "{}/releases",
-            Self::mods_browser_repo_uri(repo).trim_end_matches('/')
-        )
-    }
-
     fn mods_browser_releases_api_uri(repo: &str) -> String {
         format!("{}/releases", Self::mods_browser_repo_api_uri(repo))
     }
@@ -39285,50 +39278,12 @@ impl DesktopLauncher {
             .collect()
     }
 
-    fn mods_browser_release_entries_for_mod(
-        &self,
-        index: usize,
-    ) -> Vec<DesktopModsBrowserReleaseEntry> {
-        let Some(repo) = self.mods_route_mod_repo_at_index(index) else {
-            return Vec::new();
-        };
-        let display_name = self
-            .mods_route_mod_display_name_at_index(index)
-            .unwrap_or("@mods.unknown");
-        let version = self
-            .mods_route_mod_meta_at_index(index)
-            .map(ModMetadata::version_or_unknown)
-            .unwrap_or("latest")
-            .trim()
-            .trim_start_matches('v')
-            .to_string();
-        let tag = if version.is_empty() || version == "@unknown" {
-            "latest".to_string()
-        } else {
-            format!("v{version}")
-        };
-        let release_base = Self::mods_browser_releases_uri(repo);
-        let html_url = if tag == "latest" {
-            release_base
-        } else {
-            format!("{}/tag/{tag}", release_base.trim_end_matches('/'))
-        };
-        vec![DesktopModsBrowserReleaseEntry {
-            name: display_name.to_string(),
-            published_at: self.localize_bundle_markup_text("@mods.browser.fetching"),
-            html_url: html_url.clone(),
-            api_url: html_url,
-            tag,
-            release_id: None,
-        }]
-    }
-
     fn open_mods_browser_releases_dialog(&mut self, index: usize) -> bool {
         if self.mods_route_mod_repo_at_index(index).is_none() {
             return false;
         }
         self.mods_browser_releases_dialog_index = Some(index);
-        self.mods_browser_release_entries = self.mods_browser_release_entries_for_mod(index);
+        self.mods_browser_release_entries.clear();
         self.mods_browser_dialog_open = true;
         self.mods_search_focused = false;
         true
@@ -39340,10 +39295,19 @@ impl DesktopLauncher {
         }
         let entries = Self::mods_browser_release_entries_from_json(value);
         let count = entries.len();
+        if count == 0 {
+            self.close_mods_browser_releases_dialog();
+            self.mods_browser_selected_mod_index = Some(index);
+            self.mods_browser_dialog_open = true;
+            self.mods_search_focused = false;
+            self.last_menu_info_message = Some("@mods.browser.noreleases".into());
+            return 0;
+        }
         self.mods_browser_releases_dialog_index = Some(index);
         self.mods_browser_release_entries = entries;
         self.mods_browser_dialog_open = true;
         self.mods_search_focused = false;
+        self.last_menu_info_message = None;
         count
     }
 
@@ -51413,21 +51377,21 @@ impl DesktopLauncher {
                     "@mods.browser.sortstars"
                 }
             ));
-            if let Some(index) = self.mods_browser_selected_mod_index {
-                let name = self
-                    .mods_route_mod_display_name_at_index(index)
-                    .unwrap_or("@mods.unknown");
-                let author = self
-                    .mods_route_mod_meta_at_index(index)
-                    .map(ModMetadata::author_or_unknown)
-                    .unwrap_or("@unknown");
-                let description = self
-                    .mods_route_mod_short_description_at_index(index)
-                    .unwrap_or_else(|| self.localize_bundle_markup_text("@none"));
-                lines.push(format!(
-                    "modal: @mods.browser.selected name={} author={} description={}",
-                    name, author, description
-                ));
+            if self.mods_browser_releases_dialog_index.is_none() {
+                if let Some(index) = self.mods_browser_selected_mod_index {
+                    let name = self
+                        .mods_route_mod_name_at_index(index)
+                        .unwrap_or("@mods.unknown");
+                    let author = self
+                        .mods_route_mod_meta_at_index(index)
+                        .map(ModMetadata::author_or_unknown)
+                        .unwrap_or("@unknown");
+                    let description = self.mods_browser_selection_description_at_index(index);
+                    lines.push(format!(
+                        "modal: @mods.browser.selected name={} author={} description={}",
+                        name, author, description
+                    ));
+                }
             }
             if let Some(index) = self.mods_browser_releases_dialog_index {
                 let repo = self
@@ -53246,7 +53210,9 @@ impl DesktopLauncher {
             Some("left"),
             Layer::END_PIXELED + 0.108,
         );
-        self.push_mods_browser_selection_dialog(pass, panel);
+        if self.mods_browser_releases_dialog_index.is_none() {
+            self.push_mods_browser_selection_dialog(pass, panel);
+        }
         self.push_mods_browser_releases_dialog(pass, panel);
     }
 
@@ -71917,7 +71883,10 @@ stars: 3
         );
         assert_eq!(releases_action.opened, None);
         assert_eq!(launcher.mods_browser_releases_dialog_index, Some(1));
-        assert_eq!(launcher.mods_browser_release_entries.len(), 1);
+        assert!(
+            launcher.mods_browser_release_entries.is_empty(),
+            "Java ModsDialog shows a loading dialog before release JSON arrives, not a synthetic release row"
+        );
         assert_eq!(
             platform.opened_uris,
             vec!["https://github.com/Beta/Override".to_string()],
@@ -71939,12 +71908,15 @@ stars: 3
             })
             .collect::<Vec<_>>();
         assert!(releases_texts.contains(&"Releases"));
-        assert!(releases_texts
-            .iter()
-            .any(|text| text.contains("Beta Override") && text.contains("[Latest]")));
         assert!(releases_texts.contains(&"Fetching Releases..."));
-        assert!(releases_texts.contains(&"Release Page"));
-        assert!(releases_texts.contains(&"Install"));
+        assert!(!releases_texts.contains(&"Release Page"));
+        assert!(!releases_texts.contains(&"Install"));
+        assert!(
+            !releases_texts
+                .iter()
+                .any(|text| text.contains("beta") && text.contains("Beta browser entry")),
+            "Java hides the selection dialog while the releases/loading dialog is on top"
+        );
         assert!(releases_texts.contains(&"Back"));
 
         let releases_dialog =
@@ -71959,9 +71931,7 @@ stars: 3
                 release_page.x,
                 release_page.y
             ),
-            Some(super::DesktopMenuRouteShellAction::ModsBrowserOpenRelease(
-                0
-            ))
+            None
         );
         let release_install =
             DesktopLauncher::mods_browser_release_button_rect(release_entry, 1).center();
@@ -71971,7 +71941,7 @@ stars: 3
                 release_install.x,
                 release_install.y
             ),
-            Some(super::DesktopMenuRouteShellAction::ModsBrowserInstallRelease(0))
+            None
         );
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
@@ -71982,36 +71952,6 @@ stars: 3
             None,
             "open releases modal should block clicks from reaching browser cards behind it"
         );
-
-        let release_page_action = launcher
-            .dispatch_mods_browser_action_with_platform(
-                0,
-                super::DesktopModsBrowserActionKind::OpenRelease,
-                &mut platform,
-            )
-            .expect("release page should open through platform");
-        assert_eq!(
-            release_page_action.uri.as_deref(),
-            Some("https://github.com/Beta/Override/releases/tag/v2.0.0")
-        );
-        assert_eq!(release_page_action.release_id, None);
-        assert_eq!(release_page_action.opened, Some(true));
-        let install_release_action = launcher
-            .dispatch_mods_browser_action_with_platform(
-                0,
-                super::DesktopModsBrowserActionKind::InstallRelease,
-                &mut platform,
-            )
-            .expect("install release should record selected release without opening URI");
-        assert_eq!(
-            install_release_action.uri.as_deref(),
-            Some("https://github.com/Beta/Override/releases/tag/v2.0.0")
-        );
-        assert_eq!(
-            install_release_action.release_id, None,
-            "synthetic fetching entries are placeholders and do not carry a GitHub API release id"
-        );
-        assert_eq!(install_release_action.opened, None);
         assert!(launcher.apply_menu_back_key());
         assert_eq!(launcher.mods_browser_releases_dialog_index, None);
         assert_eq!(launcher.mods_browser_selected_mod_index, Some(1));
@@ -72125,6 +72065,77 @@ stars: 3
         );
         assert!(launcher.mods_browser_dialog_open);
         assert_eq!(launcher.mods_browser_selected_mod_index, Some(1));
+    }
+
+    #[test]
+    fn desktop_launcher_mods_browser_empty_releases_json_returns_to_selection_with_info_like_java()
+    {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.last_mods_directory_mod_names = vec!["beta".into()];
+        launcher.last_mods_directory_mod_metas = vec![ModMetadata::from_source_text(
+            "beta",
+            Some("mod.hjson"),
+            r#"
+name: beta
+displayName: "Beta Override"
+author: "Beta Author"
+description: "Beta browser entry"
+repo: "Beta/Override"
+"#,
+        )];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::OpenModsBrowser);
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsBrowserSelection(0),
+        );
+
+        let mut platform = RecordingPlatform::default();
+        launcher
+            .dispatch_mods_browser_action_with_platform(
+                0,
+                super::DesktopModsBrowserActionKind::ViewReleases,
+                &mut platform,
+            )
+            .expect("view releases should enter Java-style loading state");
+        assert_eq!(launcher.mods_browser_releases_dialog_index, Some(0));
+        assert!(launcher.mods_browser_release_entries.is_empty());
+
+        assert_eq!(
+            launcher.apply_mods_browser_releases_json_for_mod(0, "[]"),
+            0
+        );
+        assert_eq!(launcher.mods_browser_releases_dialog_index, None);
+        assert!(launcher.mods_browser_release_entries.is_empty());
+        assert_eq!(launcher.mods_browser_selected_mod_index, Some(0));
+        assert_eq!(
+            launcher.last_menu_info_message.as_deref(),
+            Some("@mods.browser.noreleases")
+        );
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods browser selection and info should render after empty releases")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"beta"));
+        assert!(texts.iter().any(|text| text.contains("No Releases Found")));
+        assert!(
+            !texts.contains(&"Fetching Releases..."),
+            "Java hides the loading dialog and returns to selection on an empty releases response"
+        );
     }
 
     #[test]
