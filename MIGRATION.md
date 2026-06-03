@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 817. MenuRenderer 子菜单 fade UI 命令缓存拆分
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.48%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `MenuFragment.java` 中 desktop submenu 是常驻 table，展开/收起通过 `Actions.alpha(...)` 改透明度；
+  - Java 不会因为 submenu fade alpha 改变就重建整棵按钮/label/icon 节点树；
+  - Rust 需要保持黑色 main/submenu 面板先画，再画按钮内容的层级顺序。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuUiRenderCommandCache` 从“完整 `MenuUiPlan` → 完整 commands”改为缓存 `MenuUiRenderCommandGroups`；
+    - 缓存 key 归一化 submenu alpha：有 submenu 布局时固定为 1.0，仅当前帧输出时按真实 `submenu_alpha` 乘透明度；
+    - 命令组拆成 `main_background / submenu_background / main_buttons / submenu_buttons`，保持 Java 原顺序：主面板、子菜单面板、主按钮、子菜单按钮；
+    - 新增 `menu_render_command_with_alpha_scale(...)`，对子菜单 group 输出时统一缩放 color/tint/mix alpha；
+    - 新增回归测试 `menu_renderer_state_keeps_ui_render_commands_cached_during_submenu_fade`，锁住 fade 期间 `ui_render_command_cache_rebuilds` 不增长且输出命令仍等价于当前 alpha 的 `to_render_commands()`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_renderer_state_keeps_ui_render_commands_cached_during_submenu_fade --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_renderer --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 菜单世界背景 `DrawCache` 仍需继续靠近 Java `SpriteCache`/`FrameBuffer` 语义，减少逐 tile 展开成本；
+  - 前端 UI 仍需继续按原版补齐所有子菜单与设置/Mods/编辑器等对话框。
+
 ## 816. Native OpenGL vsync 双重限帧修复
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

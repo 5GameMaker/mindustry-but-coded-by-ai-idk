@@ -487,10 +487,10 @@ fn menu_union_rect(a: RenderRect, b: RenderRect) -> RenderRect {
     RenderRect::new(x, y, right - x, top - y)
 }
 
-fn menu_push_desktop_panel_backgrounds(
-    commands: &mut Vec<RenderCommand>,
+fn menu_push_desktop_panel_background_groups(
+    main_commands: &mut Vec<RenderCommand>,
+    submenu_commands: &mut Vec<RenderCommand>,
     buttons: &[MenuButtonPlan],
-    submenu_alpha: f32,
 ) {
     let mut main_bounds: Option<RenderRect> = None;
     let mut submenu_bounds: Option<RenderRect> = None;
@@ -515,24 +515,53 @@ fn menu_push_desktop_panel_backgrounds(
         main_bounds.right() - main_bounds.x,
         inferred_stage_height,
     );
-    menu_push_black6_panel(commands, main_panel, 1.0);
+    menu_push_black6_panel(main_commands, main_panel, 1.0);
 
     if let Some(submenu_bounds) = submenu_bounds {
-        if submenu_alpha > f32::EPSILON {
-            let submenu_panel = RenderRect::new(
-                submenu_bounds.x,
-                0.0,
-                submenu_bounds.right() - submenu_bounds.x,
-                inferred_stage_height,
-            );
-            menu_push_black6_panel(commands, submenu_panel, submenu_alpha);
-        }
+        let submenu_panel = RenderRect::new(
+            submenu_bounds.x,
+            0.0,
+            submenu_bounds.right() - submenu_bounds.x,
+            inferred_stage_height,
+        );
+        menu_push_black6_panel(submenu_commands, submenu_panel, 1.0);
     }
 }
 
 fn menu_color_with_alpha(mut color: [f32; 4], alpha_scale: f32) -> [f32; 4] {
     color[3] = (color[3] * alpha_scale.clamp(0.0, 1.0)).clamp(0.0, 1.0);
     color
+}
+
+fn menu_render_command_with_alpha_scale(
+    mut command: RenderCommand,
+    alpha_scale: f32,
+) -> RenderCommand {
+    let scale = alpha_scale.clamp(0.0, 1.0);
+    match &mut command {
+        RenderCommand::Clear { color }
+        | RenderCommand::FillRect { color, .. }
+        | RenderCommand::StrokeRect { color, .. }
+        | RenderCommand::DrawLine { color, .. }
+        | RenderCommand::DrawCircle { color, .. }
+        | RenderCommand::DrawPolygon { color, .. }
+        | RenderCommand::DrawTriangle { color, .. }
+        | RenderCommand::DrawPixel { color, .. }
+        | RenderCommand::DrawText { color, .. } => {
+            color[3] = (color[3] * scale).clamp(0.0, 1.0);
+        }
+        RenderCommand::DrawSprite {
+            tint, mix_color, ..
+        } => {
+            tint[3] = (tint[3] * scale).clamp(0.0, 1.0);
+            mix_color[3] = (mix_color[3] * scale).clamp(0.0, 1.0);
+        }
+        RenderCommand::SetBlend { .. }
+        | RenderCommand::SetClip { .. }
+        | RenderCommand::ClearClip
+        | RenderCommand::Custom { .. } => {}
+    }
+    command
 }
 
 fn menu_shadow_texture_rect(x: f32, y: f32, width: f32, height: f32) -> RenderRect {
@@ -985,7 +1014,15 @@ struct MenuUiLayoutCache {
 #[derive(Debug, Clone, PartialEq)]
 struct MenuUiRenderCommandCache {
     plan: MenuUiPlan,
-    commands: Vec<RenderCommand>,
+    groups: MenuUiRenderCommandGroups,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct MenuUiRenderCommandGroups {
+    main_background: Vec<RenderCommand>,
+    submenu_background: Vec<RenderCommand>,
+    main_buttons: Vec<RenderCommand>,
+    submenu_buttons: Vec<RenderCommand>,
 }
 
 impl MenuUiPlan {
@@ -1017,23 +1054,43 @@ impl MenuUiPlan {
     }
 
     pub fn to_render_commands(&self) -> Vec<RenderCommand> {
+        self.to_normalized_render_command_groups()
+            .into_render_commands(self.submenu_alpha)
+    }
+
+    fn normalized_render_command_cache_plan(&self) -> MenuUiPlan {
+        let mut plan = self.clone();
+        plan.submenu_alpha = if plan.buttons.iter().any(|button| button.submenu) {
+            1.0
+        } else {
+            0.0
+        };
+        plan
+    }
+
+    fn to_normalized_render_command_groups(&self) -> MenuUiRenderCommandGroups {
         let style = MENU_FLAT_TOGGLE_MENU_STYLE;
-        let mut commands = Vec::with_capacity(self.buttons.len() * 6 + 4);
+        let mut main_background = Vec::with_capacity(2);
+        let mut submenu_background = Vec::with_capacity(2);
+        let mut main_buttons = Vec::with_capacity(self.buttons.len() * 4);
+        let mut submenu_buttons = Vec::with_capacity(self.buttons.len() * 2);
         if !self.mobile {
-            menu_push_desktop_panel_backgrounds(&mut commands, &self.buttons, self.submenu_alpha);
+            menu_push_desktop_panel_background_groups(
+                &mut main_background,
+                &mut submenu_background,
+                &self.buttons,
+            );
         }
         for button in &self.buttons {
-            let alpha = if button.submenu {
-                self.submenu_alpha
+            let commands = if button.submenu {
+                &mut submenu_buttons
             } else {
-                1.0
+                &mut main_buttons
             };
-            if alpha <= f32::EPSILON {
-                continue;
-            }
+            let alpha = 1.0;
             if self.mobile {
                 menu_push_mobile_image_button_background(
-                    &mut commands,
+                    commands,
                     button.rect,
                     button.image_button_state(),
                     alpha,
@@ -1041,7 +1098,7 @@ impl MenuUiPlan {
             } else {
                 let state = button.flat_toggle_menu_state();
                 menu_push_flat_toggle_menu_state_background(
-                    &mut commands,
+                    commands,
                     button.rect,
                     state,
                     style,
@@ -1069,7 +1126,7 @@ impl MenuUiPlan {
                     )
                 };
                 menu_push_icon_render_commands(
-                    &mut commands,
+                    commands,
                     icon_name,
                     icon_point,
                     if self.mobile {
@@ -1108,7 +1165,7 @@ impl MenuUiPlan {
                 (button.rect.center(), style.text_style)
             };
             menu_push_label_render_command(
-                &mut commands,
+                commands,
                 button.label.as_str(),
                 label_point,
                 menu_color_with_alpha(style.text_color, alpha),
@@ -1116,6 +1173,40 @@ impl MenuUiPlan {
                 0.0,
                 label_style,
                 label_layer,
+            );
+        }
+        MenuUiRenderCommandGroups {
+            main_background,
+            submenu_background,
+            main_buttons,
+            submenu_buttons,
+        }
+    }
+}
+
+impl MenuUiRenderCommandGroups {
+    fn into_render_commands(self, submenu_alpha: f32) -> Vec<RenderCommand> {
+        let submenu_alpha = submenu_alpha.clamp(0.0, 1.0);
+        let mut commands = Vec::with_capacity(
+            self.main_background.len()
+                + self.submenu_background.len()
+                + self.main_buttons.len()
+                + self.submenu_buttons.len(),
+        );
+        commands.extend(self.main_background);
+        if submenu_alpha > f32::EPSILON {
+            commands.extend(
+                self.submenu_background
+                    .into_iter()
+                    .map(|command| menu_render_command_with_alpha_scale(command, submenu_alpha)),
+            );
+        }
+        commands.extend(self.main_buttons);
+        if submenu_alpha > f32::EPSILON {
+            commands.extend(
+                self.submenu_buttons
+                    .into_iter()
+                    .map(|command| menu_render_command_with_alpha_scale(command, submenu_alpha)),
             );
         }
         commands
@@ -1995,22 +2086,25 @@ impl MenuRendererState {
     }
 
     fn cached_ui_render_commands(&mut self, ui: &MenuUiPlan) -> Vec<RenderCommand> {
+        let cache_plan = ui.normalized_render_command_cache_plan();
         let should_rebuild = self
             .ui_render_command_cache
             .as_ref()
-            .map_or(true, |cache| cache.plan != *ui);
+            .map_or(true, |cache| cache.plan != cache_plan);
         if should_rebuild {
             self.ui_render_command_cache = Some(MenuUiRenderCommandCache {
-                plan: ui.clone(),
-                commands: ui.to_render_commands(),
+                groups: cache_plan.to_normalized_render_command_groups(),
+                plan: cache_plan,
             });
             self.ui_render_command_cache_rebuilds += 1;
         }
-        self.ui_render_command_cache
+        let groups = self
+            .ui_render_command_cache
             .as_ref()
             .expect("menu UI render command cache should be populated before use")
-            .commands
-            .clone()
+            .groups
+            .clone();
+        groups.into_render_commands(ui.submenu_alpha)
     }
 
     pub fn hit_test_ui(&self, input: MenuFrameInput, x: f32, y: f32) -> Option<MenuButtonRole> {
@@ -3997,6 +4091,50 @@ mod tests {
             .buttons
             .iter()
             .any(|button| button.role == MenuButtonRole::Campaign && button.hovered));
+    }
+
+    #[test]
+    fn menu_renderer_state_keeps_ui_render_commands_cached_during_submenu_fade() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+        let input = |delta| MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
+            scl4: 4.0,
+            delta,
+        };
+
+        assert!(state.select_desktop_root(MenuButtonRole::Play));
+        let opened = state.render_plan(input(0.0));
+        assert_eq!(state.ui_layout_cache_rebuilds, 1);
+        assert_eq!(state.ui_render_command_cache_rebuilds, 1);
+        assert_eq!(opened.ui.submenu_alpha, 0.0);
+        assert_eq!(opened.ui_render_commands, opened.ui.to_render_commands());
+
+        let fading = state.render_plan(input(MENU_SUBMENU_FADE_IN_SECONDS * 0.5));
+        assert_eq!(
+            state.ui_layout_cache_rebuilds, 1,
+            "submenu fade should keep the retained Java-like table layout"
+        );
+        assert_eq!(
+            state.ui_render_command_cache_rebuilds, 1,
+            "submenu alpha changes should be applied to cached command groups instead of rebuilding all UI commands"
+        );
+        assert!((fading.ui.submenu_alpha - 0.5).abs() < 0.0001);
+        assert_eq!(fading.ui_render_commands, fading.ui.to_render_commands());
+        assert_ne!(
+            opened.ui_render_commands, fading.ui_render_commands,
+            "frame output must still reflect the current fade alpha"
+        );
+
+        let fully_visible = state.render_plan(input(MENU_SUBMENU_FADE_IN_SECONDS));
+        assert_eq!(state.ui_render_command_cache_rebuilds, 1);
+        assert_eq!(
+            fully_visible.ui_render_commands,
+            fully_visible.ui.to_render_commands()
+        );
+        assert_eq!(fully_visible.ui.submenu_alpha, 1.0);
     }
 
     #[test]
