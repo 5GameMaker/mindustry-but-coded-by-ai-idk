@@ -17,6 +17,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 826. 对齐 Java fpscap 帧率节奏
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.57%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照与约束：
+  - `ClientLauncher.java#update()` 使用 `Core.settings.getInt("fpscap", 120)`，`targetfps > 0 && targetfps <= 240` 才限帧；
+  - `SettingsMenuDialog.java` 的 `graphics.sliderPref("fpscap", 240, 10, 245, 5, ...)` 中 `245`/`>240` 显示 `setting.fpscap.none`，等价不限帧；
+  - `vsync` 默认 true，并通过 `Core.graphics.setVSync(...)` 单独控制驱动 swap interval。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DESKTOP_JAVA_DEFAULT_RUNTIME_FPS_CAP=120` 与 `DESKTOP_JAVA_UNCAPPED_FPS_THRESHOLD=240`；
+    - `DesktopFramePacing::default()` 从旧 16ms/约 60fps 改为 Java `fpscap=120` 推导出的约 8.33ms；
+    - 新增 `DesktopFramePacing::from_java_fps_cap(...)`，实现 `1..240` paced、`<=0/>240` uncapped；
+    - `DesktopLauncher` 新增 `settings_runtime_fps_cap_override/settings_runtime_fps_cap/settings_frame_pacing`，使设置覆盖可进入运行时节奏；
+    - `DesktopNativeOpenGlRuntimeConfig` 新增 `fps_cap` 并解析 `--fpscap` / `--vsync`。
+  - `desktop/src/main.rs`
+    - native OpenGL app 在 `vsync=false` 时不再落回 16ms，而是使用 Java fpscap pacing；
+    - `vsync=true` 保持交给 swap interval 节流，避免软件 sleep 与驱动 vsync 双重等待导致帧率被砍半。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_frame_pacing_matches_java_clientlauncher_fpscap_rules --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop native_opengl_app --features opengl-native-runtime -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_native_opengl_runtime_config_parses_java_window_args --features opengl-native-runtime -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 需要继续接真实 settings.bin 读取/保存，使 UI 中修改的 `fpscap/vsync` 能跨启动持久生效；
+  - 还需继续检查 sprite texture binding 反复全量刷新上传计划的问题，避免战斗/大量图标场景 CPU 开销偏高；
+  - 前端下一优先级按本地对照推进 Load/Save、Join、Mods、Editor 等高可见子菜单。
+
 ## 825. Settings Data 真实 zip 导入导出
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。

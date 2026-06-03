@@ -17810,6 +17810,7 @@ impl Default for DesktopSurfaceConfig {
 pub struct DesktopNativeOpenGlRuntimeConfig {
     pub surface: DesktopSurfaceConfig,
     pub vsync: bool,
+    pub fps_cap: i32,
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -17818,6 +17819,7 @@ impl DesktopNativeOpenGlRuntimeConfig {
         Self {
             surface,
             vsync: true,
+            fps_cap: DESKTOP_JAVA_DEFAULT_RUNTIME_FPS_CAP,
         }
     }
 
@@ -17852,6 +17854,21 @@ impl DesktopNativeOpenGlRuntimeConfig {
                             value.to_ascii_lowercase().as_str(),
                             "true" | "1" | "yes" | "on"
                         );
+                        index += 1;
+                    }
+                }
+                "-vsync" | "--vsync" => {
+                    if let Some(value) = args.get(index + 1) {
+                        config.vsync = matches!(
+                            value.to_ascii_lowercase().as_str(),
+                            "true" | "1" | "yes" | "on"
+                        );
+                        index += 1;
+                    }
+                }
+                "-fpscap" | "--fpscap" => {
+                    if let Some(value) = args.get(index + 1).and_then(|value| value.parse().ok()) {
+                        config.fps_cap = value;
                         index += 1;
                     }
                 }
@@ -17940,6 +17957,9 @@ pub struct DesktopFramePacing {
     pub target_frame_time: Duration,
 }
 
+pub const DESKTOP_JAVA_DEFAULT_RUNTIME_FPS_CAP: i32 = 120;
+pub const DESKTOP_JAVA_UNCAPPED_FPS_THRESHOLD: i32 = 240;
+
 impl DesktopFramePacing {
     pub const fn new(target_frame_time: Duration) -> Self {
         Self { target_frame_time }
@@ -17954,13 +17974,21 @@ impl DesktopFramePacing {
     pub fn is_paced(self) -> bool {
         !self.target_frame_time.is_zero()
     }
+
+    pub fn from_java_fps_cap(fps_cap: i32) -> Self {
+        if fps_cap > 0 && fps_cap <= DESKTOP_JAVA_UNCAPPED_FPS_THRESHOLD {
+            Self {
+                target_frame_time: Duration::from_nanos(1_000_000_000u64 / fps_cap as u64),
+            }
+        } else {
+            Self::uncapped()
+        }
+    }
 }
 
 impl Default for DesktopFramePacing {
     fn default() -> Self {
-        Self {
-            target_frame_time: Duration::from_millis(16),
-        }
+        Self::from_java_fps_cap(DESKTOP_JAVA_DEFAULT_RUNTIME_FPS_CAP)
     }
 }
 
@@ -25755,6 +25783,20 @@ impl DesktopLauncher {
         self.setting_override_value(table, key)
             .map(ToOwned::to_owned)
             .or_else(|| settings_pref_spec(table, key).map(|spec| spec.default_value.text()))
+    }
+
+    pub fn settings_runtime_fps_cap_override(&self) -> Option<i32> {
+        self.setting_override_value("graphics", "fpscap")
+            .or_else(|| self.settings_overrides.get("fpscap").map(String::as_str))
+            .and_then(|value| value.trim().parse::<i32>().ok())
+    }
+
+    pub fn settings_runtime_fps_cap(&self, fallback: i32) -> i32 {
+        self.settings_runtime_fps_cap_override().unwrap_or(fallback)
+    }
+
+    pub fn settings_frame_pacing(&self, fallback_fps_cap: i32) -> DesktopFramePacing {
+        DesktopFramePacing::from_java_fps_cap(self.settings_runtime_fps_cap(fallback_fps_cap))
     }
 
     fn settings_locale_exists(code: &str) -> bool {
@@ -56425,10 +56467,16 @@ mod tests {
             "768",
             "-maximized",
             "false",
+            "-vsync",
+            "false",
+            "-fpscap",
+            "30",
         ]);
 
         assert_eq!(config.surface.size, DesktopSurfaceSize::new(1024, 768));
         assert!(!config.surface.maximized);
+        assert!(!config.vsync);
+        assert_eq!(config.fps_cap, 30);
         assert_eq!(config.surface.title, "Mindustry");
 
         let config = super::DesktopNativeOpenGlRuntimeConfig::from_args([
@@ -56439,9 +56487,50 @@ mod tests {
             "480",
             "--maximized",
             "true",
+            "--vsync",
+            "true",
+            "--fpscap",
+            "245",
         ]);
         assert_eq!(config.surface.size, DesktopSurfaceSize::new(640, 480));
         assert!(config.surface.maximized);
+        assert!(config.vsync);
+        assert_eq!(config.fps_cap, 245);
+    }
+
+    #[test]
+    fn desktop_frame_pacing_matches_java_clientlauncher_fpscap_rules() {
+        assert_eq!(
+            DesktopFramePacing::default(),
+            DesktopFramePacing::from_java_fps_cap(super::DESKTOP_JAVA_DEFAULT_RUNTIME_FPS_CAP)
+        );
+        assert_eq!(
+            DesktopFramePacing::default().target_frame_time,
+            std::time::Duration::from_nanos(1_000_000_000u64 / 120)
+        );
+        assert_eq!(
+            DesktopFramePacing::from_java_fps_cap(240).target_frame_time,
+            std::time::Duration::from_nanos(1_000_000_000u64 / 240)
+        );
+        assert_eq!(
+            DesktopFramePacing::from_java_fps_cap(245),
+            DesktopFramePacing::uncapped()
+        );
+        assert_eq!(
+            DesktopFramePacing::from_java_fps_cap(0),
+            DesktopFramePacing::uncapped()
+        );
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        assert_eq!(
+            launcher.settings_frame_pacing(super::DESKTOP_JAVA_DEFAULT_RUNTIME_FPS_CAP),
+            DesktopFramePacing::from_java_fps_cap(120)
+        );
+        launcher.set_setting_override("graphics", "fpscap", "90");
+        assert_eq!(
+            launcher.settings_frame_pacing(super::DESKTOP_JAVA_DEFAULT_RUNTIME_FPS_CAP),
+            DesktopFramePacing::from_java_fps_cap(90)
+        );
     }
 
     #[cfg(feature = "opengl-native-runtime")]

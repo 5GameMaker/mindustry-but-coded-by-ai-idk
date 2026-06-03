@@ -615,6 +615,18 @@ struct DesktopNativeOpenGlApp<'a> {
 }
 
 #[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_opengl_frame_pacing(
+    launcher: &mindustry_desktop::DesktopLauncher,
+    native_config: &mindustry_desktop::DesktopNativeOpenGlRuntimeConfig,
+) -> mindustry_desktop::DesktopFramePacing {
+    if native_config.vsync {
+        mindustry_desktop::DesktopFramePacing::uncapped()
+    } else {
+        launcher.settings_frame_pacing(native_config.fps_cap)
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DesktopNativeOpenGlBufferUploadCacheEntry {
     usage: u32,
@@ -3372,11 +3384,7 @@ impl<'a> DesktopNativeOpenGlApp<'a> {
     ) -> Self {
         let frame_loop = mindustry_desktop::DesktopFrameLoopState::new(
             native_config.surface.clone(),
-            if native_config.vsync {
-                mindustry_desktop::DesktopFramePacing::uncapped()
-            } else {
-                mindustry_desktop::DesktopFramePacing::default()
-            },
+            desktop_native_opengl_frame_pacing(launcher, &native_config),
         );
         Self {
             launcher,
@@ -3602,8 +3610,54 @@ mod tests {
 
         assert_eq!(
             app.frame_loop.pacing,
-            mindustry_desktop::DesktopFramePacing::default(),
-            "without vsync the software frame cap should still prevent a busy uncapped loop"
+            mindustry_desktop::DesktopFramePacing::from_java_fps_cap(
+                mindustry_desktop::DESKTOP_JAVA_DEFAULT_RUNTIME_FPS_CAP
+            ),
+            "without vsync the software frame cap should follow ClientLauncher fpscap default instead of the old 16ms/60fps fallback"
+        );
+    }
+
+    #[test]
+    fn native_opengl_app_uses_java_fpscap_when_vsync_disabled() {
+        let mut launcher = mindustry_desktop::DesktopLauncher::new(Vec::new());
+        let mut native_config = mindustry_desktop::DesktopNativeOpenGlRuntimeConfig::from_surface(
+            mindustry_desktop::DesktopSurfaceConfig {
+                title: "Native Test FPSCap".into(),
+                size: mindustry_desktop::DesktopSurfaceSize::new(960, 540),
+                scale_factor: 1.0,
+                resizable: true,
+                maximized: false,
+                visible: false,
+            },
+        );
+        native_config.vsync = false;
+        native_config.fps_cap = 30;
+
+        let app = DesktopNativeOpenGlApp::new(&mut launcher, native_config);
+
+        assert_eq!(
+            app.frame_loop.pacing,
+            mindustry_desktop::DesktopFramePacing::from_java_fps_cap(30)
+        );
+
+        launcher.set_setting_override("graphics", "fpscap", "245");
+        let mut native_config = mindustry_desktop::DesktopNativeOpenGlRuntimeConfig::from_surface(
+            mindustry_desktop::DesktopSurfaceConfig {
+                title: "Native Test FPSCap None".into(),
+                size: mindustry_desktop::DesktopSurfaceSize::new(960, 540),
+                scale_factor: 1.0,
+                resizable: true,
+                maximized: false,
+                visible: false,
+            },
+        );
+        native_config.vsync = false;
+        let app = DesktopNativeOpenGlApp::new(&mut launcher, native_config);
+
+        assert_eq!(
+            app.frame_loop.pacing,
+            mindustry_desktop::DesktopFramePacing::uncapped(),
+            "Java treats fpscap > 240, including the UI sentinel 245, as uncapped"
         );
     }
 
