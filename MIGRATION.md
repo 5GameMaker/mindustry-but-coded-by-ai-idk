@@ -17,6 +17,43 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 798. MenuUiPlan render command 缓存与 desktop 视觉刷新接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8；本轮未依赖公网资料，继续只对照本地参考仓库。
+- 本轮总体进度更新：约 **93.2%**，仍未达到完整可玩；继续优先前端/UI、黑屏/启动兼容、性能收口与所有子菜单接近原版。
+- Java 对照：
+  - `MenuFragment.java` 中按钮 text/icon 是 retained 的静态内容，`currentMenu`/hover/pressed 只改变 Button state；
+  - `Styles.flatToggleMenut`/`Styles.defaulti` 的 up/down/over/checked 是动态状态机，不能被缓存成固定背景；
+  - submenu fade 由 `Actions.alpha(...)` 改变透明度，结构保持稳定但 tint/alpha 必须随帧刷新。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuFramePlan` 新增 `ui_render_commands`，由 `MenuRendererState::cached_ui_render_commands(...)` 生成；
+    - 新增 `MenuUiRenderCommandCache` 与 `ui_render_command_cache_rebuilds`，当完整 `MenuUiPlan` 不变时复用已生成的 UI `RenderCommand` 序列；
+    - `MenuFramePlan::to_render_pass()` / `into_render_pass()` 改为消费 `ui_render_commands`，避免继续在 frame plan 转 pass 时重复调用 `ui.to_render_commands()`；
+    - 新增回归测试锁定：time-driven menu background/flyers 变化不应重建 retained UI layout，也不应重建未变化 UI 状态的 render command cache。
+  - `desktop/src/lib.rs`
+    - `fast_menu_render_pass_from_plan(...)` 改为直接使用 `plan.ui_render_commands`；
+    - 新增 `finalize_menu_frame_plan_for_desktop_visuals(...)`，统一执行本地化、hover/pressed visual state 叠加，并在叠加后刷新 `plan.ui_render_commands`；
+    - 修正缓存接入风险：desktop 在 `render_plan()` 后改变 `plan.ui` 时，不能继续使用 core 预生成的 stale UI commands。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_renderer_state_reuses_ui_render_command_cache_when_ui_state_is_unchanged --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_renderer_state_reuses_ui_layout_cache_when_only_submenu_alpha_changes --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_renderer_state_fades_out_and_in_current_desktop_submenu_like_java_actions --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_ui_plan_hovered_buttons_emit_java_flat_over_drawable --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_ui_plan_pressed_buttons_emit_java_flat_down_drawable --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_frame_applies_hovered_button_over_drawable --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --release --features opengl-native-runtime`
+  - `MINDUSTRY_DESKTOP_TRACE_SUMMARY=1 ./target/release/mindustry-desktop.exe` 短跑核对：正确 desktop 本地化/hover 视觉路径下，后续帧当前仍约 `texture_upload_commands=0`、`sprite_mesh_upload_commands=26`、`draw_commands=84`、`gl_error=0x0000`。
+- 重要校正：
+  - 先前记录中后续帧 `sprite_mesh_upload_commands=0` 的观测来自未同步刷新 desktop 本地化/hover 后 UI render commands 的 stale 路径，不能作为正确 UI 视觉路径的最终性能结论；
+  - 当前正确路径恢复到约 `26` 条动态 sprite mesh upload，后续需要继续按 Java retained/Button state 分层，把动态 tint/alpha 与静态 label/icon/background 模板继续拆开。
+- 仍未完成：
+  - `plan.ui_render_commands.clone()` 仍有每帧拷贝成本；
+  - desktop 本地化/hover/pressed 后目前仍会重建 UI render commands，后续应在 desktop 侧增加 localized/visual-state-aware cache；
+  - 正确视觉路径下仍有约 `26` 个动态 sprite mesh upload 和 `84` 个 draw command，需继续定位到具体 UI/background batch 并拆分模板/状态。
+
 ## 797. MenuRenderer UI layout cache 对齐 Java retained 菜单结构
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

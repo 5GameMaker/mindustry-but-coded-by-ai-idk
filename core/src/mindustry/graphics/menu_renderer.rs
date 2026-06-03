@@ -982,6 +982,12 @@ struct MenuUiLayoutCache {
     plan: MenuUiPlan,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct MenuUiRenderCommandCache {
+    plan: MenuUiPlan,
+    commands: Vec<RenderCommand>,
+}
+
 impl MenuUiPlan {
     pub fn with_hovered_role(mut self, hovered_role: Option<MenuButtonRole>) -> Self {
         for button in &mut self.buttons {
@@ -1677,11 +1683,12 @@ pub struct MenuFramePlan {
     pub world: MenuWorldPlan,
     pub commands: Vec<MenuRenderCommand>,
     pub ui: MenuUiPlan,
+    pub ui_render_commands: Vec<RenderCommand>,
 }
 
 impl MenuFramePlan {
     pub fn to_render_pass(&self) -> Option<RenderPass> {
-        if self.commands.is_empty() && self.ui.buttons.is_empty() {
+        if self.commands.is_empty() && self.ui_render_commands.is_empty() {
             return None;
         }
 
@@ -1710,7 +1717,7 @@ impl MenuFramePlan {
                 viewport,
             );
         }
-        pass.extend(self.ui.to_render_commands());
+        pass.extend(self.ui_render_commands.clone());
         Some(pass)
     }
 
@@ -1724,10 +1731,11 @@ impl MenuFramePlan {
             tile_size,
             world,
             commands,
-            ui,
+            ui: _,
+            ui_render_commands,
         } = self;
 
-        if commands.is_empty() && ui.buttons.is_empty() {
+        if commands.is_empty() && ui_render_commands.is_empty() {
             return None;
         }
 
@@ -1752,7 +1760,7 @@ impl MenuFramePlan {
                 viewport,
             );
         }
-        pass.extend(ui.to_render_commands());
+        pass.extend(ui_render_commands);
         Some(pass)
     }
 }
@@ -1775,6 +1783,8 @@ pub struct MenuRendererState {
     pub custom_buttons: Vec<MenuCustomButton>,
     ui_layout_cache: Option<MenuUiLayoutCache>,
     pub ui_layout_cache_rebuilds: usize,
+    ui_render_command_cache: Option<MenuUiRenderCommandCache>,
+    pub ui_render_command_cache_rebuilds: usize,
 }
 
 impl MenuRendererState {
@@ -1800,6 +1810,8 @@ impl MenuRendererState {
             custom_buttons: Vec::new(),
             ui_layout_cache: None,
             ui_layout_cache_rebuilds: 0,
+            ui_render_command_cache: None,
+            ui_render_command_cache_rebuilds: 0,
         }
     }
 
@@ -1843,6 +1855,7 @@ impl MenuRendererState {
         });
 
         let ui = self.cached_ui_plan(input);
+        let ui_render_commands = self.cached_ui_render_commands(&ui);
 
         MenuFramePlan {
             camera_x,
@@ -1854,6 +1867,7 @@ impl MenuRendererState {
             world: self.world.clone(),
             commands,
             ui,
+            ui_render_commands,
         }
     }
 
@@ -1978,6 +1992,25 @@ impl MenuRendererState {
             button.pressed = false;
         }
         plan
+    }
+
+    fn cached_ui_render_commands(&mut self, ui: &MenuUiPlan) -> Vec<RenderCommand> {
+        let should_rebuild = self
+            .ui_render_command_cache
+            .as_ref()
+            .map_or(true, |cache| cache.plan != *ui);
+        if should_rebuild {
+            self.ui_render_command_cache = Some(MenuUiRenderCommandCache {
+                plan: ui.clone(),
+                commands: ui.to_render_commands(),
+            });
+            self.ui_render_command_cache_rebuilds += 1;
+        }
+        self.ui_render_command_cache
+            .as_ref()
+            .expect("menu UI render command cache should be populated before use")
+            .commands
+            .clone()
     }
 
     pub fn hit_test_ui(&self, input: MenuFrameInput, x: f32, y: f32) -> Option<MenuButtonRole> {
@@ -3964,6 +3997,36 @@ mod tests {
             .buttons
             .iter()
             .any(|button| button.role == MenuButtonRole::Campaign && button.hovered));
+    }
+
+    #[test]
+    fn menu_renderer_state_reuses_ui_render_command_cache_when_ui_state_is_unchanged() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+        let input = MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
+            scl4: 4.0,
+            delta: 1.0 / 60.0,
+        };
+
+        let first = state.render_plan(input);
+        assert_eq!(state.ui_layout_cache_rebuilds, 1);
+        assert_eq!(state.ui_render_command_cache_rebuilds, 1);
+        assert_eq!(first.ui_render_commands, first.ui.to_render_commands());
+
+        let second = state.render_plan(input);
+        assert_eq!(
+            state.ui_layout_cache_rebuilds, 1,
+            "time-driven menu background/flyers must not rebuild retained UI layout"
+        );
+        assert_eq!(
+            state.ui_render_command_cache_rebuilds, 1,
+            "unchanged button state should reuse cached UI render commands"
+        );
+        assert_eq!(first.ui_render_commands, second.ui_render_commands);
+        assert_eq!(second.ui_render_commands, second.ui.to_render_commands());
     }
 
     #[test]

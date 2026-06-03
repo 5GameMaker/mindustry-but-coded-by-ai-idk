@@ -20719,16 +20719,22 @@ impl DesktopLauncher {
 
     pub fn menu_frame_for_render(&mut self, input: MenuFrameInput) -> DesktopFrame {
         let mut plan = self.menu_renderer_state.render_plan(input);
-        self.localize_menu_frame_plan(&mut plan);
-        plan.ui = plan
-            .ui
-            .with_hovered_role(self.last_menu_hovered_button)
-            .with_pressed_role(self.active_menu_pressed_button_for_visuals());
-        self.apply_menu_visual_pressed_frame_decay();
+        self.finalize_menu_frame_plan_for_desktop_visuals(&mut plan);
         DesktopFrame {
             kind: DesktopFrameKind::Menu,
             payload: DesktopFramePayload::Menu(plan),
         }
+    }
+
+    fn finalize_menu_frame_plan_for_desktop_visuals(&mut self, plan: &mut MenuFramePlan) {
+        self.localize_menu_frame_plan(plan);
+        plan.ui = plan
+            .ui
+            .clone()
+            .with_hovered_role(self.last_menu_hovered_button)
+            .with_pressed_role(self.active_menu_pressed_button_for_visuals());
+        plan.ui_render_commands = plan.ui.to_render_commands();
+        self.apply_menu_visual_pressed_frame_decay();
     }
 
     fn localize_menu_frame_plan(&self, plan: &mut MenuFramePlan) {
@@ -23345,7 +23351,7 @@ impl DesktopLauncher {
         ));
         pass.push(RenderCommand::clear([0.018, 0.024, 0.036, 1.0]));
         pass.extend(self.menu_background_layer_commands(viewport));
-        pass.extend(plan.ui.to_render_commands());
+        pass.extend(plan.ui_render_commands.clone());
         pass
     }
 
@@ -51813,12 +51819,7 @@ impl DesktopLauncher {
     ) -> DesktopGraphicsFrame {
         let input = self.menu_frame_input_for_viewport(viewport);
         let mut plan = self.menu_renderer_state.render_plan(input);
-        self.localize_menu_frame_plan(&mut plan);
-        plan.ui = plan
-            .ui
-            .with_hovered_role(self.last_menu_hovered_button)
-            .with_pressed_role(self.active_menu_pressed_button_for_visuals());
-        self.apply_menu_visual_pressed_frame_decay();
+        self.finalize_menu_frame_plan_for_desktop_visuals(&mut plan);
         let mut menu_pass = if desktop_fast_menu_enabled() {
             self.fast_menu_render_pass_from_plan(&plan, viewport)
         } else {
