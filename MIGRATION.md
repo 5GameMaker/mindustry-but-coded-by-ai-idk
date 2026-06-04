@@ -17,6 +17,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 881. Native OpenGL 重复 resize 幂等化
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.13%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsNullOpenGlBackendRuntime::resize_surface(...)` 对同尺寸 resize 做幂等短路；
+    - `DesktopOpenGlBackendGraphicsRenderer::render_graphics_frame_with_effect_buffer_surface(...)` 只在 effect-buffer surface 尺寸变化时调用 runtime resize，避免菜单/前端每帧重复触发 resize；
+    - 扩展 OpenGL renderer 测试，确认同尺寸连续帧 `resize_events` 不再增长，尺寸变化时才增长。
+  - `desktop/src/main.rs`
+    - `DesktopNativeOpenGlRuntime::resize_native_surface(...)` 对同尺寸 resize 做幂等短路，避免 native `surface.resize(...) + gl.viewport(...)` 在尺寸未变时每帧执行，降低低 FPS/闪黑风险。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_opengl_backend_graphics_renderer_submits_frame_to_runtime -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_graphics_opengl_backend_runtime_feature_records_driver_submission -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop native_opengl_context_candidates_follow_upstream_version_fallback_order -- --nocapture`
+  - `git diff --check`
+- 后续不可漏：
+  - 继续处理更大的低帧率来源：sprite binding 后全量刷新 upload plans、archive/mod sprite PNG bytes 反复 clone、Windows/Intel legacy GL 默认候选导致 shader 黑屏风险、DPI 坐标统一转换。
+
 ## 880. Load/Save 错误提示接入 Java 风格 OK 模态
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。

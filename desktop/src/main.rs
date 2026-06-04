@@ -1443,6 +1443,9 @@ impl DesktopNativeOpenGlRuntime {
     }
 
     fn resize_native_surface(&mut self, size: mindustry_desktop::DesktopSurfaceSize) {
+        if self.state.surface_size == Some(size) {
+            return;
+        }
         self.state.surface_size = Some(size);
         self.state.resize_events += 1;
         if let (Some(width), Some(height)) =
