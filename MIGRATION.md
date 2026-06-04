@@ -17,6 +17,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 875. Mods browser 卡片图标 fallback 对齐 Tex.nomap
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.07%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `mods_browser_entry_icon_rect(...)`，browser 卡片 icon 几何不再散落在渲染代码里；
+    - Mods browser 列表卡片默认图标从首字母文本占位改为 `nomap` sprite，贴近 Java `rebuildBrowser()` 中 `BorderImage.setDrawable(Tex.nomap)` 的加载前 fallback；
+    - 保留已安装项 accent 边框与未安装浅色边框；
+    - 扩展 `desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries`，断言过滤后的 browser 卡片在 icon rect 上绘制 `nomap`。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop mods -- --nocapture`
+- 后续不可漏：
+  - Java browser 还会按 repo 懒加载远程 icon 并替换 `Tex.nomap`；Rust 仍需补 repo icon 请求/缓存/atlas 或纹理上传主链，不能停在静态 fallback。
+
 ## 874. Mods detail 状态区对齐 getStateDetails
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
