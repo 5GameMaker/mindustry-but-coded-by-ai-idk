@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 961. LoadDialog shown/setup 状态重置
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.01%**，仍未达到完整可玩；本轮对齐 Java `LoadDialog.java:39-54` 的 `shown(() -> { searchString = ""; setup(); })` 与 `setup()` 中 `hidden = new Seq<>()` 行为。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 将 LoadGame/SaveGame route show 时的旧状态恢复改为 Java-style show reset；
+    - 每次打开 LoadGame 或 SaveGame 都清空 `load_game_search`、`load_game_hidden_modes` 和 `load_game_scroll_offset`；
+    - 原 `desktop_launcher_load_and_save_dialogs_preserve_independent_search_state_like_java` 更新为 `desktop_launcher_load_and_save_dialogs_reset_search_and_filters_like_java_on_show`，断言 LoadDialog/SaveDialog 每次 show 均重置搜索、过滤和滚动。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop load_game -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_and_save_dialogs_reset_search_and_filters_like_java_on_show -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - LoadDialog 搜索匹配仍需从 `schematic_search_normalize` 收窄到 Java `stripColors + lowercase + contains` 语义；
+  - LoadDialog 底部按钮布局仍需继续贴近 Java BaseDialog；
+  - JoinDialog 列表滚动、社区 host per-entry 和 reconnect 策略仍是下一批前端差异。
+
 ## 960. LoadDialog 删除确认文案
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
