@@ -17,6 +17,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 880. Load/Save 错误提示接入 Java 风格 OK 模态
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.12%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `CloseLoadGameError` 路由动作，把 LoadDialog 坏档失败与 SaveDialog 保存失败的 `load_game_error` 接入同一个 Java `UI.showErrorMessage/showException` 风格 OK-dismiss 模态；
+    - `load_game_route_modal_open / save_game_route_modal_open` 将 `load_game_error` 纳入模态阻塞，错误框打开时背景存档列表、搜索输入和滚轮不会继续响应；
+    - 新增 `load_game_error_dialog_rect_for_viewport / load_game_error_dialog_ok_button_rect / push_load_game_error_dialog`，渲染全屏遮罩、`@error.title`、错误正文和单个 `@ok`；
+    - `apply_menu_back_key()` 与输入事件中 Enter/Escape/Back 均关闭错误模态而不是关闭整个路由；错误模态打开时不再叠加底层异常 guard banner；
+    - 扩展坏档读档测试，并新增保存失败测试，覆盖 modal 文案、OK 命中、Back 关闭、背景输入阻断。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_launcher_run_load_save_reports_corrupted_when_primary_and_backup_fail -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_launcher_save_dialog_failure_uses_java_error_modal -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop load_game -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop save_dialog -- --nocapture`
+  - `git diff --check`
+- 后续不可漏：
+  - 当前仍复用 `load_game_error` 字段承载 Load/Save 错误；后续如果继续贴近 Java，应抽成通用 `menu_error_dialog`，补 `@details` 折叠异常详情，并把导入失败、删除/重命名 IO 失败等入口全部接入同一模态。
+
 ## 879. LoadDialog 坏档错误提示渲染断言
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
