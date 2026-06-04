@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 971. SchematicsDialog 详情预览 block sprite 接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.33%**，仍未达到完整可玩；本轮对齐 Java `SchematicsDialog.java` 的 `SchematicInfoDialog.show(...)` / `SchematicImage` 方向，详情预览不再显示 Rust-only `preview:` 诊断文本，而是按蓝图 tile 渲染 block sprite。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopSchematicCardEntry` 新增 `preview_tiles`，由真实 `Schematic.tiles` 填充；
+    - 新增 `DesktopSchematicPreviewTile`，保留 block/x/y/rotation；
+    - `push_schematic_info_dialog()` 在预览区域绘制 `schematic-background` 后，优先通过 `push_schematic_preview_tiles()` 把 tile 映射为 block full icon sprite；
+    - 缺少可渲染 tile 时才回退 `source:` 摘要，避免真实预览区域覆盖临时诊断文本；
+    - 测试收紧为断言详情预览区域不出现 `source: local`，并检查 `router` 等 block sprite 实际进入 render frame。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop schematics_info_dialog -- --nocapture`
+  - `cargo test -p mindustry-desktop schematic_info_dialog -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - 继续把当前即时绘制预览提升到 Java `Schematics.getPreview(...)` 同款离屏/缓存纹理 seam；
+  - SchematicsDialog 子菜单仍需继续对齐导入、导出、编辑、标签、使用蓝图等完整行为；
+  - 当前最高优先级仍是所有 UI 子菜单与原版接近，其次才是后端/模组细化。
+
 ## 970. JoinDialog community host per-entry 展示
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
