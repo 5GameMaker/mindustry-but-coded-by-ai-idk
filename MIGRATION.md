@@ -30531,3 +30531,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings 子菜单仍需继续逐项核对少量像素级布局；
   - Campaign `PlanetDialog.showPlanetLaunch(...)` 仍是下一批重点 UI 缺口；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 589. Campaign PlanetDialog planetLaunch 模式闭环
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.14%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是补齐 Java `PlanetDialog.showPlanetLaunch(...)` 的候选星球和隐藏子菜单行为。
+- Java 对照证据：
+  - `showPlanetLaunch(...)` 会设置 `launchCandidates` 并进入 `mode == planetLaunch`；
+  - 单候选时自动 `viewPlanet(launchCandidates.first())`；
+  - `selectable(Planet)` 在 `planetLaunch` 下只允许 launch candidates，或 `launchSector.planet` 且该 planet 允许 self-sector launch；
+  - `campaign.difficulty` 与 `sectorlist` 在 `planetLaunch` 下不可见。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `CampaignPlanetDialogState` 新增 `launch_candidate_planet_names`；
+    - 新增 `campaign_launch_sector_planet_name_like_java(...)`；
+    - 新增 `show_campaign_planet_launch_like_java(...)`，用于设置 `PlanetLaunch` 状态、候选星球、单候选自动切星球并关闭冲突弹层；
+    - `campaign_planet_selectable_like_java(...)` 的 `PlanetLaunch` 分支改为按 candidates/self-sector launch 规则判断；
+    - `select_campaign_planet_like_java(...)` 在 `PlanetLaunch` 下保留 launch sector 和候选列表；
+    - route lines、render、hit-test 同步隐藏 `@campaign.difficulty` 与 `sectorlist`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop campaign_route -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `show_campaign_planet_launch_like_java(...)` 目前是 UI 状态 helper，仍需接入真实 launch pad / launch sector 运行时入口；
+  - PlanetDialog 的 projection hover、locked/nolaunch 文案和跨星球 launch 资源链仍需继续细化；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
