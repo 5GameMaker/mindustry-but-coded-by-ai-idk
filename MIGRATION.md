@@ -30600,3 +30600,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - LoadDialog 底部按钮层级与 BaseDialog 像素级位置仍需继续对齐；
   - JoinDialog 社区 host 行、搜索触发语义、重连行为仍需继续细化；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 592. JoinDialog 顶栏刷新按钮对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.17%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `JoinDialog` 顶部 chrome 不出现 Java 原版没有的常驻刷新按钮。
+- Java 对照证据：
+  - `JoinDialog` 构造中绑定 `F5 -> refreshAll()`；
+  - `refreshCommunity()` 的搜索行保留 zoom 刷新按钮；
+  - local empty 状态保留 `@hosts.none` 旁的 refresh；
+  - 顶部 action 区没有常驻 `@refresh` 文本按钮。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 删除 `join_route_refresh_button_rect_for_panel(...)`；
+    - 删除 `push_join_route_page(...)` 顶部 `@refresh` 文本按钮渲染；
+    - 删除顶栏 refresh 的命中分发；
+    - shell lines 与 JoinDialog 测试改为锁住“不显示顶栏 @refresh”，同时保留 F5 / search zoom / local empty refresh 行为。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - JoinDialog 社区列表仍需继续压到 Java ScrollPane 级别的滚动/命中一致；
+  - Settings 子弹窗和 MapPlay/CustomRules 子窗仍需继续从 route child 状态机收敛到 Java 独立 dialog 栈语义；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
