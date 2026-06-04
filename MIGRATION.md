@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 908. About contributors 资源加载与标准特效帧复用
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `AboutDialog.java` 与当前 Rust render/frame 主链。
+- 本轮总体进度更新：约 **94.42%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `AboutDialog.shown(...)` 从 `Core.files.internal("contributors").readString("UTF-8").split("\n")` 读取 contributors；
+  - Credits 页按 3 列 contributor 行显示并由 ScrollPane 承载；
+  - 世界渲染中同一帧的标准特效数据应作为一份帧快照被 light pass 与 effect pass 复用，避免重复构建/复制。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `about_contributors_candidate_paths()`、`about_contributors_from_utf8_like_java()`、`load_about_contributors_from_resource_like_java()` 与 `ABOUT_CONTRIBUTORS_CACHE`，优先从 `core/assets/contributors` 按 UTF-8 懒加载，缺失时才回退旧硬编码列表；
+    - About Credits 行数、滚动上限和实际绘制都改为基于资源加载结果，保持 Java 3 列 contributor 分组；
+    - `graphics_frame_for_render(...)` 中 `standard_effect_render_frame()` 改为每帧只构建一次，light pass 与 overlay/effect pass 复用同一 `DesktopStandardEffectRenderFrame`，降低前端/世界帧 CPU clone 压力。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_about_contributors_are_loaded_from_resource_like_java -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_about_menu_route_renders_upstream_credits_links_and_contributors -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_routes_standard_effect_circles_into_graphics_backend -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_routes_standard_effect_lights_into_graphics_backend -- --nocapture`
+- 后续不可漏：
+  - 继续收 UI 子菜单细节，下一批可按只读审查结果优先做 Database block tag / ContentInfo 细节或继续降低菜单 plan 重建成本；
+  - 继续检查 native OpenGL 帧率，特别是菜单 `MenuFramePlan` 每帧重建与 UI command cache 复用率，不能把这次 clone 优化当成完整 FPS 修复。
+
 ## 907. Bloom capture 命令进入 OpenGL buffer/resolve 主链
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `Renderer.java` 的 `bloom.capture/render` 插层行为。
