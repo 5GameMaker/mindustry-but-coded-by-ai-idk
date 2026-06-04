@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 929. CustomGame MapPlay late content-error 守卫
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，继续优先前端/UI/可玩性，不推进 Mods。
+- 本轮总体进度更新：约 **94.63%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率/输入命中问题收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `block_menu_action_for_content_errors(...)` 改为通过 `close_play_entry_ui_state_like_java()` 统一清理 play-route 残留 UI 状态；
+    - MapPlayDialog 的 `@play` 主按钮在 content errors 出现后不再 hit-test 成 `PlaySelected`；
+    - `DesktopMapCardActionKind::PlaySelected` 分支增加 late content-error 守卫，避免打开 CustomGame/Editor MapPlayDialog 后错误才出现时仍然 seed playable smoke world；
+    - 新增 `desktop_launcher_menu_play_guard_blocks_custom_game_play_if_errors_appear_late`，覆盖 UI 不可点击与直接 dispatch 仍被安全守卫拦截。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_menu_play_guard_blocks_custom_game_play_if_errors_appear_late -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_menu_play_guard_blocks_campaign_launch_if_errors_appear_late -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_map_card_dialog_buttons_dispatch_play_and_editor_actions -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -j 1 -p mindustry-desktop --features opengl-native-runtime`
+- 后续不可漏：
+  - 继续做子代理指出的 MapPlayDialog mobile 横屏预览 150f 对齐；
+  - 继续做 LoadGame/SaveGame 焦点/首键输入稳定回归；
+  - 同类 play guard 后续扩展到 Editor playtest 的更多边缘组合。
+
 ## 928. Campaign 主按钮随 content error 禁用
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，继续优先前端/UI/可玩性，不推进 Mods。
