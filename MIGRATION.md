@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 928. Campaign 主按钮随 content error 禁用
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，继续优先前端/UI/可玩性，不推进 Mods。
+- 本轮总体进度更新：约 **94.62%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率/输入命中问题收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `active_menu_route_shell_primary_enabled(...)`，Campaign route 在 content loader 存在错误时主按钮视觉置灰且 hit-test 不再返回 `LaunchCampaign`；
+    - 直接 `dispatch_menu_route_shell_action(LaunchCampaign)` 的安全守卫保持不变，仍会阻止进入游戏并给出 `MENU_PLAY_GUARD_MESSAGE`；
+    - `desktop_launcher_menu_play_guard_blocks_campaign_launch_if_errors_appear_late` 补 UI hit-test 断言，确认 late content error 出现后主按钮不可点击。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_menu_play_guard_blocks_campaign_launch_if_errors_appear_late -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_campaign_launch_button_seeds_playable_smoke_world -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -j 1 -p mindustry-desktop --features opengl-native-runtime`
+- 后续不可漏：
+  - 继续把 Campaign 主按钮推进为 sector 状态驱动的 `resume/go/locked/no source`；
+  - 同类禁用视觉之后应扩展到 CustomGame/LoadGame/Editor 的 content-error play guard。
+
 ## 927. Campaign route 接入 Back/Tech Tree 次级动作
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，继续优先前端/UI/可玩性，不推进 Mods。
