@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 981. BannedContentDialog 图标网格对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；当前第一优先级是 UI 所有子菜单与 Java 原版对齐，第二优先级是确保完整可玩和代码层面一致。
+- 本轮总体进度更新：约 **95.44%**，仍未达到完整可玩；本轮对齐 Java `BannedContentDialog` 的 50x50 图标网格，而不是旧 Rust 文本行列表。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 将 MapPlay/CustomRules 与 pause overlay 的 banned blocks/units 条目布局改为双列 50x50 图标网格，滚动单位改为“网格行”；
+    - `@addall` 按钮宽度跟随左右网格列，标题下划线扩展到完整网格列；
+    - 条目渲染改为按钮背景 + block/unit full icon，去掉候选名称可见文本，名称只保留在搜索、状态和后续 tooltip/可访问扩展语义中；
+    - 修正图标网格 hit-test，按 `side_index / columns` 计算可见行，点击映射回真实 candidate index；
+    - 修正 pause overlay 禁用内容弹窗滚轮入口的 `is_none` 条件，避免弹窗打开时滚动被错误屏蔽；
+    - add/remove all 后重置滚动位置，避免列表重建后保留越界行偏移。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_banned_content_dialog_search_addall_and_scrolls --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_banned_content_child_dialog_like_java --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,683,904` 字节。
+- 后续继续：
+  - CustomRules 仍需继续把 Planet/Env、Team Rules 和右侧快捷入口列按 Java `CustomRulesDialog` 主面板 inline flow 收敛；
+  - BannedContentDialog 后续可补 Java tooltip 语义，但不要退回可见文本列表；
+  - 继续推进完整可玩、整体 runtime 接入与 Java↔Rust 联机兼容。
+
 ## 980. MapPlay LoadoutDialog 大弹窗布局对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；当前仍优先 UI 子菜单与可玩性。
