@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 945. Controls 本地化搜索与中文主菜单 label sprite 对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.85%**，仍未达到完整可玩；本轮收口 Settings -> Controls 的本地化搜索/提示文案，并修正中文/繁中主菜单 label sprite 快路径，避免乱码或内部 key 破坏 UI 观感。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Settings Controls 的分类标题、keybind 行标题改为显示本地化 bundle 可见文本，而不是 `@category.*.name` / `@keybind.*.name` 原始 key；
+    - `settings_keybind_filtered_specs()` 改为按本地化后的可见 keybind label 搜索，对齐 Java `KeybindDialog.rebuildBinds()` 的 `bundle.get(...).contains(searchText)`；
+    - 重绑弹窗 `keybind.press.axis` / `keybind.press` 改为 `@keybind.press.axis` / `@keybind.press` bundle 本地化文本；
+    - 新增 `desktop_launcher_settings_keybind_search_matches_localized_labels_like_java`，锁定 `zh_CN` 下搜索 `聊天` 能命中聊天相关按键、搜索内部英文 key `chat` 不命中。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 中文主菜单 label sprite 快路径不再依赖硬编码中文字面量，改为通过 `upstream_menu_bundle_value_for_locale("zh_CN"/"zh_TW", key)` 匹配上游 bundle 值；
+    - 中文与繁中 `play` label sprite 各有回归测试，避免 UTF-8/乱码读写导致 sprite 快路径失效。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop keybind -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop settings_controls -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-core menu_ui_plan_desktop_ --lib -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe build -p mindustry-desktop --features opengl-native-runtime --release`
+- 当前可查看客户端产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+- 并行探索结论已吸收，后续不可漏：
+  - Play 按钮链路基本对齐，P0 差异转向 Campaign 仍偏 smoke world、Save 写入和全局 loading 体验不够原版；
+  - Campaign/Research 仍是扁平 route，缺 Java `PlanetDialog / ResearchDialog / SectorSelectDialog` 的返回栈、lastplanet/last-sector 持久化和自动按当前星球切研究树；
+  - Editor/MapList 建议优先小步收口 modded 地图 footer 文案/样式，再决定 Playtest 入口职责是否严格拆回 Java `MapEditorDialog` 语义。
+
 ## 944. SettingsMenuDialog Data 页导入导出可见性回归
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。

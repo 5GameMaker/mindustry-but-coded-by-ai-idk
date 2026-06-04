@@ -9,7 +9,8 @@ use super::{
     RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderViewport,
 };
 use crate::mindustry::ui::{
-    upstream_bundle_en_value, upstream_image_button_style_skin, upstream_text_button_style_skin,
+    upstream_bundle_en_value, upstream_image_button_style_skin,
+    upstream_menu_bundle_value_for_locale, upstream_text_button_style_skin,
     upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, UiDrawableAlias, UiDrawableTint,
 };
 
@@ -107,83 +108,105 @@ fn menu_icon_sprite_rect(center: RenderPoint, size: f32, mobile: bool) -> Render
 }
 
 fn menu_label_sprite_for_text(label: &str) -> Option<MenuLabelSprite> {
-    match label {
-        "开始游戏" => Some(MenuLabelSprite {
+    let matches_bundle_value = |key: &str| {
+        upstream_menu_bundle_value_for_locale("zh_CN", key)
+            .is_some_and(|candidate| candidate == label)
+            || upstream_menu_bundle_value_for_locale("zh_TW", key)
+                .is_some_and(|candidate| candidate == label)
+    };
+
+    if matches_bundle_value("play") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-play",
             width: 88.0,
             height: 35.0,
-        }),
-        "数据库" => Some(MenuLabelSprite {
+        })
+    } else if matches_bundle_value("database.button") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-database",
             width: 67.0,
             height: 35.0,
-        }),
-        "地图编辑器" => Some(MenuLabelSprite {
+        })
+    } else if matches_bundle_value("editor") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-editor",
             width: 109.0,
             height: 35.0,
-        }),
-        "模组" => Some(MenuLabelSprite {
+        })
+    } else if matches_bundle_value("mods") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-mods",
             width: 46.0,
             height: 35.0,
-        }),
-        "设置" => Some(MenuLabelSprite {
+        })
+    } else if matches_bundle_value("settings") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-settings",
             width: 46.0,
             height: 35.0,
-        }),
-        "退出" => Some(MenuLabelSprite {
+        })
+    } else if matches_bundle_value("quit") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-quit",
             width: 46.0,
             height: 35.0,
-        }),
-        "战役模式" => Some(MenuLabelSprite {
+        })
+    } else if matches_bundle_value("campaign") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-campaign",
             width: 88.0,
             height: 35.0,
-        }),
-        "加入游戏" => Some(MenuLabelSprite {
+        })
+    } else if matches_bundle_value("joingame") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-join",
             width: 88.0,
             height: 35.0,
-        }),
-        "自定义游戏" => Some(MenuLabelSprite {
+        })
+    } else if matches_bundle_value("customgame") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-custom",
             width: 109.0,
             height: 35.0,
-        }),
-        "载入游戏" => Some(MenuLabelSprite {
+        })
+    } else if matches_bundle_value("loadgame") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-load",
             width: 88.0,
             height: 35.0,
-        }),
-        "蓝图" => Some(MenuLabelSprite {
+        })
+    } else if matches_bundle_value("schematics") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-schematics",
             width: 46.0,
             height: 35.0,
-        }),
-        "核心数据库" => Some(MenuLabelSprite {
+        })
+    } else if matches_bundle_value("database") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-content-database",
             width: 109.0,
             height: 35.0,
-        }),
-        "关于" => Some(MenuLabelSprite {
+        })
+    } else if matches_bundle_value("about.button") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-about",
             width: 46.0,
             height: 35.0,
-        }),
-        "创意工坊" => Some(MenuLabelSprite {
+        })
+    } else if matches_bundle_value("workshop") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-workshop",
             width: 88.0,
             height: 35.0,
-        }),
-        "科技树" => Some(MenuLabelSprite {
+        })
+    } else if matches_bundle_value("techtree") {
+        Some(MenuLabelSprite {
             symbol: "menu-label-zh-tech-tree",
             width: 67.0,
             height: 35.0,
-        }),
-        _ => None,
+        })
+    } else {
+        None
     }
 }
 
@@ -5695,12 +5718,14 @@ mod tests {
     #[test]
     fn menu_ui_plan_desktop_chinese_menu_labels_use_upstream_label_sprites() {
         let rect = RenderRect::new(128.0, 325.0, 230.0, 70.0);
+        let label_text = upstream_menu_bundle_value_for_locale("zh_CN", "play")
+            .expect("zh_CN bundle should provide a localized play label");
         let plan = MenuUiPlan {
             mobile: false,
             submenu_alpha: 1.0,
             buttons: vec![MenuButtonPlan {
                 role: MenuButtonRole::Play,
-                label: "开始游戏".to_string(),
+                label: label_text.to_string(),
                 icon_name: None,
                 rect,
                 selected: false,
@@ -5732,7 +5757,37 @@ mod tests {
                 < f32::EPSILON
         );
         assert!(!commands.iter().any(
-            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "开始游戏")
+            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == label_text)
+        ));
+    }
+
+    #[test]
+    fn menu_ui_plan_desktop_traditional_chinese_menu_labels_use_upstream_label_sprites() {
+        let rect = RenderRect::new(128.0, 325.0, 230.0, 70.0);
+        let label_text = upstream_menu_bundle_value_for_locale("zh_TW", "play")
+            .expect("zh_TW bundle should provide a localized play label");
+        let plan = MenuUiPlan {
+            mobile: false,
+            submenu_alpha: 1.0,
+            buttons: vec![MenuButtonPlan {
+                role: MenuButtonRole::Play,
+                label: label_text.to_string(),
+                icon_name: None,
+                rect,
+                selected: false,
+                hovered: false,
+                pressed: false,
+                submenu: false,
+            }],
+        };
+
+        let commands = plan.to_render_commands();
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, .. } if symbol == "menu-label-zh-play"
+        )));
+        assert!(!commands.iter().any(
+            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == label_text)
         ));
     }
 
