@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 891. Mods GitHub resolved 后下载目标选择
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
+- 本轮总体进度更新：约 **94.23%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - Java repo 语言判定为 JVM 语言后进入 `githubImportJavaMod(repo, release)`，下一跳是 `/repos/{repo}/releases/latest` 或 `/releases/{release}`；
+  - 非 JVM 语言且无 release 时进入 `githubImportBranch(default_branch, repo, null)`，下一跳是 `/repos/{repo}/zipball/{branch}`；
+  - 非 JVM 语言但指定 release 时先请求 `/repos/{repo}/releases/{release}`，再从 release JSON 取 `zipball_url`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopModsImportGithubDownloadTargetKind` 与 `DesktopModsImportGithubDownloadTarget`；
+    - 新增 Java-like URI helper：Java release metadata、branch zipball、branch release metadata；
+    - `remember_mods_import_github_request_like_java(...)` 对 `hasJava=true` 的 browser/listing 请求立即生成 Java release metadata target；
+    - `apply_mods_import_github_repo_api_json_like_java(...)` 在 repo metadata resolved 后同步生成下一跳 target；
+    - Mods shell lines 增加 target 事件，便于后续真实 HTTP executor 直接消费。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_import_github -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_browser -- --nocapture`
+- 后续不可漏：
+  - 下一步继续解析 Java release `assets`，按 Java 优先选择 `dexed*.jar`，否则选择任意 `.jar`；branch release 还需解析 `zipball_url` 与 GitHub 302 `Location`；最终接临时文件写入与真正导入。
+
 ## 890. Mods GitHub 导入下载态 loadfrag 与取消闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
