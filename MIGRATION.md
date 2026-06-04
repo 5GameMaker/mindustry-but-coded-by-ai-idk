@@ -30806,3 +30806,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings 的其他像素级和生命周期差异仍需继续审查；
   - 前端所有子菜单仍需继续逐项对齐 Java 原版；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 601. JoinDialog 刷新范围拆分
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.26%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `JoinDialog` 的刷新入口不再全部误走 `refreshAll()`。
+- Java 对照证据：
+  - `F5` 调用 `refreshAll()`，顺序刷新 local / remote / community，并递增全量 refresh counter；
+  - community search `Enter` 和 zoom 按钮只调用 `refreshCommunity()`；
+  - local 空列表旁的刷新按钮只调用 `refreshLocal()`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopMenuRouteShellAction::RefreshJoinLocalServers` 与 `RefreshJoinCommunityServers`；
+    - local empty refresh 命中改为 local-only；
+    - search zoom 与 search Enter 改为 community-only；
+    - `RefreshJoinServers` 保持 F5/resize 全量刷新；
+    - scoped local/community 刷新不再递增全量 `join_refresh_requests`，对齐 Java `refreshAll()` 计数语义。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - JoinDialog search 文本归一化和 community group header/host card 结构仍需继续对齐；
+  - 前端所有子菜单仍需继续逐项对齐 Java 原版；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
