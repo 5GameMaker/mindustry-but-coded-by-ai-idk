@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 895. Mods GitHub importFail/modError 弹窗收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
+- 本轮总体进度更新：约 **94.27%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `importFail(Throwable t)` 会回到主线程调用 `modError(t)`；
+  - `modError(Throwable error)` 第一件事是隐藏 `ui.loadfrag`，再按错误类型弹 `@error.title/@ok` 或异常弹窗；
+  - `writable dex`、SSL/证书/protocol 类错误有特殊提示分支。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 Mods GitHub 错误弹窗状态与 `CloseModsImportGithubError` 动作；
+    - GitHub 下载写入失败时隐藏下载态、记录失败结果，并显示 Java-like `@error.title` + `@ok` 模态；
+    - Back/Escape 与 OK 按钮均可关闭该错误模态，模态打开时阻断底层 Mods 交互；
+    - shell lines 增加 `modal: @error.title message=...` 与 `button: @ok`，方便自动验收。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`（已手动回退 `desktop/src/main.rs` 纯换行噪音）
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_import_github -- --nocapture`
+- 后续不可漏：
+  - 继续接真实 HTTP executor 与 GitHub 302 `Location`；成功路径仍需更贴近 Java 的临时文件删除、`mods.importMod(file)` 真实 runtime 接入和 `setup()` 级刷新。
+
 ## 894. Mods GitHub handleMod 本地导入收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
