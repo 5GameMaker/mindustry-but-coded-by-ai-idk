@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 944. SettingsMenuDialog Data 页导入导出可见性回归
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.84%**，仍未达到完整可玩；本轮核验本地 Java `SettingsMenuDialog.java` 后确认 `@data.export` 与 `@data.import` 是原版 Data 页可见按钮，纠正之前隐藏导入/导出的错误方向。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `settings_data_action_visible(...)` 改为只在 mobile 隐藏 `OpenDataFolder`，保留 `ExportData` / `ImportData` 可见；
+    - Settings Data 页 route line、渲染文本、按钮容器和 hit-test 测试全部改为按 `settings_visible_data_actions()` 的真实可见数量计算；
+    - 恢复 Data 页 `ExportData` 按钮命中回归，避免导入/导出只停留在底层 platform hook；
+    - mobile 仍对齐 Java：隐藏 `@data.openfolder`，保留 `@data.export`、`@data.import`、`@crash.export`。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop settings_data -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe build -p mindustry-desktop --features opengl-native-runtime --release`
+- 当前可查看客户端产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+- 后续不可漏：
+  - 优先补 `MenuFragment` / UI controller 和 `Load / Save / Settings / Research / Planet / Editor / Schematics` 等子对话框的完整链路；
+  - 对照 Java 修正 Controls 搜索、设置状态持久化、动态分类、滚动/返回栈等差异；
+  - 继续查黑屏、低 FPS、点击命中和资产根路径问题，资源优先复用 `D:/MDT/mindustry-upstream-v157.4`。
+
 ## 943. LoadDialog / SaveDialog 独立搜索状态闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
