@@ -1,6 +1,6 @@
 # Mindustry Java → Rust 迁移总控文档
 
-**固定 Rust 工作路径（上下文压缩后不要重新找）：`D:\MDT\rust-mindustry`；命令中统一写作 `D:/MDT/rust-mindustry`。**
+**固定 Rust 工作路径：`D:\MDT\rust-mindustry`；命令中统一写作 `D:/MDT/rust-mindustry`。**
 
 ```text
 CONTEXT_BOOTSTRAP_RUST_WORKDIR=D:/MDT/rust-mindustry
@@ -12,10 +12,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；资源层优先复用 `D:/MDT/mindustry-upstream-v157.4` 里可直接沿用的原项目资源（如 assets、布局、文案、图标、字体），避免重复造轮子。
 - 当前 fast synthetic background 只是过渡方案，最终必须接入 cached/batched 的原版 `MenuRenderer`。
+- 本任务是将 Java Mindustry/MDT 完整重写为整体化、可游玩的 Rust 版，而不是独立模块；helper/plan 必须继续接入 runtime/render/backend 主链路。
+- 乱码优先 UTF-8：遇到乱码时先按 UTF-8 读取/保存，确认不是 UTF-8 后再尝试其他编码。
 
 本文档用于约束后续 AI/开发者持续迁移，目标是防止漏迁移、跑偏目录、把工程做成孤立模块，或忘记最终要交付的是可整合、可联机、可游玩的 Rust 版 Mindustry/MDT。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 889. Mods 手动 GitHub 导入接入 Java 仓库类型判定
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
+- 本轮总体进度更新：约 **94.21%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `ModsDialog.githubImportMod(repo, false, release)` 会先请求 `https://api.github.com/repos/{repo}`；
+  - `language` 为 `Java / Kotlin / Groovy / Scala` 时走 `githubImportJavaMod(repo, release)`；
+  - 否则读取 `default_branch` 并走 `githubImportBranch(default_branch, repo, release)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopModsImportGithubRepoProbe / DesktopModsImportGithubResolvedRequest / DesktopModsImportGithubResolvedKind`；
+    - 手动 GitHub 导入和 browser listing 导入统一通过 `remember_mods_import_github_request_like_java(...)` 记录请求；
+    - `isJava=false` 的请求会记录 GitHub repo API probe，等待 repo 元数据；
+    - 新增 `apply_mods_import_github_repo_api_json_like_java(...)`，按 Java 的语言启发式解析 `language/default_branch`，决定 Java release JAR 或 branch ZIP 路径；
+    - Mods 路由 shell lines 增加 probe/resolved 事件，方便后续把真实 HTTP 下载执行链接上。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_mods_route_import_dialog_renders_and_records_file_request -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_import_github -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_browser -- --nocapture`
+- 后续不可漏：
+  - 当前已把 Java 的“仓库类型判定边界”接入 Rust 状态机；下一步仍需把 `JavaReleaseJar / BranchZip` 继续接到真实 HTTP release/zip 下载、loadfrag 取消按钮、导入失败弹窗和依赖导入链。
 
 ## 888. Join 本地 LAN empty/discovering 卡片
 
