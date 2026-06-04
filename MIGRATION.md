@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 917. Mods GitHub 下载 loadfrag 接入 LoadingFragmentState
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，继续推进 `LoadingFragment.java` / `UI.loadAnd(...)` 前端统一接入。
+- 本轮总体进度更新：约 **94.51%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `remember_mods_import_github_request_like_java(...)` 在创建 `mods_import_github_download_state` 时同步显示 `loading_fragment_state`，文本为 `@downloading`，进度从 0 开始，并启用取消按钮；
+    - `cancel_mods_import_github_download_like_java(...)`、`record_mods_import_github_error_like_java(...)`、`complete_mods_import_github_download_bytes_like_java(...)` 在下载结束/取消/失败后隐藏 `loading_fragment_state`；
+    - 新增 `desktop_launcher_mods_github_download_syncs_loading_fragment_state`，锁定 GitHub 下载 loadfrag 能产出统一 desktop load frame，并在 cancel/error 后清理。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_mods_github_download_syncs_loading_fragment_state -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_import_github -- --nocapture`
+- 后续不可漏：
+  - Join 连接中/reconnect loadfrag 仍需继续接入同一个 `LoadingFragmentState`；
+  - Mods 下载目前只有状态创建时的 0 进度，后续真实下载字节进度接入时要继续同步；
+  - 现有 route overlay 视觉仍保留，后续要逐步统一到 Java-like LoadingFragment/LoadFramePlan 消费链。
+
 ## 916. LoadGame/SaveGame pending 接入 LoadingFragmentState 进度
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只继续接入本地 `LoadingFragment.java` / `UI.loadAnd(...)` 对应加载前端链路。
