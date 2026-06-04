@@ -30736,3 +30736,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - SaveDialog 预览 PNG 写入、Load/Save 其他 BaseDialog 像素级布局仍需继续审查；
   - 前端所有子菜单仍需继续逐项对齐 Java 原版；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 598. Settings PlanetData 诊断文本收口
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.23%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `SettingsMenuDialog` 的 `dataDialog / PlanetDataDialog` 文本层级更接近 Java 独立 `BaseDialog`。
+- Java 对照证据：
+  - Java `dataDialog` 是数据动作按钮表，不显示 `planet:` 诊断行；
+  - `PlanetDataDialog` 的选中星球只体现在 `@settings.planetselect: [#color]name` 按钮文案里；
+  - 独立 dialog route/shell 不应泄漏旧的 selected planet 调试文本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `settings_route_lines()` 的 Data 页不再输出 `planet: ...`；
+    - `PlanetDataDialog` route line 从 `child dialog: PlanetDataDialog planet:... actions:2 planets:...` 收敛为不带 planet 的 `child dialog: PlanetDataDialog actions:2 planets:...`；
+    - 扩展 `desktop_launcher_settings_child_dialog_overlay_and_back_stack_match_java`，断言 route lines 不再包含 `planet:` 或 `PlanetDataDialog planet:`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop settings_data -- --nocapture`
+  - `cargo test -p mindustry-desktop settings_child_dialog -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Settings LanguageDialog 默认 locale 回退、KeybindDialog bare modal 仍需继续对齐；
+  - 前端所有子菜单仍需继续逐项对齐 Java 原版；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
