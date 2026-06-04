@@ -30646,3 +30646,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - MapPlay/CustomRules 子窗仍需继续像素级对齐 Java 独立 dialog 栈；
   - 前端所有子菜单仍需继续逐项审查；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 594. Settings 子弹窗滚轮隔离
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.19%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `Settings` 的 Language / Controls / PlanetData 子弹窗更接近 Java 独立 `BaseDialog`，打开时阻断背景父设置页滚轮输入。
+- Java 对照证据：
+  - `LanguageDialog` / `KeybindDialog` 是独立 dialog；
+  - 独立 dialog 打开后，背景 `SettingsMenuDialog` 的设置表格不应继续接收滚轮滚动；
+  - child 自己的列表区域仍应正常响应滚轮。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `apply_settings_scroll_delta(...)` 在 `settings_child_dialog` 打开时先处理 child dialog；
+    - 光标不在 child dialog 内时直接阻断滚轮，防止穿透到父 Settings 表格；
+    - child 为 Language / Controls 时仅滚动 child 自己的 ScrollPane，PlanetData 不滚动；
+    - 新增 `desktop_launcher_settings_child_dialog_blocks_background_scroll_like_java`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop settings_child_dialog_blocks -- --nocapture`
+  - `cargo test -p mindustry-desktop settings -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Settings 子弹窗仍需继续逐项像素级对齐 Java 独立 dialog 栈；
+  - 前端所有子菜单仍需继续逐项审查；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
