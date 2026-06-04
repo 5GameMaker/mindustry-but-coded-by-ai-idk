@@ -17,6 +17,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 886. Join 社区服务器搜索剥离颜色 markup
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `JoinDialog.java`。
+- 本轮总体进度更新：约 **94.18%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `JoinDialog.java` 在社区服务器搜索中对 `name / description / mapname / modeName` 使用 `Strings.stripColors(...).contains(serverSearch)`，颜色 tag 名不参与搜索命中。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_join_search_plain_text(...)` 与 `desktop_join_search_terms(...)`，复用现有 Mindustry markup plain-text 解析，统一 query 与字段 normalizer；
+    - `DesktopJoinRouteServerSnapshot::matches_query/refresh_search_terms()` 改为剥离 `[accent]...[]` 等 markup 后建立搜索词；
+    - `DesktopJoinCommunityGroup::matches_query()` 对 group 名、地址和 host 的 name/description/map/mode/address 同样先剥 markup 再匹配；
+    - 补充回归测试，确认 `scarlet/accent/cyan` 这类颜色 tag 名不会命中，但 tag 包裹的真实文本仍可命中。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_join_route_search_strips_colors_like_java -- --nocapture`
+- 后续不可漏：
+  - Join 下一步优先继续 legacy `server-list` 自动迁移、本地 LAN discovering/empty card、社区 group address ping 回填 hosts，避免社区服务器页停留在静态地址清单。
+
 ## 885. Mods browser 选择导入请求接入 Java githubImportMod
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
