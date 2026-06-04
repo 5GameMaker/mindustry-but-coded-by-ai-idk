@@ -3269,16 +3269,28 @@ impl GameRuntime {
         &mut self,
         content: &ContentLoader,
     ) -> GameRuntimePlayableSmokeReport {
+        self.seed_playable_smoke_world_with_dimensions(content, 16, 16, false)
+    }
+
+    pub fn seed_playable_smoke_world_with_dimensions(
+        &mut self,
+        content: &ContentLoader,
+        width: usize,
+        height: usize,
+        force_resize: bool,
+    ) -> GameRuntimePlayableSmokeReport {
         let state_was_menu = self.state.is_menu();
         let mut world_initialized = false;
+        let width = width.clamp(1, 1024);
+        let height = height.clamp(1, 1024);
 
-        if self.state.world.width() == 0 || self.state.world.height() == 0 {
+        if force_resize || self.state.world.width() == 0 || self.state.world.height() == 0 {
             self.clear_buildings();
             let floor_id = content
                 .block_by_name("stone")
                 .map(|block| block.base().id)
                 .unwrap_or(Tile::AIR);
-            self.state.world.load_generator(16, 16, |tiles| {
+            self.state.world.load_generator(width, height, |tiles| {
                 for tile in tiles.iter_mut() {
                     tile.floor = floor_id;
                     tile.overlay = Tile::AIR;
@@ -21784,6 +21796,26 @@ mod tests {
             .get_or_null(default_team)
             .expect("default team should be present");
         assert!(team.cores.iter().any(|core| core.id == core_tile));
+    }
+
+    #[test]
+    fn game_runtime_seed_playable_smoke_world_with_dimensions_matches_map_size() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mut runtime = GameRuntime::default();
+
+        let report = runtime.seed_playable_smoke_world_with_dimensions(&content, 180, 120, true);
+
+        assert_eq!(report.world_width, 180);
+        assert_eq!(report.world_height, 120);
+        assert!(report.world_initialized);
+        assert!(report.core_added);
+        assert!(runtime.state.is_playing());
+        assert_eq!(runtime.state.world.width(), 180);
+        assert_eq!(runtime.state.world.height(), 120);
+        let core_tile = report
+            .core_tile_pos
+            .expect("resized smoke core should exist");
+        assert!(runtime.storage_runtime_states.contains_key(&core_tile));
     }
 
     #[test]
