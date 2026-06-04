@@ -19,6 +19,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 926. Campaign 主按钮使用原版发射文案
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，继续优先前端/UI/可玩性，不推进 Mods。
+- 本轮总体进度更新：约 **94.60%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率/输入命中问题收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Campaign route 主按钮文案从硬编码 `LAUNCH` 改为原版 bundle key `@sectors.launch`；
+    - `desktop_launcher_campaign_menu_route_shell_uses_content_start_sector` 补断言，确认按钮实际渲染本地化后的原版发射文案；
+    - 发射动作与现有 campaign launch smoke 链路保持不变。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_campaign_menu_route_shell_uses_content_start_sector -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_campaign_launch_button_seeds_playable_smoke_world -- --nocapture`
+- 后续不可漏：
+  - 继续把 Campaign 主按钮推进为状态驱动的 `launch/resume/go/locked/no source`，并接禁用命中；
+  - 补 `@back` / `@techtree` 次级动作与真实 sector 详情。
+
 ## 925. Campaign route 专用 PlanetDialog 卡片 body
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，继续按用户要求优先前端/UI/可玩性，不推进 Mods。
