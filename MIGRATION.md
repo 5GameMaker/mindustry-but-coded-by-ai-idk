@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 963. MapListDialog 搜索框桌面端自动聚焦
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.03%**，仍未达到完整可玩；本轮对齐 Java `MapListDialog.java:375-377` 的 `Core.app.isDesktop() && searchField != null` 自动聚焦条件。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_list_auto_focus_search_like_java()`；
+    - 打开 CustomGame/Editor 的 MapListDialog route 时，只有 `!menu_renderer_state.config.mobile` 才自动设置 `map_list_search_focused=true`；
+    - 用户主动点击搜索框仍然通过 `FocusMapListSearch` 聚焦，不影响 mobile 手动输入；
+    - 新增 `desktop_launcher_map_list_search_autofocuses_only_on_desktop_like_java`，覆盖 mobile 不自动聚焦、manual tap 聚焦、desktop 自动聚焦。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_list_search_autofocuses_only_on_desktop_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop map_list_search -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - MapList/Editor 导入 loading、mod displayName 搜索语义仍需继续对齐；
+  - JoinDialog/LoadDialog 的列表滚动、搜索刷新和按钮布局仍需继续收口；
+  - 当前最高优先级仍是 UI 子菜单与 Java 原版对齐。
+
 ## 962. JoinDialog 保存服务器动作按钮顺序
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
