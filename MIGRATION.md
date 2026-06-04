@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 966. Campaign LaunchLoadoutDialog launch.from 源扇区语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.06%**，仍未达到完整可玩；本轮对齐 Java `LaunchLoadoutDialog.java:36-37,165`，`show(CoreBlock core, Sector sector, Sector destination, Runnable confirm)` 中 `launch.from` 使用源扇区 `sector.name()`，不是目标扇区 `destination`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增/复用 Campaign 扇区显示名 helper，按 `localized_name` 优先、无 preset 时退回 `#id`，贴近 Java `Sector.name()`；
+    - `campaign_launch_loadout_sector_name()` 优先读取 `CampaignPlanetDialogState.launch_sector_id`，没有源扇区时才回退到当前选中目标；
+    - 新增 `desktop_launcher_campaign_launch_loadout_uses_source_sector_label_like_java`，覆盖当前源扇区为 `groundZero`、目标选择为 `saltFlats` 时，发射配置弹窗必须渲染源扇区文案。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_uses_source_sector_label_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop campaign_launch -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - Campaign `PlanetDialog.showStats(sector)` 详情弹窗仍需继续补齐 Java 的 playtime/attempt/wave/threat/resources/production/export/import/stored/abandon 行为；
+  - Campaign `campaign.difficulty` / `CampaignRulesDialog` 入口、规则草稿与关闭回写仍需继续接线；
+  - `LaunchLoadoutDialog` 确认后仍需把 loadout/resources 真正落地到战役启动链，而不是继续停留在 smoke world 过渡实现。
+
 ## 965. JoinDialog 搜索空白归一化
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
