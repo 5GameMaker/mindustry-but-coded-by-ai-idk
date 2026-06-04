@@ -17,6 +17,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 873. Mods detail mobile reinstall 按钮分行
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.05%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增带上下文的 Mods detail 按钮几何 helper，渲染和 hit-test 共用，避免按钮位置与点击区域分叉；
+    - 当 `mobile && repo 存在 && !hasSteamID` 时，按 Java `ModsDialog.showMod(...)` 的 `dialog.buttons.row()` 语义把 Reinstall 放到第二行；
+    - 详情 content 按钮在 mobile reinstall 分行时自动下移，避免与第二行按钮重叠；
+    - 扩展 `desktop_launcher_mods_route_hides_open_folder_on_mobile_like_java`，覆盖 mobile 下 Back/GitHub/Reinstall 顺序、Reinstall 下一行和点击命中。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_route_hides_open_folder_on_mobile_like_java -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop mods -- --nocapture`
+- 后续不可漏：
+  - 继续核对 Mods detail 状态区：Java `showMod` 使用 `getStateDetails(mod)` + `@mod.disabled` header，Rust 仍需进一步剥离列表态 `state_text` 与详情态 `state details` 的差异。
+
 ## 872. Mods detail metadata 对齐 Java showMod
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
