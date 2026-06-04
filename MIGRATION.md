@@ -30783,3 +30783,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - KeybindDialog rebind bare modal 仍需继续对齐；
   - 前端所有子菜单仍需继续逐项对齐 Java 原版；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 600. KeybindDialog rebind 裸弹窗回归锁定
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.25%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是锁住 `KeybindDialog` rebind capture 弹窗的 Java 裸 modal 语义。
+- Java 对照证据：
+  - `KeybindDialog` 的 rebind capture 是一个裸 `Dialog`；
+  - 弹窗内容只有 `@keybind.press` 或 `@keybind.press.axis`；
+  - 没有额外 close/back/cancel/ok chrome，也不允许背景 keybind row 接收点击。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 扩展 `desktop_launcher_settings_child_dialog_overlay_and_back_stack_match_java`；
+    - 在 rebind dialog bounds 内收集 `DrawText`，断言只存在 `@keybind.press.axis` prompt；
+    - 继续锁住无 Rust-only hint、无显式 cancel/back 命中、背景 reset 被 modal 阻断。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop settings_child_dialog -- --nocapture`
+  - `cargo test -p mindustry-desktop keybind -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Settings 的其他像素级和生命周期差异仍需继续审查；
+  - 前端所有子菜单仍需继续逐项对齐 Java 原版；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
