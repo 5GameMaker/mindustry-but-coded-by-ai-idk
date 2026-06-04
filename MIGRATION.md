@@ -17,6 +17,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 871. Mods detail 复用本地模组图标
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.03%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Mods 详情弹窗新增稳定 icon 区域，优先复用 `mods_route_mod_icon_symbol_at_index(...)` 解析到的真实 `mod-icon-*`，缺失时回退 `nomap`；
+    - 详情页 metadata 文本起点右移，避免与 icon 区域重叠；
+    - archive-backed root `icon.png/preview.png` 现在从发现、atlas、PNG bytes cache、OpenGL 上传链路延伸到 Mods detail 渲染命令；
+    - 同步补齐测试里手写 `DesktopGraphicsFrame / DesktopGraphicsResolvedSpriteTrace / TextureBinding / TextureUploadPlan` 的新增 `mod_texture_source_bytes/source_png_bytes` 默认字段，确保 test target 也能编译验证。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_archive_discovery_reads_zip_metadata_like_java_mods_load -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo check -j 1 -p mindustry-desktop --lib`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop mods -- --nocapture`
+- 后续不可漏：
+  - Java `ModsDialog.showMod(...)` 本身主要是标题、metadata pane、buttons、content 入口；后续继续核对是否保留 Rust detail icon 作为 MDT 前端增强，或在更严格原版 UI 还原阶段收敛为仅列表卡片显示 icon。
+
 ## 870. Mods archive icon 接入列表卡片
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
