@@ -30624,3 +30624,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - JoinDialog 社区列表仍需继续压到 Java ScrollPane 级别的滚动/命中一致；
   - Settings 子弹窗和 MapPlay/CustomRules 子窗仍需继续从 route child 状态机收敛到 Java 独立 dialog 栈语义；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 593. MapPlay/MapInfo modal 焦点隔离
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.18%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `MapPlayDialog` / `MapInfoDialog` 作为 Java 式 modal 打开时不让后台 `MapListDialog` 搜索框继续接收输入。
+- Java 对照证据：
+  - `MapPlayDialog.show(map)` / 编辑器 map info 都是独立 dialog；
+  - modal 打开后，后台 `MapListDialog` search field 不应继续拥有文本输入焦点。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `open_map_play_dialog_for_index(...)` 打开 MapPlay modal 时清除 `map_list_search_focused`；
+    - `OpenEditorInfo` 打开 Editor MapInfo modal 时清除 `map_list_search_focused`；
+    - 新增 `desktop_launcher_map_play_modal_clears_map_list_search_focus_like_java`，验证 modal 打开后输入不会穿透到后台地图搜索。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop map_play_modal -- --nocapture`
+  - `cargo test -p mindustry-desktop map_play -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - MapPlay/CustomRules 子窗仍需继续像素级对齐 Java 独立 dialog 栈；
+  - 前端所有子菜单仍需继续逐项审查；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
