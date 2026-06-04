@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 975. CustomGame/Editor 去除 MapPlay 诊断 route 文案
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.37%**，仍未达到完整可玩；本轮对齐 Java `CustomGameDialog.showMap()` / `MapPlayDialog.show(...)`：MapPlayDialog 作为真实 modal 渲染模式按钮、帮助、Customize 和 Play，不在 CustomGame/Editor route-shell 文本里额外暴露 `MapPlayDialog.show` / `dialog: MapPlayDialog` / `button hierarchy: @customize > @play` 这类 Rust-only 诊断文案。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `custom_game_route_lines()` 改回只返回 Java `MapListDialog` 风格基础 lines；
+    - `editor_maps_route_lines()` 不再在 `map_play_dialog_index` 打开时追加 MapPlay 诊断行；
+    - 更新 `desktop_launcher_pending_menu_routes_use_upstream_dialog_structure`，断言 CustomGame/Editor route lines 不出现 MapPlay 诊断文案；
+    - 保留 Editor 的 `map click: @editor.mapinfo`，因为它对应 EditorMapsDialog 的 map info 入口。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_pending_menu_routes_use_upstream_dialog_structure -- --nocapture`
+  - `cargo test -p mindustry-desktop map_play_dialog -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - MapPlayDialog 仍需继续核对 mode help、Customize 子树、rules edit/loadout/banned/weather/team/ambient/planet 等子弹窗视觉与交互；
+  - CustomGame/Editor 地图列表仍需继续对齐滚动、preview、工作坊与 playtest 入口；
+  - 前端目标仍是与原版差异不大，并且最终能进入完整可玩游戏。
+
 ## 974. LoadDialog 错误态仅保留 Java 式 modal
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
