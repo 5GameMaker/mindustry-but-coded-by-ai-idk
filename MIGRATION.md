@@ -17,6 +17,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 888. Join 本地 LAN empty/discovering 卡片
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `JoinDialog.java`。
+- 本轮总体进度更新：约 **94.20%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `JoinDialog.refreshLocal()` 会在 LAN 发现中显示 `@hosts.discovering.any` 的临时卡片；
+  - 发现结束但没有 local host 时，`JoinDialog.setup()` 显示 `@hosts.none`，并在旁边提供 refresh 按钮重新触发 `refreshLocal()`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 local empty card / refresh button 几何 helper；
+    - `push_join_route_page(...)` 在 local section 无 host 且 discovering/done 时渲染 Java-like pane：发现中显示 `@hosts.discovering.any...`，空结果显示 `@hosts.none` + refresh 图标按钮；
+    - saved server 渲染、容量计算和 hit-test 改为使用 local slot count，local empty card 占位后 saved card 不再与 local empty/discovering 卡片重叠；
+    - local empty refresh 按钮命中后派发既有 `RefreshJoinServers`，复用 `refresh_join_all_like_java()` 主链路。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop join_route -- --nocapture`
+- 后续不可漏：
+  - Join 剩余前端/运行时重点是社区 group `addresses` 的真实 ping/hosts 回填、社区服务器卡片从 waiting 进入完整 Host 卡、以及连接 loadfrag 细节继续对齐 Java。
+
 ## 887. Join legacy server-list 运行时自动迁移
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `JoinDialog.java` 与 `LegacyIO.java`。
