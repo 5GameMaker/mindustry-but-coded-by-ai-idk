@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 978. LaunchLoadout 目标描述 fallback 对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；当前仍优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.41%**，仍未达到完整可玩；本轮继续对齐 Java `LaunchLoadoutDialog.show(...)` 在不允许 launch schematics 时的 description fallback。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `campaign_launch_loadout_destination_description()` 与 description pane rect；
+    - 当目标 sector 不允许 launch schematics 且 `preset.description` 非空时，渲染 Java 式 description pane；
+    - fallback 场景不再显示旧 Rust-only `loadout: default` 占位文本；
+    - 新增 `desktop_launcher_campaign_launch_loadout_description_fallback_like_java`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_description_fallback_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 当前可查看客户端产物：`D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`。
+- 后续继续：
+  - Campaign `LaunchLoadoutDialog` 仍需补 schematic 选择列表，并替换允许 schematic 路径下的 `loadout: core-shard` 占位；
+  - MapPlay/CustomRules/Loadout 子弹窗仍需继续对齐 Java 大弹窗尺寸、按钮热区与各子弹窗视觉；
+  - 继续推进完整可玩、整体 runtime 接入与 Java↔Rust 联机兼容。
+
 ## 977. LaunchLoadout 资源汇总四列表格对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；当前仍优先 UI 子菜单与可玩性。
