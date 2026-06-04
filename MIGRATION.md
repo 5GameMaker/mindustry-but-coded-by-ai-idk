@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 942. MenuFragment Database 子菜单 TechTree 入口语义对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮暂停 Mods，继续优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级仍是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。
+- 本轮总体进度更新：约 **94.82%**，仍未达到完整可玩；本轮只收口 `MenuFragment` 主菜单层面的 Research/TechTree 入口语义，不代表 ResearchDialog 或 Campaign 已完全迁移完成。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuRoute::from_menu_button(MenuButtonRole::TechTree)` 改为 `None`，对齐 Java `MenuFragment.buildDesktop()` 中 Database 子菜单只暴露 `@schematics` / `@database` / `@about.button`；
+    - 保留 `DesktopMenuRoute::TechTree` / `ResearchDialog` 内部路由，继续允许 Campaign/PlanetDialog 的 `@techtree` 按钮和暂停菜单 `@research` 打开研究树；
+    - 新增 `desktop_launcher_database_root_does_not_dispatch_techtree_like_java_menu_fragment`，锁定主菜单 Database root 不再拥有 TechTree 直达 dispatch；
+    - `desktop_launcher_techtree_route_renders_research_dialog_shell_and_graph` 与 `desktop_launcher_techtree_route_opens_node_detail_panel_on_node_click` 改为通过 Campaign route 的 `OpenCampaignTechTree` 进入 ResearchDialog，避免测试继续把内部 route 当主菜单按钮。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop techtree -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_database_root_does_not_dispatch_techtree_like_java_menu_fragment -- --nocapture`
+- 后续不可漏：
+  - 继续逐项审查 `SettingsMenuDialog`、`MapListDialog`、`MapPlayDialog`、`PlanetDialog`、`EditorMapsDialog` 的子菜单、弹窗、禁用态、滚动与返回栈；
+  - Campaign 真实 sector generator/loadout/rules、CustomGame/Editor 真开局与低 FPS/黑屏/输入命中问题仍需继续收口；
+  - 暂不处理 Mods，除非阻塞能玩或 UI 主线。
+
 ## 941. EditorInGame 接入真实本地地图 snapshot
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮暂停 Mods。
