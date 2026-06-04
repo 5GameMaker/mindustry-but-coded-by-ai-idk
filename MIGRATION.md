@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 952. Campaign LaunchLoadoutDialog 启动装备选择骨架
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.92%**，仍未达到完整可玩；本轮补齐 Java `LaunchLoadoutDialog.show(...)` 的 Campaign 启动前子弹窗骨架，主按钮不再直接关菜单启动，而是先进入 `@configure` loadout 子流程，确认后复用现有 Campaign 启动链。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuRouteShellAction` 新增 `OpenCampaignLaunchLoadout` / `CloseCampaignLaunchLoadout` / `ConfirmCampaignLaunchLoadout` / `ToggleCampaignLaunchLoadoutMaxResources` / `OpenCampaignLaunchResources`；
+    - `DesktopLauncher` 新增 `campaign_launch_loadout_dialog_open` 与 `campaign_launch_loadout_use_max_resources`，并接入 CloseRoute、Back、reset、play-entry 清理链路；
+    - Campaign 主按钮命中从直接 `LaunchCampaign` 改为打开 loadout 弹窗；直接 dispatch `LaunchCampaign` 仍保留为内部/旧测试兼容入口；
+    - 新增 `campaign_planet_defaults_for_name(...)`、`campaign_launch_loadout_capacity(...)`、`campaign_launch_loadout_stacks(...)` 等 helper，使用 Rust 内容注册表的 planet launch defaults / default core capacity 推导 UI capacity；
+    - 新增 `push_campaign_launch_loadout_dialog(...)`，显示 `@configure`、`launch.from`、`launch.capacity`、`@resources.max`、`@resources`、`@launch.text`、`@sector.missingresources` 与资源行，并阻塞底层点击；
+    - 更新 Campaign 启动测试为 Java 流程：点击 route 主按钮先打开 loadout，点击确认后才进入现有 smoke world 启动链。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop campaign -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - Campaign P0 还剩 `@stats` sector info 详情弹窗；
+  - 再推进 planet selector / difficulty / sector-aware 主按钮标签与 locked/resume/go 状态；
+  - 最终仍必须把 Campaign 从 smoke world 过渡到真实 sector/world load/generator/runtime 链路。
+
 ## 951. Campaign PlanetDialog sector stats/resources 可见层
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
