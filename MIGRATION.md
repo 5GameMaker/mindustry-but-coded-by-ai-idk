@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 918. Mods GitHub 下载进度 tick 回写 LoadingFragmentState
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只继续对照本地 `ModsDialog.java` / `LoadingFragment.java`。
+- 本轮总体进度更新：约 **94.52%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `set_mods_import_github_download_progress_like_java(...)`，在 GitHub 下载进度 tick 时同步更新 `DesktopModsImportGithubDownloadState.progress` 与 `loading_fragment_state.progress`；
+    - 若下载进度 tick 到来时加载层尚未显示，会按 Java `ui.loadfrag.show("@downloading") / setButton(...) / setProgress(...)` 语义恢复加载层；
+    - 扩展 `desktop_launcher_mods_github_download_syncs_loading_fragment_state`，锁定 tick 后 `loading_fragment_frame_for_surface(...)` 产出的 `LoadFramePlan.progress` 与下载状态一致。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_mods_github_download_syncs_loading_fragment_state -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_import_github -- --nocapture`
+- 后续不可漏：
+  - Join 连接中/reconnect/world-data loadfrag 仍需继续接入同一个 `LoadingFragmentState`；
+  - Mods 真实网络下载字节循环接入后必须调用本轮 tick 入口，不能只更新孤立字段；
+  - 现有 route overlay 视觉仍保留，后续要逐步统一到 Java-like LoadingFragment/LoadFramePlan 消费链。
+
 ## 917. Mods GitHub 下载 loadfrag 接入 LoadingFragmentState
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，继续推进 `LoadingFragment.java` / `UI.loadAnd(...)` 前端统一接入。
