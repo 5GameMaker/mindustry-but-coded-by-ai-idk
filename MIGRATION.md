@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 893. Mods GitHub branch zipball 目标解析
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
+- 本轮总体进度更新：约 **94.25%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `githubImportBranch(branch, repo, null)` 直接请求 `/repos/{repo}/zipball/{branch}`；
+  - `githubImportBranch(branch, repo, release)` 先请求 `/repos/{repo}/releases/{release}`，读取 `zipball_url` 后再下载；
+  - 后续下载还要处理 GitHub `Location` 重定向。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopModsImportGithubBranchZipTarget`，保存 repo/release/zip 下载 URL；
+    - `apply_mods_import_github_repo_api_json_like_java(...)` 对无 release 的 BranchZip 直接生成 final zip target；
+    - 新增 `apply_mods_import_github_branch_release_json_like_java(...)`，从 release JSON 解析 `zipball_url`；
+    - Mods shell lines 增加 branchzip event，作为后续真实 HTTP 下载/重定向处理边界。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_import_github -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_browser -- --nocapture`
+- 后续不可漏：
+  - BranchZip target 下一步仍需接实际 HTTP GET、GitHub 302 `Location`、临时 zip 写入和真实 `mods.importMod` 等价导入；取消状态必须继续贯穿所有回调。
+
 ## 892. Mods GitHub Java release jar asset 选择
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
