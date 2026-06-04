@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 959. Campaign LaunchLoadoutDialog 资源编辑子窗
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.99%**，仍未达到完整可玩；本轮对齐 Java `LaunchLoadoutDialog.java` 中 `@resources -> LoadoutDialog.show(...)` 的资源编辑子对话骨架，修复此前 `OpenCampaignLaunchResources` 只切换 `maxresources=false` 而没有真实子菜单的问题。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuRouteShellAction` 新增 `CloseCampaignLaunchResources`、`MaxCampaignLaunchResources`、`ResetCampaignLaunchResources`、单项 `Increment/Decrement/MaxCampaignLaunchResource`；
+    - `DesktopLauncher` 新增 `campaign_launch_resources_dialog_open` 与 `campaign_launch_resources_draft`，用于承载 Java `LoadoutDialog` 的资源草稿；
+    - 新增 `campaign_launch_resource_step()`，按 Java `LoadoutDialog.step()` 实现 100/200/500/1000 阶梯；
+    - 新增资源子窗矩形、命中测试与 `push_campaign_launch_resources_dialog()`，渲染 `@configure`、`@back`、`@max`、`@settings.reset`、资源行、`-` / `+` / `✎`；
+    - `@resources` 点击现在打开子窗，子窗修改 draft 后外层 `LaunchLoadoutDialog` 汇总会即时读取并重建总资源量；
+    - 关闭 route、切 Campaign 其他子弹窗、确认发射、关闭父 loadout 时同步关闭资源子窗，避免状态残留；
+    - 新增 `desktop_launcher_campaign_launch_resources_opens_child_loadout_like_java`，覆盖允许 loadout 的 `saltFlats(101)` 目标、打开资源子窗、`+` 阶梯增量、关闭后外层汇总写回。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_resources_opens_child_loadout_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop campaign_launch -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - `LaunchLoadoutDialog` 确认后仍需从 smoke world 过渡到真实 sector/world load/generator/runtime，并真实消费 loadout/launch resources；
+  - `launch.from` 仍需改为 Java 语义上的源扇区而不是当前目标扇区文案；
+  - Join/Load/Editor/Settings 当前无阻断 P0，但仍有列表滚动、搜索语义、Dialog 生命周期和移动端 autofocus 等 P1 前端差异需要继续收口。
+
 ## 958. HostDialog hostinfo 与 PlanetDataDialog 星球按钮文案
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
