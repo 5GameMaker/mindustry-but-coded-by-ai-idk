@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 951. Campaign PlanetDialog sector stats/resources 可见层
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.91%**，仍未达到完整可玩；本轮不改 `LaunchCampaign`/smoke world 启动链，先对齐 Java `PlanetDialog.updateSelected()` 中选中 sector 的 threat/wave/resources/stats 可见信息层。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `campaign_selected_runtime_sector(...)`，把当前 `CampaignPlanetDialogState` 选中 preset 与 `GameState::sector` 运行时信息窄路径关联；
+    - 新增 threat 分级与资源显示 helpers，资源名优先走 `@item.<name>.name` bundle，本地化失败再回退 content/name；
+    - `push_campaign_route_page()` 的 sector card 现在显示 `@sectors.threat`、`@sectors.wave`、`@sectors.resources`，有 base 时显示 `@stats` 小按钮；
+    - `active_menu_route_shell_lines(Campaign)` 同步输出这些 stats/resources 行，方便后续上下文压缩后快速校验；
+    - 新增 `desktop_launcher_campaign_route_renders_planetdialog_like_sector_stats`，覆盖已保存 sector 的 Threat/Wave/Resources/Stats 可见文本；
+    - 修正旧 Campaign 测试断言：打开 Research/TechTree 后保留 `campaign_planet_dialog`，对齐 Java `ResearchDialog` 盖在 `PlanetDialog` 上方的返回栈。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_campaign_route_renders_planetdialog_like_sector_stats -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop campaign -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+- 后续不可漏：
+  - Campaign 下一步应继续补 `LaunchLoadoutDialog` 的打开/关闭/确认子菜单骨架，但仍先不要改真实 world 启动链；
+  - Campaign 仍缺 `lastplanet`、`*-last-sector` settings 写回和真正 `SectorSelectDialog`；
+  - SaveDialog 后续应优先补保存后 slot preview PNG 生成，对齐 Java `SaveSlot.savePreview()`。
+
 ## 950. EditorMapsDialog 地图信息页按钮对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
