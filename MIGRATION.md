@@ -30880,3 +30880,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - JoinDialog community 搜索仍需进一步收敛到 Java 的“刷新时提交查询”而不是实时过滤；
   - JoinDialog community group header/host card 结构仍需继续对齐；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 604. JoinDialog community 搜索提交语义对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.29%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `JoinDialog` community search 从实时过滤收敛到 Java 的 refresh 提交语义。
+- Java 对照证据：
+  - search field callback 更新 `serverSearch`；
+  - community 列表只在 `refreshCommunity()` 重建/过滤；
+  - `Enter`、zoom 按钮、`show hidden` 切换会触发 `refreshCommunity()`；
+  - 输入文本本身保留在 field 内，过滤使用提交后的归一化查询。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_community_search_committed` 保存已提交 community 查询；
+    - `visible_join_community_groups()` 改用 committed query；
+    - `refresh_join_community_servers_like_java()` 在每次 community refresh 时提交 `join_search` 的归一化值；
+    - 进入 Join route / clear search 时清空 committed query；
+    - `ToggleJoinShowHidden` 切换后刷新 community，匹配 Java 行为；
+    - 新增 `desktop_launcher_join_route_community_search_filters_only_on_refresh_like_java`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - JoinDialog community group header/host card 结构仍需继续对齐；
+  - SaveDialog 预览 PNG sidecar / UI 懒加载仍需补齐；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
