@@ -17,6 +17,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 882. Sprite texture upload plan 延迟刷新
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.14%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendAdapterExecutionState` 新增 `sprite_texture_upload_plans_dirty` 与 rebuild 计数；
+    - classifying adapter 的 sprite/primitive texture binding 不再每次绑定后立即 `full_upload_plans()` 全表扫描，改为 EndPass/Resolve 时 dirty 一次性刷新；
+    - 保持 executor 路径与 classifying adapter 路径一致，减少菜单/前端大量 sprite binding 时的重复 upload-plan rebuild；
+    - 扩展 atlas sprite 上传测试，确认同 pass 两次同 atlas sprite binding 只 rebuild 一次 upload plan；
+    - 修正 DrawText style 测试对 outline 分层 batch 数的过窄断言，继续保留 executor/classifying 等价断言。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_graphics_opengl_backend_executor_emits_texture_upload_plan_for_sprite_atlas_page -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_graphics_opengl_backend_executor_preserves_draw_text_style -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop opengl_backend -- --nocapture`
+  - `git diff --check`
+- 后续不可漏：
+  - 继续处理 archive/mod sprite PNG bytes 反复 clone、Windows/Intel legacy GL 默认候选导致 shader 黑屏风险、DPI 坐标统一转换；若实际帧率仍低，应加 trace 对比 upload-plan rebuild 次数和 texture upload commands。
+
 ## 881. Native OpenGL 重复 resize 幂等化
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
