@@ -19,6 +19,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 965. JoinDialog 搜索空白归一化
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.05%**，仍未达到完整可玩；本轮对齐 Java `JoinDialog.java:398-402` 的 `text.trim().replaceAll(" +", " ").toLowerCase()` 搜索输入归一化。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `desktop_join_search_plain_text()` 在去除 Mindustry markup/color tag 并 lowercase 后，压缩连续普通空格并 trim；
+    - 扩展 `desktop_launcher_join_route_search_strips_colors_like_java`，覆盖 `hardcore    server` 与 `community    host` 这类多空格 query。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_search_strips_colors_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route_search -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - JoinDialog 搜索 Enter/zoom 触发刷新、社区 host per-entry 展示和可滚动列表仍需继续对齐；
+  - reconnect 策略需要设计取消安全的无限 ping，不宜用无退出线程硬改；
+  - 当前最高优先级仍是 UI 子菜单与 Java 原版对齐。
+
 ## 964. LoadDialog 搜索匹配语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
