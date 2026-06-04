@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 967. Campaign PlanetDialog 星球选择按钮
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.07%**，仍未达到完整可玩；本轮对齐 Java `PlanetDialog.java:731-764` 的左侧 planet selection：在非 `select` 模式下显示可选星球按钮，点击后切换当前 `PlanetDialog` 视图。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `SelectCampaignPlanet(usize)` route shell action；
+    - 新增 Java-like selectable planet helper：普通浏览模式下显示 `alwaysUnlocked && isLandable` 或已有基地的星球；
+    - Campaign route 左侧渲染 Serpulo/Erekir 等可选星球按钮，并按原版使用星球 icon color；
+    - 点击星球按钮会重建 `CampaignPlanetDialogState::look_at_planet`，关闭当前 Campaign 子弹窗/sector list，避免和旧选区状态混用；
+    - 新增 `desktop_launcher_campaign_route_planet_buttons_switch_planets_like_java`，覆盖按钮可见、命中和 Serpulo→Erekir 切换。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_planet_buttons_switch_planets_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop campaign_route -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - Campaign PlanetDialog 仍需继续补真正的星球投影、hover 高亮、连线、launch/select 模式细节；
+  - 当前 planet selection 是 UI/状态切换闭环，还不是完整 Java `planets.render(state)` 投影渲染替代品。
+
 ## 966. Campaign LaunchLoadoutDialog launch.from 源扇区语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
