@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 900. Mods GitHub branch zipball Location 重定向
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
+- 本轮总体进度更新：约 **94.32%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `githubImportBranch(...)` 下载 zipball 后检查响应头 `Location`；
+  - 如果有 `Location`，Java 再对该地址执行一次 GET，之后才进入 `handleMod(repo, result)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `mods_import_github_header_value_like_java(...)`；
+    - 新增 `apply_mods_import_github_branch_zip_headers_like_java(...)`；
+    - branch zip target 在检测到 `Location` 后改写为最终 codeload URL；
+    - 增加回归测试覆盖 302 Location 分支。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_import_github -- --nocapture`
+- 后续不可漏：
+  - 仍需把该 target 接到真实 HTTP executor；取消态必须继续贯穿 repo metadata、release metadata、zipball redirect、最终下载与 handleMod。
+
 ## 899. ContentInfoDialog blockInfo/F1 关闭语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ContentInfoDialog.java` / `Binding.java`。
