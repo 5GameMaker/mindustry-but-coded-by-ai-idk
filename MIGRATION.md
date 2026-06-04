@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 955. Campaign PlanetDialog sectorlist 折叠列表与搜索
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.95%**，仍未达到完整可玩；本轮对齐 Java `PlanetDialog.rebuildExpand()` / `rebuildList()` 的 `sectorlist` 折叠区骨架，把 Campaign 页面从固定 sector selector chips 进一步推进到带 `sectorlist`、attacked 计数、搜索框、空结果和列表项选择的右侧折叠列表。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `CAMPAIGN_SECTOR_LIST_SEARCH_MAX_LENGTH`；
+    - `DesktopLauncher` 新增 `campaign_sector_list_open`、`campaign_sector_list_search`、`campaign_sector_list_search_focused`；
+    - `DesktopMenuRouteShellAction` 新增 `ToggleCampaignSectorList` / `FocusCampaignSectorListSearch` / `ClearCampaignSectorListSearch`；
+    - 新增 `campaign_sector_list_base_entries(...)`、`campaign_sector_list_attacked_count(...)`、`campaign_sector_list_filtered_entries(...)` 等 helper，当前从 runtime/game_state 中已保存且有 core 的 sector 汇总，按 attacked 优先与 playtime 倒序排序；
+    - Campaign input chain 接入 sectorlist 搜索 Text、Backspace、Delete；
+    - Campaign hit-test 先处理 sectorlist toggle/search/entry，再处理 sector card stats 与底部 selector，避免 `@stats` 被 toggle 抢命中；
+    - 新增 `push_campaign_sector_list(...)`，渲染 `@sectorlist`、`sectorlist.attacked`、搜索框、清空按钮、`@none.found` 与 sector entry；
+    - 扩展 route shell lines 输出 sectorlist attacked/search/entry 行，便于上下文压缩后快速验证；
+    - 新增 `desktop_launcher_campaign_route_sectorlist_expands_searches_and_selects_like_java`，覆盖展开、attacked 计数、搜索过滤、空结果、清空、点击 entry 选择 sector。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop campaign -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - sectorlist 仍需接入完整 campaign save registry，当前只能稳定展示 runtime/game_state 已知 base sector；
+  - P1 继续补 `@campaign.difficulty` / `CampaignRulesDialog` 与 `@sectors.viewsubmission`；
+  - Campaign 仍需从 smoke world 过渡到真实 sector/world load/generator/runtime 链路。
+
 ## 954. Campaign 首次战役选择与 Serpulo rework notice
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
