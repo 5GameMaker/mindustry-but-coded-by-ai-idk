@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 912. Font glyph 上传计划加入前端帧缓存
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只沿用本地前端渲染链路和字体/图标资源表。
+- 本轮总体进度更新：约 **94.46%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 问题定位：
+  - `menu_graphics_frame_for_surface(...)` 与 `graphics_frame_for_render(...)` 每帧都会经 `font_glyph_upload_plan()` 重新推导字体 atlas/upload plan；
+  - 该计划的真实输入只依赖字体资源来源、content icon registry 与 icon atlas symbol 可见性，普通菜单帧、无关 atlas region 或 route shell 更新不应反复重建；
+  - 这是继菜单 UI command cache 后的另一条前端热路径减负闭环，目标是降低主菜单/子菜单帧率抖动风险。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopFontGlyphUploadPlanCacheKey` 与 `DesktopFontGlyphUploadPlanCache`；
+    - `DesktopLauncher` 新增 `font_glyph_upload_plan_cache` 与测试计数 `font_glyph_upload_plan_cache_rebuilds`；
+    - `menu_graphics_frame_for_surface(...)` 与 `graphics_frame_for_render(...)` 改为使用 `cached_font_glyph_upload_plan_for_frame()`；
+    - cache key 只跟 `font_asset_sources`、content icon registry 路径/错误状态、以及每个 icon 的 `(name, unicode, atlas_symbol, atlas_symbol_visible)` 有关，避免无关 texture atlas 写入污染字体上传计划。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_font_ -- --nocapture`
+- 后续不可漏：
+  - 该闭环只是减少字体上传计划的重复推导，不代表前端 FPS/黑屏已完整修好；
+  - 下一步继续按 Java `UI.java`、`MenuFragment.java`、`LoadingFragment.java`、`SettingsMenuDialog.java` 补 UI 总控、菜单控制、加载页生命周期与子菜单交互；
+  - 不能把字体/菜单 cache 变成孤立优化模块，必须继续接入真实 desktop runtime、OpenGL backend 与完整 UI 调用链。
+
 ## 911. ContentInfoDialog stats 分类按 Java StatCat 渲染
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ContentInfoDialog.java`、`StatCat.java`、`Stat.java` 与 `Block.java`。
