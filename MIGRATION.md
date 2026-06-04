@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 964. LoadDialog 搜索匹配语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.04%**，仍未达到完整可玩；本轮对齐 Java `LoadDialog.java:98-101` 的 `Strings.stripColors(slot.getName()).toLowerCase().contains(searchString)` 搜索语义。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `load_game_search_normalize_like_java()`，只做 Mindustry markup/color tag 去除和 lowercase；
+    - `filtered_load_game_slot_indices()` 不再复用 `schematic_search_normalize()`，避免错误吞掉 `-`、`_`、`.` 等标点；
+    - 新增 `desktop_launcher_load_game_search_matches_java_stripcolors_lowercase_contains`，覆盖颜色 tag 不参与匹配、大小写不敏感、标点不被归一化。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_search_matches_java_stripcolors_lowercase_contains -- --nocapture`
+  - `cargo test -p mindustry-desktop load_game -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - LoadDialog 底部按钮布局与 BaseDialog 层级仍需继续对齐；
+  - JoinDialog 可滚动列表、社区 host per-entry 展示、搜索触发刷新和 reconnect 策略仍需继续收口；
+  - 当前最高优先级仍是 UI 子菜单与 Java 原版对齐。
+
 ## 963. MapListDialog 搜索框桌面端自动聚焦
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
