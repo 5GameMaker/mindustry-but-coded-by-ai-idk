@@ -30507,3 +30507,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - DatabaseDialog 仍需继续核对 ContentInfoDialog 内部字段/统计/按钮的像素级布局；
   - 其他 UI 子菜单，尤其 Campaign `planetLaunch` 模式仍未补齐；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 588. SettingsMenuDialog Rust-only 文案收口
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.13%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是去掉 Settings 子菜单中原版 Java 不会显示的 Rust-only 文案。
+- Java 对照证据：
+  - `KeybindDialog` 搜索框是搜索输入框，不额外显示 `keybind search` 文案；
+  - `SettingsMenuDialog.addCategory(...)` 核心是切换对应 category table，不由通用框架自动给动态分类页补一段 description；
+  - `PlanetData` / `PlanetChooser` / `Language` / `Data` 的按钮与返回栈当前已基本对齐。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_controls_dialog_content(...)` 在 keybind search 为空时不再渲染 `keybind search`；
+    - `push_settings_dynamic_category_page(...)` 不再统一渲染 `category.description`；
+    - `settings_route_lines()` 不再输出 DynamicCategory description 行；
+    - `settings_route_action_for_line(...)` 的 DynamicCategory `@back` 行固定为 Java 结构下的 line 4；
+    - 更新现有 settings 测试，确认空搜索和 dynamic description 不再进入 frame 文本。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop settings -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Settings 子菜单仍需继续逐项核对少量像素级布局；
+  - Campaign `PlanetDialog.showPlanetLaunch(...)` 仍是下一批重点 UI 缺口；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
