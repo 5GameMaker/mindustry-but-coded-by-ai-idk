@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 943. LoadDialog / SaveDialog 独立搜索状态闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级仍是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。
+- 本轮总体进度更新：约 **94.83%**，仍未达到完整可玩；本轮把 LoadDialog / SaveDialog 的 search、hidden modes、scroll offset 做成独立状态，避免 Load/Save 来回切换时互相串状态。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLoadSaveDialogUiState`，把 `LoadGame` 与 `SaveGame` 的 `search / scroll_offset / hidden_modes` 分开保存；
+    - `dispatch_menu_action(...)`、`open_pause_overlay_route(...)`、`Back/close` 路径在切换 route 前先保存当前 Load/Save 状态，再恢复对应 route 的状态；
+    - `LoadGame | SaveGame` 打开时不再无条件清空 search / hidden_modes / scroll_offset，只恢复各自的上一份状态并继续聚焦搜索框；
+    - 新增 `desktop_launcher_load_and_save_dialogs_preserve_independent_search_state_like_java`，验证 Load 与 Save 两个 dialog 状态各自独立，不会互相串门；
+    - 保留 `desktop_launcher_save_game_new_dialog_and_load_search_focus_are_stable`、`desktop_launcher_load_save_route_scroll_focus_matches_java` 作为回归。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_save_game_new_dialog_and_load_search_focus_are_stable -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_load_and_save_dialogs_preserve_independent_search_state_like_java -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop load_save -- --nocapture`
+- 后续不可漏：
+  - `SettingsMenuDialog` 继续收口 Data 页与原版独立 modal 的差异；
+  - `MapListDialog` / `MapPlayDialog` / `PlanetDialog` / `EditorMapsDialog` 仍需逐项对齐按钮、返回栈、滚动和摘要；
+  - Campaign 真实 sector generator/loadout/rules、CustomGame/Editor 真开局与低 FPS/黑屏/输入命中问题仍需继续收口。
+
 ## 942. MenuFragment Database 子菜单 TechTree 入口语义对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮暂停 Mods，继续优先 UI 子菜单与可玩性。
