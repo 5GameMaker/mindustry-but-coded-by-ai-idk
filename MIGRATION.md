@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 956. CampaignRulesDialog 战役难度/规则弹窗
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.96%**，仍未达到完整可玩；本轮对齐 Java `PlanetDialog.java:736-738` 的 `@campaign.difficulty` 入口和 `CampaignRulesDialog.java` 的独立规则弹窗骨架，完成难度选择、规则 toggle、关闭回写与当前 rules 应用链路。
+- 本轮主改动：
+  - `core/src/mindustry/game/difficulty.rs`
+    - `Difficulty` 补 `Eq` 派生，便于 route action/测试做完整等价比较；该 enum 无浮点字段，语义安全。
+  - `desktop/src/lib.rs`
+    - 引入 core 已有 `CampaignRules` / `CampaignPlanetRules` / `Difficulty`，UI 层不重复实现规则倍率；
+    - `DesktopLauncher` 新增 `campaign_rules_dialog_open`、`campaign_rules_planet_name`、`campaign_rules_draft`、`campaign_rules_by_planet`，模拟 Java `planet.campaignRules` 的 per-planet 草稿/保存；
+    - `DesktopMenuRouteShellAction` 新增 `OpenCampaignRules` / `CloseCampaignRules` / `SetCampaignDifficulty(...)` 与 invasions/fog/showSpawns/randomWaveAI/pauseDisabled/rtsAI/clearSectorOnLoss toggle；
+    - 新增 `campaign_rules_entry_visible(...)`，入口可见性对齐 `planet.allowCampaignRules && mode != planetLaunch`；
+    - 新增 `open_campaign_rules_dialog_like_java(...)` / `close_campaign_rules_dialog_like_java(...)`，关闭时保存 per-planet 规则，并对当前 game/runtime rules 执行 `CampaignRules::apply(...)`；
+    - Campaign route 顶部新增 `@campaign.difficulty` 按钮；
+    - 新增 `push_campaign_rules_dialog(...)`，渲染 `@campaign.difficulty`、5 个 difficulty 按钮、当前 difficulty info、`@rules.invasions`、`@rules.fog`、`@rules.showspawns`、`@rules.randomwaveai`、`@rules.pauseDisabled`、`@rules.rtsai.campaign`、`@rules.clearsectoronloss` 与 `@ok`；
+    - 新增 `desktop_launcher_campaign_route_opens_campaign_rules_dialog_like_java`，覆盖入口命中、打开弹窗、选择 Hard、切 Fog、关闭回写与当前 rules 应用。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop campaign -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - `CampaignRulesDialog` 仍需接入真实 planet saveRules 持久化、tooltip/info 文案完全本地化，以及与多人/Call.setRules 等价链路；
+  - Campaign 仍缺 `@sectors.viewsubmission` 条件外链；
+  - Campaign 仍需从 smoke world 过渡到真实 sector/world load/generator/runtime 链路。
+
 ## 955. Campaign PlanetDialog sectorlist 折叠列表与搜索
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
