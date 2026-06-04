@@ -17,6 +17,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 879. LoadDialog 坏档错误提示渲染断言
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.11%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 扩展 `desktop_launcher_run_load_save_reports_corrupted_when_primary_and_backup_fail`，在坏档 primary 与 backup 都失败时，不只断言状态回到菜单，还断言 `load_game_error == @save.corrupted`；
+    - 明确区分用户可见的 `@save.corrupted` 与底层 `SaveException` 详情，要求 `last_menu_guard_message` 存在且不等于用户文案；
+    - 对 `active_menu_route_shell_lines(LoadGame)` 与实际渲染帧 `DrawText` 增加断言，确认 LoadDialog 错误分支会渲染 `save slots: error | @save.corrupted`，避免坏档失败变成无提示黑箱。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_launcher_run_load_save_reports_corrupted_when_primary_and_backup_fail -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop load_game -- --nocapture`
+  - `git diff --check`
+- 后续不可漏：
+  - 当前 Rust 仍是 LoadGame 路由内错误态 + 顶部 guard banner，不是 Java `UI.showErrorMessage` 那种 OK-dismiss 全屏模态；后续前端还原应补真正 `@error.title / @save.corrupted / @ok / closeOnBack` 错误模态。
+
 ## 878. LoadDialog 模态输入隔离与 Mods 图标缓存去重
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
