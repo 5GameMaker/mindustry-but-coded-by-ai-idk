@@ -17,6 +17,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 869. Mods archive sprite bytes 接入 OpenGL 上传主链
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.01%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsFrame` 现在携带 `mod_texture_source_bytes`，`DesktopLauncher` 构造 menu/world graphics frame 时会注入已发现的 archive sprite bytes；
+    - `DesktopGraphicsResolvedSpriteTrace` 增加 `source_png_bytes`，frame trace 解析 atlas symbol 时按 mod bytes cache 注入 PNG bytes；
+    - `DesktopGraphicsOpenGlBackendTextureBinding / Resource / UploadPlan / ResolvedTextureUpload` 全链路携带可选 `source_png_bytes`；
+    - 新增 `DesktopGraphicsOpenGlBackendTextureUploadPixelSource::ArchivePngBytes`，上传阶段命中 archive sprite 时走 `png_rgba8888_from_bytes(...)`，不再强依赖本地文件路径；
+    - archive sprite 命中 bytes 时按独立 atlas page 处理，使用稳定虚拟 `archive-mod-sprite:<symbol>:<source>` tag 和全幅 UV `[0,0,1,1]`，后续 native OpenGL 上传可直接消费真实像素。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo check -j 1 -p mindustry-desktop --lib`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_graphics_frame_plan_carries_archive_sprite_bytes_into_texture_upload -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_graphics_opengl_backend_uses_archive_sprite_bytes_as_direct_texture_upload -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_archive_discovery_reads_zip_metadata_like_java_mods_load -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop mods -- --nocapture`
+- 验证说明：
+  - 常规 `cargo check` 曾触发 Windows `页面文件太小`，已改用 `CARGO_BUILD_JOBS=1 / CARGO_INCREMENTAL=0 / debuginfo=0 / codegen-units=1` 低内存参数完成验证。
+- 后续不可漏：
+  - icon/preview 的 archive-backed texture 还需继续按 Java `new Texture(icon)` 路径补齐；本轮先完成 `sprites/**` / `sprites-override/**` 的 bytes → frame → OpenGL upload 主链。
+
 ## 868. Mods archive sprite bytes 接入桌面纹理源缓存
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
