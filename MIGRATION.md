@@ -17,6 +17,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 878. LoadDialog 模态输入隔离与 Mods 图标缓存去重
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.10%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `load_game_route_modal_open / save_game_route_modal_open / save_slot_route_modal_open`，统一判断 Load/Save 路由中的 delete/rename/missing-mods/new-save/overwrite/loading/saving 模态；
+    - `load_game_slot_at_surface_point(...)`、Load/Save 点击分发、搜索文本输入和 `apply_load_game_scroll_delta(...)` 均接入 modal guard，避免 Java `ui.showConfirm/showTextInput/loadAnd` 模态打开时背后列表、搜索、顶部菜单被误触发；
+    - 新增 `desktop_launcher_load_game_modal_blocks_background_slot_search_and_scroll`，覆盖 Delete 确认框打开后滚轮不滚列表、背后卡片点击不触发 load、背景搜索不接收文本；
+    - Mods browser 图标请求增加缓存命中短路：已有有效 `last_mods_browser_icon_symbols` + atlas region 时，不再为同一 repo 追加懒请求，对齐 Java `textureCache.containsKey(repo)`；
+    - 扩展 browser 测试，确认图标响应缓存后即便清空请求表，下一帧也不会重复登记同 repo icon 请求。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_launcher_load_game_modal_blocks_background_slot_search_and_scroll -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop load_game -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop mods -- --nocapture`
+  - `git diff --check`
+- 后续不可漏：
+  - 继续补 LoadDialog 坏档 UI banner 的渲染态断言、加载完成后 overlay 消失断言；Mods browser 仍需接真实 HTTP 完成/失败调度，但不能新增自动重试破坏 Java 失败静默语义。
+
 ## 877. Mods browser repo icon response 接入上传链
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
