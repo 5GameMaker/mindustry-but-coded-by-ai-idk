@@ -17,6 +17,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 872. Mods detail metadata 对齐 Java showMod
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.04%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Mods 详情 metadata 改为 Java `ModsDialog.showMod(...)` 的可选字段语义：`author/version` 只有源字段存在且非空才显示，不再把缺失字段渲染成 `Unknown`；
+    - repo 不再作为 metadata 正文行渲染，保留在 GitHub/Reinstall 按钮行为中，减少正文与按钮重复；
+    - `@mods.viewcontent` 入口按钮尺寸收敛为 Java 固定 `300 x 50`，仍只在实际内容存在时显示；
+    - 扩展 `desktop_launcher_mods_route_opens_and_closes_detail_dialog`，覆盖无 metadata 的 mod 详情不显示 `Unknown/Author/Version`，并断言 `View Content` 按钮尺寸。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_route_opens_and_closes_detail_dialog -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop mods -- --nocapture`
+- 后续不可漏：
+  - 继续收敛 mobile detail 按钮分行布局：Java 在 mobile 且显示 reinstall 时会 `dialog.buttons.row()`，Rust 还需要在几何和 hit-test 上体现这一行布局。
+
 ## 871. Mods detail 复用本地模组图标
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
