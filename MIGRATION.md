@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 938. EditorInGame placeholder world 尺寸跟随地图
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续优先前端/UI/可玩性，不推进 Mods。
+- 本轮总体进度更新：约 **94.72%**，仍未达到完整可玩；继续优先 Campaign/CustomGame/Editor 真开局、真实 map/world tile load、黑屏/低帧率/输入命中问题收口、原版 UI/所有子菜单还原与真实资源复用。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `edit_current_map_in_game()` 改用 `seed_playable_smoke_world_with_dimensions(...)`，按当前编辑地图 `map.width/map.height` 强制 seed placeholder world；
+    - 扩展 `desktop_launcher_editor_route_has_ingame_button_and_enters_play_state_like_java`，断言 `Ingame Arena` 进入后 runtime world 与 report 均为 128×128。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_editor_route_has_ingame_button_and_enters_play_state_like_java -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_map_card_dialog_buttons_dispatch_play_and_editor_actions -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -j 1 -p mindustry-desktop --features opengl-native-runtime`
+- 后续不可漏：
+  - EditorInGame/MapPlay 仍然需要真实 tile load，而不只是尺寸正确的 placeholder；
+  - Campaign 仍需真实 sector world/loadout/rules；
+  - 暂不处理 Mods，除非阻塞能玩或 UI 主线。
+
 ## 937. MapPlay placeholder world 尺寸跟随地图
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续优先前端/UI/可玩性，不推进 Mods。
