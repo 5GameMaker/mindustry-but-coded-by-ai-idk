@@ -19,6 +19,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 903. Settings reset 恢复图形运行时副作用
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `SettingsMenuDialog.java` 的 reset-to-defaults 行为。
+- 本轮总体进度更新：约 **94.35%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - Settings 页面 `Reset to Defaults` 不只是删除存储值；
+  - 对 UI scale、edge padding、pixelate 这类会直接影响运行时 UI/渲染的项，reset 后应恢复默认运行时效果。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `reset_settings_table_overrides(...)` 在移除 override 后，对被移除的 key 重新应用 spec default 的 side-effect；
+    - 图形页 reset 后 `uiEdgePadding` 恢复 0、`uiscale` 恢复 100%、`pixelate` 恢复 false；
+    - 增加回归测试覆盖图形页 reset 的运行时状态回滚，并保留既有“只移除当前 table override”语义。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`（已手动回退 `desktop/src/main.rs` 纯换行噪音）
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_settings_reset_current_page_restores_graphics_side_effects_like_java -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_settings_reset_current_page_removes_only_that_table_overrides -- --nocapture`
+- 后续不可漏：
+  - 继续补齐 fullscreen/vsync/linear/bloom 等 Java 即时副作用；当前闭环先解决直接影响前端观感的 UI scale/padding/pixelate。
+
 ## 902. Mods GitHub branch release 缺 zipball_url 错误收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
