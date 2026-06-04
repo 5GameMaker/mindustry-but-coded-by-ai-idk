@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 948. ResearchDialog root 选择弹窗高亮跟随 effective root
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.88%**，仍未达到完整可玩；本轮修正 ResearchDialog root 选择弹窗默认勾选态，让弹窗高亮与当前 effective root 一致，而不是在未手动选择时固定高亮第一个 root。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_tech_tree_select_dialog()` 新增 `effective_root_name = tech_tree_route_root()`，未显式选择 root 时按当前 effective root 决定 `ok/rightOpen` 图标；
+    - `desktop_launcher_techtree_root_follows_current_campaign_planet_like_java` 追加渲染断言：Erekir 当前 planet 时，root select dialog 的 Erekir 行显示 `ok`，Serpulo 行显示 `rightOpen`；
+    - 保留当前 dialog 内手动 `SelectTechTreeRoot` 的优先级，手动选择后仍可切到其它 root。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_techtree_root_follows_current_campaign_planet_like_java -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop techtree -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe build -p mindustry-desktop --features opengl-native-runtime --release`
+- 当前可查看客户端产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+- 后续不可漏：
+  - Campaign 仍缺 `lastplanet`、`*-last-sector` settings 写回和真正 `SectorSelectDialog`；
+  - SaveDialog 后续应优先补保存后 slot preview PNG 生成，对齐 Java `SaveSlot.savePreview()`；
+  - MapList modded 地图 footer displayName/灰色样式仍需收口。
+
 ## 947. ResearchDialog 默认研究树 root 跟随当前星球
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
