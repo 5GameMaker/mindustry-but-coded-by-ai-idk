@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 980. MapPlay LoadoutDialog 大弹窗布局对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；当前仍优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.43%**，仍未达到完整可玩；本轮对齐 Java `LoadoutDialog` 在 MapPlay/CustomRules 入口下的大弹窗尺寸与按钮热区。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 MapPlay 专用 `map_play_loadout_dialog_rect`，不再直接使用 pause overlay 的压缩 `pause_loadout_dialog_rect`；
+    - MapPlay Loadout 底部 `@back` / `@max` / `@settings.reset` 按 Java `210x64` 按钮尺寸绘制与命中；
+    - MapPlay Loadout entries clip / visible rows / max scroll 改为专用大弹窗区域，避免条目压到底部按钮；
+    - 更新 `desktop_launcher_map_play_custom_rules_loadout_child_dialog_like_java`，断言大弹窗宽度和 `210x64` 按钮，并继续覆盖 max/reset/plus/滚动/back/隐藏写回。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_loadout_child_dialog_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop map_play_dialog --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 当前可查看客户端产物：`D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`。
+- 后续继续：
+  - Pause overlay 的 LoadoutDialog 仍可继续审查是否也应采用 Java `210x64` 大按钮，避免和暂停菜单布局冲突时需分支处理；
+  - MapPlay Weather/TeamRules/BannedContent/Planet 等子弹窗仍需继续逐项对齐 Java；
+  - 继续推进完整可玩、整体 runtime 接入与 Java↔Rust 联机兼容。
+
 ## 979. LaunchLoadout 蓝图选择器接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；当前仍优先 UI 子菜单与可玩性。
