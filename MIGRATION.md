@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 896. 菜单帧循环 uncapped delta 对齐 Java
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ClientLauncher.java` / `Renderer.java` / `MenuRenderer.java`。
+- 本轮总体进度更新：约 **94.28%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `ClientLauncher` 通过 `Core.graphics.getDeltaTime()` 驱动 `Time.delta`；
+  - 菜单背景和子菜单动画每帧消耗真实帧间隔，而不是 uncapped 时固定 60fps 步长。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopFrameLoopState` 新增上一帧 `Instant`；
+    - 新增 `menu_frame_delta_like_java()`，第一帧用现有 fallback，后续帧用真实 elapsed；
+    - `step_desktop_frame_loop(...)` 的 `menu_frame_delta_seconds` 改为来自真实帧间隔，并保留既有 clamp；
+    - 增加回归测试，确认 uncapped 菜单 delta 不再永远固定 `1/60`。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_frame_loop -- --nocapture`
+- 后续不可漏：
+  - 继续观察原版 UI/菜单低帧率；如果仍卡，下一步优先审查菜单背景动态层缓存与 `MenuRenderer.cache()` 等价实现。
+
 ## 895. Mods GitHub importFail/modError 弹窗收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
