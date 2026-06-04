@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 922. Settings 动态分类页隐藏 target 诊断文本
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，按用户要求继续优先 UI/可玩性，不推进 Mods。
+- 本轮总体进度更新：约 **94.56%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_dynamic_category_page(...)` 不再把 `dynamic target: ...` 诊断信息绘制到真实 Settings 前端；
+    - 保留动态分类标题、图标、非空描述与返回交互，内部 route line 仍可用于测试/调试；
+    - 更新 `desktop_launcher_settings_dynamic_categories_join_main_menu_model`，确认 render pass 不再出现 `dynamic target: example-mod`。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_settings_dynamic_categories_join_main_menu_model -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_settings_dynamic_category_without_description_maps_back_line_like_java_dialog -- --nocapture`
+- 后续不可漏：
+  - 继续优先主菜单/Settings/Load/Play/可玩链路和黑屏/低帧率问题；
+  - Settings 子弹窗组合还需要继续补黑屏防护回归；
+  - 本轮不涉及 Mods，后续在用户允许前不要优先处理模组功能。
+
 ## 921. Settings 动态分类空描述不再绘制调试占位
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，按用户要求优先 UI/可玩性，不推进 Mods。
