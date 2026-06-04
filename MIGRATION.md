@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 979. LaunchLoadout 蓝图选择器接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；当前仍优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.42%**，仍未达到完整可玩；本轮为 Campaign `LaunchLoadoutDialog` 接入最小 Java 式 schematic/loadout picker。
+- 本轮主改动：
+  - `core/src/mindustry/content/loadouts.rs`
+    - 内置 loadout schematic 设置 Java 风格 `file = "{name}.msch"`，使 `lastloadout-*` 可按 `file_stem_like_java` 持久化；
+  - `desktop/src/lib.rs`
+    - 新增 Campaign launch loadout 当前选择状态、候选 helper、选择 action、picker rect/hit-test；
+    - picker 候选来自 `content_loader.catalog().loadouts`，按源 sector `best_core_type` 的 core size 过滤；
+    - 允许 schematics 时渲染可点击 loadout 卡片并高亮当前选择，替换旧 Rust-only `loadout: core-shard` 占位；
+    - 点击候选仅更新选择并保持弹窗打开；点击 `@launch.text` 时按源 core 写入 `lastloadout-{core}`；
+    - `campaign_launch_loadout_capacity()` 与资源校验改为基于当前选中 loadout 的 core / schematic requirements。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core vanilla_loadouts_decode_to_single_core_tile_schematics -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_picker_selects_and_commits_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 当前可查看客户端产物：`D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`。
+- 后续继续：
+  - picker 仍需继续升级为更接近 Java `SchematicImage` 的视觉预览和完整环境/planet 可建造过滤；
+  - MapPlay/CustomRules/Loadout 子弹窗仍需继续对齐 Java 大弹窗尺寸、按钮热区与各子弹窗视觉；
+  - 继续推进完整可玩、整体 runtime 接入与 Java↔Rust 联机兼容。
+
 ## 978. LaunchLoadout 目标描述 fallback 对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；当前仍优先 UI 子菜单与可玩性。
