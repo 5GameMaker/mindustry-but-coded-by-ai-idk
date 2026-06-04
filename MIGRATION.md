@@ -30931,3 +30931,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - JoinDialog community group header/host card 结构仍需继续对齐；
   - Settings / Schematics / Editor 等子菜单仍需继续逐项对齐 Java 原版；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 606. SchematicsDialog 详情功率行
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.31%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `SchematicsDialog.SchematicInfoDialog` 的详情功率收支行对齐 Java。
+- Java 对照证据：
+  - `Schematic.powerProduction()` 只统计 `PowerGenerator.getDisplayedPowerProduction()`；
+  - `Schematic.powerConsumption()` 统计 `block.consPower.usage`；
+  - `SchematicInfoDialog.show(...)` 在 requirements 后渲染功率行，顺序是 `+production` 在前、`-consumption` 在后，再渲染 description。
+- 本轮主改动：
+  - `core/src/mindustry/content/blocks.rs`
+    - 新增 `BlockDef::power_consumption()`；
+    - 新增 `BlockDef::displayed_power_production()`，按 Java `PowerGenerator` 语义只统计 generator 类 power block，Thermal 使用 `display_efficiency_scale`；
+  - `core/src/mindustry/game/schematic.rs`
+    - 新增 `Schematic::power_production(...)` / `Schematic::power_consumption(...)`；
+    - 新增 `schematic_power_summary_matches_java_power_methods`；
+  - `desktop/src/lib.rs`
+    - `DesktopSchematicCardEntry` 增加每秒功率 centi 字段；
+    - `push_schematic_info_dialog(...)` 在 requirements 后绘制 `+60` / `-30` 风格功率行；
+    - 新增 `desktop_launcher_schematic_info_dialog_renders_power_balance_like_java`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core schematic_power_summary -- --nocapture`
+  - `cargo test -p mindustry-desktop schematic_info_dialog -- --nocapture`
+  - `cargo test -p mindustry-desktop schematics_info_dialog -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Schematics 详情标题仍需继续审查是否应从 `@schematics` 收敛到 Java 单数 `@schematic`；
+  - Schematics 详情 ScrollPane / 真实 SchematicImage 预览仍需继续逼近 Java；
+  - JoinDialog community group header/host card 结构仍需继续对齐；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。

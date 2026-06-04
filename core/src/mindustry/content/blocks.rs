@@ -4959,6 +4959,65 @@ impl BlockDef {
         }
     }
 
+    pub fn power_consumption(&self) -> f32 {
+        match self {
+            Self::Production(block) => block.consume_power,
+            Self::Turret(block) => block.consume_power,
+            Self::Crafting(block) => block.consume_power,
+            Self::DefenseWall(block) => block.consume_power,
+            Self::Effect(block) => block.consume_power,
+            Self::Distribution(block) => block.consume_power,
+            Self::Liquid(block) => block.consume_power,
+            Self::Power(block) => block.consume_power,
+            Self::UnitFactory(block) => block.consume_power,
+            Self::UnitReconstructor(block) => block.consume_power,
+            Self::UnitAssembler(block) => block.consume_power,
+            Self::UnitAssemblerModule(block) => block.consume_power,
+            Self::UnitRepairTower(block) => block.consume_power,
+            Self::PayloadMassDriver(block) => block.consume_power,
+            Self::PayloadDeconstructor(block) => block.consume_power,
+            Self::PayloadConstructor(block) => block.consume_power,
+            Self::PayloadLoader(block) => block.consume_power,
+            Self::Sandbox(block) => block.consume_power,
+            Self::Light(block) => block.consume_power,
+            Self::Campaign(block) => block.consume_power,
+            Self::Plain(_)
+            | Self::Floor(_)
+            | Self::StaticWall(_)
+            | Self::StaticTree(_)
+            | Self::TreeBlock(_)
+            | Self::TallBlock(_)
+            | Self::Prop(_)
+            | Self::Ore(_)
+            | Self::Storage(_)
+            | Self::Payload(_)
+            | Self::Legacy(_)
+            | Self::Logic(_) => 0.0,
+        }
+    }
+
+    pub fn displayed_power_production(&self) -> f32 {
+        let Self::Power(block) = self else {
+            return 0.0;
+        };
+        match block.kind {
+            PowerBlockKind::ConsumeGenerator
+            | PowerBlockKind::SolarGenerator
+            | PowerBlockKind::NuclearReactor
+            | PowerBlockKind::ImpactReactor
+            | PowerBlockKind::VariableReactor
+            | PowerBlockKind::HeaterGenerator => block.power_production,
+            PowerBlockKind::ThermalGenerator => {
+                block.power_production / block.display_efficiency_scale.max(f32::EPSILON)
+            }
+            PowerBlockKind::PowerNode
+            | PowerBlockKind::PowerDiode
+            | PowerBlockKind::Battery
+            | PowerBlockKind::BeamNode
+            | PowerBlockKind::LongPowerNode => 0.0,
+        }
+    }
+
     pub fn build_cost_multiplier(&self) -> f32 {
         match self {
             Self::Storage(block) => block.build_cost_multiplier,

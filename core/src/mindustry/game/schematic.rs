@@ -80,6 +80,22 @@ impl Schematic {
 
         requirements.to_vec()
     }
+
+    pub fn power_production(&self, content_loader: &ContentLoader) -> f32 {
+        self.tiles
+            .iter()
+            .filter_map(|tile| content_loader.block_by_name(&tile.block))
+            .map(|block| block.displayed_power_production())
+            .sum()
+    }
+
+    pub fn power_consumption(&self, content_loader: &ContentLoader) -> f32 {
+        self.tiles
+            .iter()
+            .filter_map(|tile| content_loader.block_by_name(&tile.block))
+            .map(|block| block.power_consumption())
+            .sum()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -567,6 +583,33 @@ mod tests {
         assert_eq!(
             schematic.requirements(&content_loader),
             vec![ItemStack::new("copper", 7)]
+        );
+    }
+
+    #[test]
+    fn schematic_power_summary_matches_java_power_methods() {
+        let content_loader = ContentLoader::create_base_content_or_panic();
+        let schematic = Schematic::new(
+            vec![
+                SchematicTile::new("combustion-generator", 0, 0, None, 0),
+                SchematicTile::new("thermal-generator", 2, 0, None, 0),
+                SchematicTile::new("battery", 4, 0, None, 0),
+                SchematicTile::new("silicon-smelter", 6, 0, None, 0),
+                SchematicTile::new("air", 8, 0, None, 0),
+                SchematicTile::new("missing-block", 10, 0, None, 0),
+            ],
+            HashMap::new(),
+            12,
+            4,
+        );
+
+        assert!(
+            (schematic.power_production(&content_loader) - 2.8).abs() < 0.0001,
+            "Java Schematic.powerProduction sums displayed PowerGenerator output only"
+        );
+        assert!(
+            (schematic.power_consumption(&content_loader) - 0.5).abs() < 0.0001,
+            "Java Schematic.powerConsumption sums block.consPower.usage"
         );
     }
 
