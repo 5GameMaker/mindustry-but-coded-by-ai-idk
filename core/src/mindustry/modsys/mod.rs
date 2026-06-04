@@ -347,7 +347,7 @@ fn mod_file_tree_from_archive_entries(entries: &[ModArchiveEntry]) -> FileTree {
 
 fn scan_mod_sprite_paths_from_archive_entries(
     entries: &[ModArchiveEntry],
-) -> Vec<(String, Option<(u32, u32)>)> {
+) -> Vec<(String, Option<(u32, u32)>, Option<Vec<u8>>)> {
     let prefix = mod_archive_root_prefix(entries);
     let mut paths = entries
         .iter()
@@ -359,7 +359,13 @@ fn scan_mod_sprite_paths_from_archive_entries(
                 && path
                     .split('/')
                     .any(|segment| matches!(segment, "sprites" | "sprites-override"));
-            is_sprite.then(|| (path, png_dimensions_from_bytes(&entry.data)))
+            is_sprite.then(|| {
+                (
+                    path,
+                    png_dimensions_from_bytes(&entry.data),
+                    Some(entry.data.clone()),
+                )
+            })
         })
         .collect::<Vec<_>>();
     paths.sort_by(|left, right| left.0.cmp(&right.0));
@@ -610,6 +616,7 @@ pub struct ModSpritePackSource {
     pub source_path: String,
     pub prefix_with_mod_name: bool,
     pub dimensions: Option<(u32, u32)>,
+    pub source_bytes: Option<Vec<u8>>,
 }
 
 impl ModSpritePackSource {
@@ -623,6 +630,7 @@ impl ModSpritePackSource {
             source_path: source_path.into(),
             prefix_with_mod_name,
             dimensions: None,
+            source_bytes: None,
         }
     }
 
@@ -640,6 +648,11 @@ impl ModSpritePackSource {
 
     pub fn with_dimensions(mut self, dimensions: Option<(u32, u32)>) -> Self {
         self.dimensions = dimensions;
+        self
+    }
+
+    pub fn with_source_bytes(mut self, source_bytes: Option<Vec<u8>>) -> Self {
+        self.source_bytes = source_bytes;
         self
     }
 
@@ -692,6 +705,16 @@ impl ModSpritePackSource {
     ) -> Option<Self> {
         Self::from_scanned_path(mod_name, source_path)
             .map(|source| source.with_dimensions(dimensions))
+    }
+
+    pub fn from_scanned_path_with_dimensions_and_bytes(
+        mod_name: impl Into<String>,
+        source_path: impl Into<String>,
+        dimensions: Option<(u32, u32)>,
+        source_bytes: Option<Vec<u8>>,
+    ) -> Option<Self> {
+        Self::from_scanned_path_with_dimensions(mod_name, source_path, dimensions)
+            .map(|source| source.with_source_bytes(source_bytes))
     }
 }
 
@@ -761,17 +784,35 @@ impl ModResourcePlan {
         headless: bool,
         paths: impl IntoIterator<Item = (String, Option<(u32, u32)>)>,
     ) -> Self {
+        Self::from_file_paths_with_dimensions_and_bytes(
+            mod_name,
+            headless,
+            paths
+                .into_iter()
+                .map(|(path, dimensions)| (path, dimensions, None)),
+        )
+    }
+
+    pub fn from_file_paths_with_dimensions_and_bytes(
+        mod_name: impl Into<String>,
+        headless: bool,
+        paths: impl IntoIterator<Item = (String, Option<(u32, u32)>, Option<Vec<u8>>)>,
+    ) -> Self {
         let mod_name = mod_name.into();
         let mut regular_sources = Vec::new();
         let mut override_sources = Vec::new();
 
-        for source in paths.into_iter().filter_map(|(path, dimensions)| {
-            ModSpritePackSource::from_scanned_path_with_dimensions(
-                mod_name.clone(),
-                path,
-                dimensions,
-            )
-        }) {
+        for source in paths
+            .into_iter()
+            .filter_map(|(path, dimensions, source_bytes)| {
+                ModSpritePackSource::from_scanned_path_with_dimensions_and_bytes(
+                    mod_name.clone(),
+                    path,
+                    dimensions,
+                    source_bytes,
+                )
+            })
+        {
             if source.prefix_with_mod_name {
                 regular_sources.push(source);
             } else {
@@ -854,7 +895,7 @@ impl ModResourceDirectoryPlan {
         let meta = mod_metadata_from_archive_entries(&mod_name, &entries)?;
         let file_tree = mod_file_tree_from_archive_entries(&entries);
         let sprite_paths = scan_mod_sprite_paths_from_archive_entries(&entries);
-        let resource_plan = ModResourcePlan::from_file_paths_with_dimensions(
+        let resource_plan = ModResourcePlan::from_file_paths_with_dimensions_and_bytes(
             mod_name.clone(),
             headless,
             sprite_paths,
@@ -2233,6 +2274,14 @@ repo: "Anon/archive"
                     dimensions: Some((32, 32)),
                 },
             ]
+        );
+        assert_eq!(
+            plan.resource_plan.sprite_sources[0].source_bytes.as_deref(),
+            Some(router_png.as_slice())
+        );
+        assert_eq!(
+            plan.resource_plan.sprite_sources[1].source_bytes.as_deref(),
+            Some(icon_png.as_slice())
         );
 
         let _ = std::fs::remove_dir_all(&outer_root);

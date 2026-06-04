@@ -17,6 +17,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 868. Mods archive sprite bytes 接入桌面纹理源缓存
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.00%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `core/src/mindustry/modsys/mod.rs`
+    - 在 `ModSpritePackSource` 增加 `source_bytes: Option<Vec<u8>>`；
+    - archive sprite scanner 现在把 zip/jar entry 内 PNG bytes 与预计算尺寸一起保存；
+    - 新增 `from_file_paths_with_dimensions_and_bytes(...)`，让目录 mod 保持 bytes 为空、archive mod 走 bytes 贯通路径；
+    - `ModResourceDirectoryPlan::from_archive_file(...)` 改走 bytes-aware 入口，对齐 Java `ZipFi` 从压缩包内直接读取资源的方向。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLauncher::mod_texture_source_bytes: BTreeMap<String, Vec<u8>>`；
+    - `merge_mod_resource_plan_into_texture_atlas(...)` 继续生成 `TextureAtlasPlan<bool>`，同时按 atlas region 名保存 archive PNG bytes；
+    - 同名非 archive sprite 合并时会清理旧 bytes，避免后续纹理上传读取 stale archive 数据。
+- 已验证：
+  - `RUSTFLAGS='-C debuginfo=0' cargo check -j 1 -p mindustry-core --lib`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_archive_discovery_reads_zip_metadata_like_java_mods_load -- --nocapture`
+  - `RUSTFLAGS='-C debuginfo=0' cargo test -j 1 -p mindustry-core mod_resource_directory_plan_reads_archive_backed_mod_like_java_zipfi --lib -- --nocapture`
+- 后续不可漏：
+  - 当前已做到 archive bytes 在 desktop launcher 中可按 atlas region 名取出；下一步应把 `mod_texture_source_bytes` 接入 OpenGL/native texture upload 或统一纹理资源解析层，完成真实像素上传，而不是只停留在缓存可取。
+
 ## 867. Mods archive sprite 预计算尺寸接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
