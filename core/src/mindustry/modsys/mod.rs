@@ -372,6 +372,47 @@ fn scan_mod_sprite_paths_from_archive_entries(
     paths
 }
 
+fn mod_icon_source_from_archive_entries(
+    headless: bool,
+    entries: &[ModArchiveEntry],
+) -> Option<ModIconSource> {
+    let prefix = mod_archive_root_prefix(entries);
+    for candidate in mod_icon_candidates(headless) {
+        let full_name = format!("{prefix}{candidate}");
+        if let Some(entry) = entries
+            .iter()
+            .find(|entry| !entry.directory && entry.name == full_name)
+        {
+            return Some(ModIconSource {
+                source_path: candidate,
+                dimensions: png_dimensions_from_bytes(&entry.data),
+                source_bytes: Some(entry.data.clone()),
+            });
+        }
+    }
+    None
+}
+
+fn mod_icon_source_from_directory(
+    headless: bool,
+    root: impl AsRef<Path>,
+) -> io::Result<Option<ModIconSource>> {
+    let root = root.as_ref();
+    for candidate in mod_icon_candidates(headless) {
+        let path = root.join(&candidate);
+        if !path.is_file() {
+            continue;
+        }
+        let bytes = fs::read(&path)?;
+        return Ok(Some(ModIconSource {
+            source_path: path.to_string_lossy().replace('\\', "/"),
+            dimensions: png_dimensions_from_bytes(&bytes),
+            source_bytes: Some(bytes),
+        }));
+    }
+    Ok(None)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModConfigPaths {
     pub mods_dir: String,
@@ -723,9 +764,17 @@ impl ModSpritePackSource {
 /// Headless runtimes never try to load an icon. Non-headless runtimes keep the
 /// v158.1 candidate order: `icon.png` first, then `preview.png`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModIconSource {
+    pub source_path: String,
+    pub dimensions: Option<(u32, u32)>,
+    pub source_bytes: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModIconLoadPlan {
     pub headless: bool,
     pub candidates: Vec<String>,
+    pub source: Option<ModIconSource>,
 }
 
 impl ModIconLoadPlan {
@@ -733,7 +782,13 @@ impl ModIconLoadPlan {
         Self {
             headless,
             candidates: mod_icon_candidates(headless),
+            source: None,
         }
+    }
+
+    pub fn with_source(mut self, source: Option<ModIconSource>) -> Self {
+        self.source = source;
+        self
     }
 }
 
@@ -764,6 +819,11 @@ impl ModResourcePlan {
         sources: impl IntoIterator<Item = ModSpritePackSource>,
     ) -> Self {
         self.sprite_sources.extend(sources);
+        self
+    }
+
+    pub fn with_icon_source(mut self, source: Option<ModIconSource>) -> Self {
+        self.icon.source = source;
         self
     }
 
@@ -837,8 +897,13 @@ impl ModResourcePlan {
         headless: bool,
         root: impl AsRef<Path>,
     ) -> io::Result<Self> {
+        let root = root.as_ref();
         let sprite_paths = scan_mod_sprite_paths(root)?;
-        Ok(Self::from_file_paths(mod_name, headless, sprite_paths))
+        let mut plan = Self::from_file_paths(mod_name, headless, sprite_paths);
+        plan.icon = plan
+            .icon
+            .with_source(mod_icon_source_from_directory(headless, root)?);
+        Ok(plan)
     }
 
     pub fn sprite_requests(&self) -> Vec<SpritePackRequest> {
@@ -899,7 +964,8 @@ impl ModResourceDirectoryPlan {
             mod_name.clone(),
             headless,
             sprite_paths,
-        );
+        )
+        .with_icon_source(mod_icon_source_from_archive_entries(headless, &entries));
 
         Ok(Self {
             mod_name,
@@ -2217,6 +2283,7 @@ steamID: "1234567890"
         let outer_root = temp_mod_root("mod-archive-plan");
         std::fs::create_dir_all(&outer_root).unwrap();
         let archive = outer_root.join("Archive Mod.zip");
+        let root_icon_png = minimal_png_bytes(24, 24);
         let router_png = minimal_png_bytes(16, 16);
         let icon_png = minimal_png_bytes(32, 32);
         let bytes = stored_zip_bytes(&[
@@ -2229,6 +2296,7 @@ author: "Zip Tester"
 repo: "Anon/archive"
 "#,
             ),
+            ("example-pack/icon.png", &root_icon_png),
             ("example-pack/assets/data.txt", b"data"),
             ("example-pack/bundles/messages.properties", b"hello=world"),
             ("example-pack/sprites/blocks/router.png", &router_png),
@@ -2282,6 +2350,18 @@ repo: "Anon/archive"
         assert_eq!(
             plan.resource_plan.sprite_sources[1].source_bytes.as_deref(),
             Some(icon_png.as_slice())
+        );
+        let icon_source = plan
+            .resource_plan
+            .icon
+            .source
+            .as_ref()
+            .expect("archive root icon.png should be retained like Java ZipFi");
+        assert_eq!(icon_source.source_path, "icon.png");
+        assert_eq!(icon_source.dimensions, Some((24, 24)));
+        assert_eq!(
+            icon_source.source_bytes.as_deref(),
+            Some(root_icon_png.as_slice())
         );
 
         let _ = std::fs::remove_dir_all(&outer_root);

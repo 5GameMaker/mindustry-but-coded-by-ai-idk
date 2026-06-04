@@ -17,6 +17,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 870. Mods archive icon 接入列表卡片
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.02%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `core/src/mindustry/modsys/mod.rs`
+    - 新增 `ModIconSource`，`ModIconLoadPlan` 现在记录命中的 root `icon.png` / `preview.png` 来源；
+    - 目录 mod 从真实 root 读取候选 PNG bytes，archive mod 从 zip/jar entry bytes 读取候选 PNG bytes；
+    - archive root icon 按 Java `ZipFi` 语义保留 `source_path / dimensions / source_bytes`，不要求先落地到文件系统。
+  - `desktop/src/lib.rs`
+    - 新增 `last_mods_directory_mod_icon_symbols`，每个已发现 mod 都可携带自己的 icon atlas symbol；
+    - mod icon 合并到 texture atlas，symbol 形如 `mod-icon-<mod_name>`，并复用上一轮 archive bytes → OpenGL upload 主链；
+    - Mods 列表卡片不再固定画 `nomap`，存在 icon symbol 时优先绘制真实 mod icon，缺失时才回退 `nomap`。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-core mod_resource_directory_plan_reads_archive_backed_mod_like_java_zipfi --lib -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_archive_discovery_reads_zip_metadata_like_java_mods_load -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop mods -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo check -j 1 -p mindustry-core --lib`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo check -j 1 -p mindustry-desktop --lib`
+- 后续不可漏：
+  - Mods detail/browser 页面还需要继续按 Java `ModsDialog.showMod(...)` 对齐 icon/preview 的尺寸、布局、tooltip 与在线列表图标；本轮只收口本地列表卡片 icon。
+
 ## 869. Mods archive sprite bytes 接入 OpenGL 上传主链
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
