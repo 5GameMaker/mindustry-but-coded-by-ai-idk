@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 892. Mods GitHub Java release jar asset 选择
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
+- 本轮总体进度更新：约 **94.24%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `githubImportJavaMod(repo, release)` 读取 release JSON 的 `assets`；
+  - 优先选择 `name.startsWith("dexed") && name.endsWith(".jar")` 的 asset；
+  - 若没有 dexed jar，则选择第一个 `name.endsWith(".jar")` 的 asset；
+  - 若没有 jar，则报出 “No JAR file found in releases...” 错误。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopModsImportGithubJavaJarAssetTarget`，保存 repo/release/asset_name/browser_download_url；
+    - 新增 JSON array slice helper，解析 release JSON 的 `assets` 对象数组；
+    - 新增 `apply_mods_import_github_java_release_json_like_java(...)`，实现 dexed jar 优先、普通 jar 兜底、无 jar 写入错误 guard；
+    - Mods shell lines 增加 jar asset 事件，给后续真实下载执行器提供明确 URL 边界。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_import_github -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_browser -- --nocapture`
+- 后续不可漏：
+  - Java jar asset target 仍需接真实 HTTP 下载、临时文件写入、repo set、导入完成后 `setup()`/隐藏 loadfrag；branch release 还需解析 `zipball_url` 与重定向 `Location`。
+
 ## 891. Mods GitHub resolved 后下载目标选择
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
