@@ -13,6 +13,7 @@ pub struct UnlockableContentBase {
     pub localized_name: Option<String>,
     pub description: Option<String>,
     pub details: Option<String>,
+    pub credit: Option<String>,
     pub always_unlocked: bool,
     pub inline_description: bool,
     pub hide_details: bool,
@@ -33,6 +34,7 @@ impl UnlockableContentBase {
             localized_name: None,
             description: None,
             details: None,
+            credit: None,
             always_unlocked: false,
             inline_description: false,
             hide_details: true,
@@ -121,6 +123,7 @@ mod tests {
         let content = UnlockableContentBase::new(2, ContentType::Item, "copper");
 
         assert!(!content.hide_database);
+        assert_eq!(content.credit, None);
         assert!(!content.all_database_tabs);
         assert!(content.database_tabs.is_empty());
         assert_eq!(content.database_category, None);

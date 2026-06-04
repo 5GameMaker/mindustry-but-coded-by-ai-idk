@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 898. ContentInfoDialog credit 字段与 createdby 行
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ContentInfoDialog.java`。
+- 本轮总体进度更新：约 **94.30%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `ContentInfoDialog` 在 description / stats / details 后追加 `content.credit`；
+  - 文案通过 `content.createdby = Created by: {0}` 格式化。
+- 本轮主改动：
+  - `core/src/mindustry/ctype/unlockable_content.rs`
+    - `UnlockableContentBase` 新增 `credit: Option<String>`，默认 `None`；
+  - `core/src/mindustry/ui/mod.rs`
+    - 补充 `content.createdby` bundle key fallback；
+  - `desktop/src/lib.rs`
+    - 新增 `database_content_credit(...)`；
+    - ContentInfoDialog 在 details 后渲染 Java-like createdby 行，并支持 `{0}` 替换；
+    - Database 前端测试给 copper 注入 credit，验证详情页出现作者行。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-core database_metadata_defaults_match_java_unlockable_content_baseline -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell -- --nocapture`
+- 后续不可漏：
+  - `displayExtra(table)` 仍未完全迁移；Stats 仍需继续向 Java 的 `Stats/StatCat/StatValue` 结构化渲染靠拢。
+
 ## 897. Database patched 标记改为内容级
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `DatabaseDialog.java` / `ContentInfoDialog.java`。
