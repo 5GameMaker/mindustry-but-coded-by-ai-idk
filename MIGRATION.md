@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 911. ContentInfoDialog stats 分类按 Java StatCat 渲染
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ContentInfoDialog.java`、`StatCat.java`、`Stat.java` 与 `Block.java`。
+- 本轮总体进度更新：约 **94.45%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `ContentInfoDialog.show(...)` 中只有 `content.stats.toMap().size > 0` 时，description 前才加 `@category.purpose`；
+  - `stats.useCategories=false` 时，所有 stat 行显示在一个 `@category.general` 下面；
+  - `stats.useCategories=true` 时，按 `StatCat` 顺序显示 `@category.general/power/liquids/items/crafting/function/optional` 等分类头；
+  - `Block.init()` 设置 `stats.useCategories = true`，因此 block 详情页不能长期只做扁平 stat 文本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopDatabaseContentStatLine/Group/Stats`，把 Database ContentInfo 的 stat 数据从扁平字符串升级为 Java-like 分类结构；
+    - 新增 `database_content_stat_category(...)`，按本地 Java `Stat.java` 中的 `StatCat` 归类 `items/liquids/power/crafting/function/optional/general`；
+    - `database_content_stats_like_java(...)` 保留现有 id/health/size/item/liquid/status/unit/weather/sector/planet stat 数据，同时让 block 走 `use_categories=true`；
+    - `push_database_content_info_dialog(...)` 按 `stats.use_categories` 决定绘制单个 `@category.general` 还是逐个 `@category.<cat>`；
+    - `database_content_info_viewfields_rect_for_content(...)` 改用同一份 stats 分类高度计算，避免 `@viewfields` 按旧扁平高度压到内容。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_database_content_info_stats_keep_java_stat_categories -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell -- --nocapture`
+- 后续不可漏：
+  - Rust 当前 block stat 仍只有简化的 health/size/placeable 等少量项，后续应继续迁移 Java `Block.setStats()`、consumers、requirements、boosters、ammo 等真实 `StatValue.display(...)`；
+  - `displayExtra(table)` 扩展点仍未完整接入，特别是 `TeamEntry` lore 和其它后置 UI 内容；
+  - 该闭环改善的是 Database 子菜单详情页结构，仍不能把具体子菜单还原停在主菜单层。
+
 ## 910. Desktop 菜单图形热路径跳过被覆盖的 core UI commands
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `MenuRenderer.java`、`MenuFragment.java` 与 Rust 菜单渲染链路。
