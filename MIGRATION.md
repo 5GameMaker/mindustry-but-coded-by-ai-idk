@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 894. Mods GitHub handleMod 本地导入收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
+- 本轮总体进度更新：约 **94.26%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `handleMod(repo, result)` 将下载结果写入 `tmpDirectory.child(repo.replace("/", "") + ".zip")`；
+  - 写入后进入 `mods.importMod(file)`，设置 `mod.meta.repo = repo`，随后删除临时文件、刷新 `setup()` 并隐藏 `loadfrag`；
+  - 失败路径后续仍应统一走 `modError/importFail`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopModsImportGithubDownloadResult` 与 `last_mods_import_github_download_result`，记录本地导入结果；
+    - 新增 `complete_mods_import_github_download_bytes_like_java(...)`，按 Java 命名规则写入 `repo.replace("/", "") + ".zip"`；
+    - 导入成功后更新 Mods 列表快照、设置 `meta.repo`、标记 `requires_reload`、清理下载态并输出 shell event；
+    - 增加回归测试，覆盖 handleMod 写文件、repo 元数据、reload 标记与 shell lines。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_import_github -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_browser -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_mods_route_import_file_selection_copies_and_marks_reload_like_java -- --nocapture`
+- 后续不可漏：
+  - 该 helper 下一步必须接真实 HTTP executor、GitHub 302 `Location` 重定向、Java-like `modError/importFail` 弹窗、取消态贯穿所有回调，并补齐临时文件删除与 `setup()` 级刷新。
+
 ## 893. Mods GitHub branch zipball 目标解析
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
