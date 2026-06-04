@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 927. Campaign route 接入 Back/Tech Tree 次级动作
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，继续优先前端/UI/可玩性，不推进 Mods。
+- 本轮总体进度更新：约 **94.61%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率/输入命中问题收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopMenuRouteShellAction::OpenCampaignTechTree` 与 `campaign_route_secondary_button_rect(...)`；
+    - Campaign 专用 body 现在渲染 `@back` 与 `@techtree` 两个次级按钮，布局在主发射按钮上方；
+    - Campaign hit-test 接入 Back/Tech Tree：Back 关闭 route，Tech Tree 切到 `DesktopMenuRoute::TechTree` 并清理 `campaign_planet_dialog`；
+    - `desktop_launcher_campaign_menu_route_shell_uses_content_start_sector` 覆盖两个按钮文本、命中与 TechTree 跳转；
+    - 顺手修正 TechTree 测试中硬编码英文 `Back` / `Tech Tree Selection` / `Locked` / `<none>`，改为按 bundle 本地化断言，避免本机语言环境导致前端测试误报。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_campaign_menu_route_shell_uses_content_start_sector -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_campaign_launch_button_seeds_playable_smoke_world -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_techtree_route -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -j 1 -p mindustry-desktop --features opengl-native-runtime`
+- 后续不可漏：
+  - 继续补 Campaign 主按钮的状态驱动禁用/恢复/继续逻辑；
+  - 继续补真实 sector 详情、资源、威胁、占领/攻击状态和 LaunchLoadoutDialog；
+  - TechTree route 的本地化测试修正说明默认语言环境不应影响 UI 回归判断。
+
 ## 926. Campaign 主按钮使用原版发射文案
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，继续优先前端/UI/可玩性，不推进 Mods。
