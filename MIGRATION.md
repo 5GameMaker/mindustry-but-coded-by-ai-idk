@@ -17,6 +17,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 887. Join legacy server-list 运行时自动迁移
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `JoinDialog.java` 与 `LegacyIO.java`。
+- 本轮总体进度更新：约 **94.19%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `JoinDialog.loadServers()` 先读现代 `servers`，若 `Core.settings.has("server-list")` 则用 `LegacyIO.readServers()` 覆盖服务器列表，并删除旧 `server-list`；
+  - `LegacyIO.readServers()` 从 `Core.settings.getBytes("server-list")` 读取 Java DataInput 形状：length、type name、逐项 UTF ip + int port。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 导入 `LEGACY_SERVER_LIST_SETTING`，新增 `load_legacy_join_servers_from_settings()`；
+    - `load_join_saved_servers_from_settings()` 优先迁移旧 `server-list`，迁移成功后写回现代 `servers` JSON，旧键移除；旧键存在但无有效数据时按 Java 覆盖语义清空当前 saved servers；
+    - Join 路由初始化时调用 `load_join_saved_servers_from_settings()`，打开 Join 页面即可自动迁移；
+    - 对当前 Rust 字符串 settings 过渡层增加 `hex:` legacy bytes 承载，真实 settings bytes 层后续可复用同一迁移入口。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_join_route_auto_migrates_legacy_server_list_setting_like_java -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop join_route -- --nocapture`
+  - `git diff --check`
+- 后续不可漏：
+  - 当前 desktop settings 仍是字符串覆盖层，真实 Arc/Java settings bytes 持久化读取还需继续接入；Join 下一步继续本地 LAN discovering/empty card 与社区 group address ping 回填 hosts。
+
 ## 886. Join 社区服务器搜索剥离颜色 markup
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `JoinDialog.java`。
