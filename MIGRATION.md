@@ -17,6 +17,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 885. Mods browser 选择导入请求接入 Java githubImportMod
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
+- 本轮总体进度更新：约 **94.17%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `ModsDialog.showModBrowser()` 的选择弹窗中 `@mods.browser.add` / `@mods.browser.reinstall` 会先关闭选择弹窗，再调用 `githubImportMod(mod.repo, mod.hasJava, null)`；
+  - releases 下载按钮会调用 `githubImportMod(mod.repo, mod.hasJava, releaseUrl.substring(...))`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `queue_mods_browser_github_import_like_java(...)`，把 browser listing 的 `repo / hasJava / release id` 写入既有 `DesktopModsImportGithubRequest`；
+    - `Add` / `Reinstall` 不再只记录 `last_mods_browser_action`，有 repo 时同步排队 `DesktopModsImportAction::Github`，无 repo 的本地扫描条目仍保留旧的 browser action 记录但不伪造 GitHub 导入；
+    - `InstallRelease` 复用 release dialog 当前 mod index，把 release API URL 末段解析出的 release id 传入导入请求，贴近 Java `githubImportMod(repo, hasJava, release)`。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_browser -- --nocapture`
+- 后续不可漏：
+  - 当前仍只是把 Java browser 按钮接到可观察的 GitHub 导入请求边界；真实 HTTP 下载、Java/class mod release 选择、取消 loadfrag、依赖导入和错误弹窗仍需继续迁移到完整导入执行链。
+
 ## 884. ScaleFactorChanged 同步 frame-loop surface size
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
