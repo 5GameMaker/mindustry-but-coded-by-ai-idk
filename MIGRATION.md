@@ -30759,3 +30759,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings LanguageDialog 默认 locale 回退、KeybindDialog bare modal 仍需继续对齐；
   - 前端所有子菜单仍需继续逐项对齐 Java 原版；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 599. LanguageDialog 默认 locale 回退对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.24%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `LanguageDialog` 的默认语言回退更接近 Java `findClosestLocale()`。
+- Java 对照证据：
+  - `LanguageDialog.findClosestLocale()` 先匹配 exact locale；
+  - exact 失败后按 language 匹配第一个可用 locale；
+  - exact/language 都失败时写回 `en`；
+  - Java 没有 `MINDUSTRY_LOCALE` 这类额外优先规则。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `settings_closest_locale_code("default")` 的无系统候选 fallback 从 `zh_CN` 改为 `en`；
+    - 移除非 Java 的 `MINDUSTRY_LOCALE` 优先读取，只保留常见系统 locale 环境候选用于近似 `Locale.getDefault()`；
+    - 扩展 Settings child dialog 测试，锁住 `pt_PT` exact、`pt_AO` language fallback、`zh-CN.UTF-8` normalize、`xx_YY` fallback `en`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop language -- --nocapture`（当前无独立命中）
+  - `cargo test -p mindustry-desktop settings_child_dialog -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - KeybindDialog rebind bare modal 仍需继续对齐；
+  - 前端所有子菜单仍需继续逐项对齐 Java 原版；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
