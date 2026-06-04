@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 919. Join 连接重连完成同步 LoadingFragmentState
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `JoinDialog.java`、`NetClient.java` 与 Rust desktop runtime。
+- 本轮总体进度更新：约 **94.53%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `connect_to_target(...)` 发起连接时同步 `show_loading_fragment_like_java("@connecting")` 与取消按钮，立即连接失败时隐藏加载层并打开 Join 错误 modal；
+    - `start_join_reconnect(...)` 进入重连时同步 `@reconnecting` 加载层与取消按钮，`poll_join_reconnect(...)` 失败时隐藏加载层，成功时交给 `connect_to_target(...)` 切换到 `@connecting`；
+    - `CancelJoinConnect`、`sync_join_connection_error_dialog_from_net_state(...)` 在取消/错误 modal 接管时隐藏 `LoadingFragmentState`；
+    - `sync_client_loaded_state(...)` 在 world data 已应用且 connect confirm 后切到 Playing，并隐藏 Java-like LoadingFragmentState。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_join_route_connect_error_uses_java_like_error_modal -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_join_route_server_restarting_enters_reconnecting_loadfrag -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_playable_smoke_ready_after_world_stream_and_confirm -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop join_route -- --nocapture`
+- 后续不可漏：
+  - NetClient world-data chunk 的真实进度 tick 后续仍要桥接到 `LoadingFragmentState`，当前闭环先覆盖 show/cancel/error/finish hide；
+  - route overlay 的旧 `loadfrag: @connecting/@reconnecting` 文本仍作为过渡，最终要让 runtime 消费统一 LoadingFragment/LoadFramePlan；
+  - 真实 Java↔Rust 联机 smoke test 仍需持续推进，不能只停留在 UI 状态同步。
+
 ## 918. Mods GitHub 下载进度 tick 回写 LoadingFragmentState
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只继续对照本地 `ModsDialog.java` / `LoadingFragment.java`。
