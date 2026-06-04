@@ -30457,3 +30457,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - add tag 仍是直接显示可用 chip，未做 Java 的 add tag 子弹窗和新建文本/icon tag 入口；
   - 当前 tag 修改还未接真实 schematic `save()`；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 586. JoinDialog 列表滚动与命中对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.11%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 JoinDialog 的服务器列表行为更接近 Java 原版 `ScrollPane(hosts)`。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java` 中服务器列表承载在 `ScrollPane(hosts)`；
+  - 原版 `setScrollingDisabled(true, false)`，即列表垂直滚动而非固定截断；
+  - 社区服务器 resolved host 应逐条作为可连接 entry 展示并参与同一列表滚动。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_route_scroll_offset`；
+    - 新增 Join route scroll clip / scrollbar / max offset / clamp helper；
+    - `DesktopInputTickEvent::Scroll` 接入 `apply_join_route_scroll_delta(...)`；
+    - saved server 与 community resolved host 渲染窗口改为共享同一滚动 offset；
+    - saved server 与 community host hit-test 同步使用滚动后的可见窗口，避免显示和点击错位；
+    - Join 搜索文本变化时重置 scroll offset，避免过滤后跳过首屏结果。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - JoinDialog 仍未完全重排为 Java `Table hosts + ScrollPane` 的像素级结构；
+  - 当前滚动是最小稳定窗口滚动，后续还应继续收口 local/saved/global 分区在同一 hosts table 内的真实布局；
+  - 联机协议、真实服务器兼容和完整可玩仍需继续推进，不能宣告目标完成。
