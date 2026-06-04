@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 923. 游玩入口成功后统一清理菜单状态
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，按用户最新要求暂不优先处理 Mods，继续优先“能玩”和 UI/前端稳定性。
+- 本轮总体进度更新：约 **94.57%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率/输入命中问题收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `close_play_entry_ui_state_like_java()`，把 Campaign 启动、Custom Game/Editor PlaySelected、LoadGame 成功载入后应关闭的菜单 route、PlanetDialog、MapPlayDialog、Editor map info、LoadDialog 子弹窗、SaveDialog 子弹窗等状态统一清理；
+    - `complete_load_game_pending_load()`、`launch_campaign_smoke_world_from_menu()`、地图 `PlaySelected` 分支改走统一 helper，避免进入 Playing 后残留旧弹窗导致 UI 污染或继续拦截输入；
+    - helper 保留 `last_menu_route_shell_action` 点击审计，不再像旧 LoadGame 成功路径那样清掉最后一次 route-shell action；
+    - 补强 Campaign、MapPlay/Playtest、LoadGame 成功载入路径断言，确认进入游玩态后不残留菜单/弹窗/搜索焦点/错误弹窗/重命名删除弹窗/Save 新建覆盖弹窗等状态。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_campaign_launch_button_seeds_playable_smoke_world -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_map_card_dialog_buttons_dispatch_play_and_editor_actions -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_run_load_save_falls_back_to_backup_on_corrupt_primary -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -j 1 -p mindustry-desktop --features opengl-native-runtime`
+- 后续不可漏：
+  - 继续优先 Campaign/LoadGame/CustomGame/MapPlay/Settings 等点进后的真实页面流，而不是 Mods；
+  - 黑屏优先查 `desktop/src/lib.rs` 的空帧 fallback/可见命令过滤与 `desktop/src/main.rs` 的 OpenGL 提交诊断；
+  - 鼠标点击反转优先保证窗口坐标只在 `menu_input_event_from_window_space(...)` 做一次 Y 翻转，后续 `apply_menu_input_events` 与 `*_at_surface_point` 只吃 surface-space；
+  - 低帧率优先确认 vsync 与软件 fpscap 没有重复限速。
+
 ## 922. Settings 动态分类页隐藏 target 诊断文本
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，按用户要求继续优先 UI/可玩性，不推进 Mods。
