@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 949. Editor MapList 类型 footer 对齐 Java
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.89%**，仍未达到完整可玩；本轮收口 Java `MapListDialog` 在 Editor/displayType 模式下的地图卡片类型 footer，避免 mod displayName 被当作 bundle key 解析或被截断。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_list_card_mod_display_name()` / `map_list_card_type_footer_text()`，按 Java 顺序 `custom -> workshop -> mod displayName -> builtin` 生成 footer；
+    - modded footer 使用 `[lightgray]` + 完整 displayName，且不再经过 `localize_bundle_markup_text(...)`，避免 `@custom` 等普通 mod 文本被错误本地化；
+    - Editor 卡片 footer 基色改为 Java `Color.gray` 语义 `[0.5, 0.5, 0.5, 1.0]`；
+    - 更新旧回归断言：`custom=true && workshop=true` 时 footer 显示 `Custom`，对齐 Java 三元表达式；
+    - 新增 `desktop_launcher_editor_map_cards_render_java_map_list_type_footer`，覆盖 custom/workshop/modded/builtin footer、mod displayName plain text 和 CustomGame/displayType=false 不显示类型 footer。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_editor_map_cards_render_java_map_list_type_footer -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop map_list -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+- 后续不可漏：
+  - Campaign P0 转向 `PlanetDialog -> sector stats/resources -> LaunchLoadoutDialog -> launch` 可见闭环；
+  - Settings 继续补 `PlanetChooser` back 优先级回归、DynamicCategory 真实表格页/Data 双层窗结构细节；
+  - SaveDialog 后续应优先补保存后 slot preview PNG 生成，对齐 Java `SaveSlot.savePreview()`。
+
 ## 948. ResearchDialog root 选择弹窗高亮跟随 effective root
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
@@ -40,7 +61,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 后续不可漏：
   - Campaign 仍缺 `lastplanet`、`*-last-sector` settings 写回和真正 `SectorSelectDialog`；
   - SaveDialog 后续应优先补保存后 slot preview PNG 生成，对齐 Java `SaveSlot.savePreview()`；
-  - MapList modded 地图 footer displayName/灰色样式仍需收口。
+  - Campaign/Settings 子菜单仍需继续按 Java 对照收口。
 
 ## 947. ResearchDialog 默认研究树 root 跟随当前星球
 
