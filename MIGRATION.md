@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 910. Desktop 菜单图形热路径跳过被覆盖的 core UI commands
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `MenuRenderer.java`、`MenuFragment.java` 与 Rust 菜单渲染链路。
+- 本轮总体进度更新：约 **94.44%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 问题定位：
+  - `desktop/src/lib.rs::menu_graphics_frame_for_surface(...)` 和 `menu_frame_for_render(...)` 原先先调用 `core::MenuRendererState::render_plan(...)` 构建一份 core `ui_render_commands`；
+  - 随后 `finalize_menu_frame_plan_for_desktop_visuals(...)` 会本地化按钮文本、叠加 hover/pressed，再用 desktop 侧 `MenuUiRenderCommandCache` 重建并覆盖 `plan.ui_render_commands`；
+  - 这导致前端菜单热路径每帧存在一层确定会被丢弃的 UI command 构建/clone 成本。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增内部 `render_plan_with_ui_render_commands(input, build_ui_render_commands)`；
+    - 保留原 `render_plan(...)` 语义不变，继续给纯 core 调用者生成 UI commands；
+    - 新增 `render_plan_without_ui_render_commands(...)`，供外部后处理/本地化路径只取 world/static/ui layout，不预构建马上会被覆盖的 UI commands。
+  - `desktop/src/lib.rs`
+    - `menu_frame_for_render(...)` 与 `menu_graphics_frame_for_surface(...)` 改走 `render_plan_without_ui_render_commands(...)`；
+    - desktop finalize 仍是唯一一次本地化/hover/pressed 后的 UI command 构建点；
+    - 新增 `desktop_launcher_menu_graphics_frame_for_surface_uses_single_ui_command_build`，锁定图形热路径 core UI cache rebuild 为 0、desktop finalized cache rebuild 为 1，且菜单仍输出可见命令。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_menu_graphics_frame_for_surface_uses_single_ui_command_build -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_reuses_finalized_menu_ui_render_command_cache_when_unchanged -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_keeps_finalized_menu_ui_render_command_cache_during_submenu_fade -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_menu_graphics_frame_for_surface_keeps_screen_visible_commands -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-core menu_renderer_state_reuses_ui_render_command_cache_when_ui_state_is_unchanged -- --nocapture`
+- 后续不可漏：
+  - 该闭环只是移除一层确定重复构建，不代表 FPS 已完整修好；下一步继续检查 `menu_background_layer_commands(...)`、route shell 每帧构建、字体/atlas 上传计划和 OpenGL draw batching；
+  - 继续补具体子菜单/对话框还原，不能只停在主菜单 shell；
+  - 完整目标仍是整体化、可游玩、可联机兼容的 Rust 版 MDT/Mindustry，不能把性能 helper 或 UI plan 变成孤立模块。
+
 ## 909. Database block tag 补全与 ContentInfo hideDetails 锁定
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `DatabaseDialog.java`、`ContentInfoDialog.java` 与 `Block.java`。

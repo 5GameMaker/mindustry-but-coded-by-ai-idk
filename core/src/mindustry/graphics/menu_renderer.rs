@@ -2111,7 +2111,11 @@ impl MenuRendererState {
             .unwrap_or_default()
     }
 
-    pub fn render_plan(&mut self, input: MenuFrameInput) -> MenuFramePlan {
+    fn render_plan_with_ui_render_commands(
+        &mut self,
+        input: MenuFrameInput,
+        build_ui_render_commands: bool,
+    ) -> MenuFramePlan {
         self.time += input.delta;
         self.tick_submenu_alpha(input.delta);
 
@@ -2158,7 +2162,11 @@ impl MenuRendererState {
             scaling,
         );
         let ui = self.cached_ui_plan(input);
-        let ui_render_commands = self.cached_ui_render_commands(&ui);
+        let ui_render_commands = if build_ui_render_commands {
+            self.cached_ui_render_commands(&ui)
+        } else {
+            Vec::new()
+        };
 
         MenuFramePlan {
             camera_x,
@@ -2173,6 +2181,17 @@ impl MenuRendererState {
             ui,
             ui_render_commands,
         }
+    }
+
+    pub fn render_plan(&mut self, input: MenuFrameInput) -> MenuFramePlan {
+        self.render_plan_with_ui_render_commands(input, true)
+    }
+
+    pub fn render_plan_without_ui_render_commands(
+        &mut self,
+        input: MenuFrameInput,
+    ) -> MenuFramePlan {
+        self.render_plan_with_ui_render_commands(input, false)
     }
 
     pub fn flyers(&self) -> Vec<FlyerPlan> {
