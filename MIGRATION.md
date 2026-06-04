@@ -17,6 +17,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 874. Mods detail 状态区对齐 getStateDetails
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.06%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 Mods detail 专用状态行 helper，详情页不再直接复用列表卡片的 `getStateText` 风格文本；
+    - 详情状态区改为 Java `ModsDialog.showMod(...)` 语义：只有 `getStateDetails(mod)` 有内容时显示 `@mod.disabled` header + 详情；
+    - hidden mod 的 `[gray]Multiplayer Compatible` 保留在列表卡片，不再进入 detail 正文；
+    - 扩展状态测试，覆盖 disabled+missing dependencies、errored content detail、hidden detail 三类差异，并将 detail 断言收窄到 modal 层，避免背景列表文本干扰。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_route_renders_state_and_reload_required_like_java_dialog -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop mods -- --nocapture`
+- 后续不可漏：
+  - 继续对齐 Mods browser/selection/release 详情图标与远程 `Tex.nomap` fallback；当前本地 Mods route/detail 已更接近 Java `ModsDialog`。
+
 ## 873. Mods detail mobile reinstall 按钮分行
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
