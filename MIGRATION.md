@@ -30693,3 +30693,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings 子弹窗仍需继续逐项像素级对齐 Java 独立 dialog 栈；
   - 前端所有子菜单仍需继续逐项审查；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 596. HostDialog 信息弹窗遮罩对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.21%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `HostDialog` 的 `@host.info` 更接近 Java `ui.showInfo("@host.info")` 的独立 modal 语义。
+- Java 对照证据：
+  - `HostDialog.shown()` 非 Steam 首次打开时调用 `ui.showInfo("@host.info")`；
+  - `?` 按钮同样调用 `ui.showInfo("@host.info")`；
+  - `showInfo` 是独立 modal，打开后背景 Host 面板应被遮罩并阻断点击穿透。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_host_route_page(...)` 在 `host_info_dialog_open` 时先绘制覆盖 Host panel 的半透明遮罩，再绘制信息框；
+    - 扩展 `desktop_launcher_paused_world_overlay_opens_host_dialog_route`，断言 `@host.info` 打开时存在覆盖 Host panel 的 modal backdrop。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop host_route -- --nocapture`
+  - `cargo test -p mindustry-desktop paused_world_overlay_opens_host_dialog_route -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - HostDialog/JoinDialog 的其他细节仍需继续逐项压到 Java dialog/ScrollPane 行为；
+  - Settings、Load/Save、Campaign/MapPlay 等前端子菜单仍需继续逐项审查和修复；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
