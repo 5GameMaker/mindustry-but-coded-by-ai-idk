@@ -19,6 +19,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 920. 菜单 route shell chrome 稳定帧缓存
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，继续收口前端低 FPS 热路径。
+- 本轮总体进度更新：约 **94.54%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopActiveMenuRouteShellCacheKey` / `DesktopActiveMenuRouteShellCache`，按 route、viewport、localized title 缓存 `BaseDialog.shell_render_commands(...)` 产出的 route shell chrome；
+    - `push_active_menu_route_shell(...)` 继续保留动态 body、按钮、子弹窗和 route-specific page 实时渲染，只复用稳定外壳，避免把动态 UI 状态冻住；
+    - 新增 `desktop_launcher_menu_graphics_frame_for_surface_reuses_active_route_shell_cache`，锁定同一 route+viewport 的 time-only frame 不重建，viewport 改变时重建。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_menu_graphics_frame_for_surface_reuses_active_route_shell_cache -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_menu_graphics_frame_for_surface_uses_single_ui_command_build -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop menu_graphics_frame_for_surface -- --nocapture`
+- 后续不可漏：
+  - 继续把缓存扩展到 route shell 的局部稳定文本/本地化结果，但必须先做准确 key，不能让 Settings/Join/Mods 等动态状态陈旧；
+  - 菜单背景动画层仍可继续拆静态几何缓存，但不能破坏原版 MenuRenderer 的动态表现；
+  - 前端最终目标仍是原版 UI/子菜单还原，而不是只堆性能 cache。
+
 ## 919. Join 连接重连完成同步 LoadingFragmentState
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `JoinDialog.java`、`NetClient.java` 与 Rust desktop runtime。
