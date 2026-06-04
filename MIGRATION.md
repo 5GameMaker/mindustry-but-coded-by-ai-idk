@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；资源层优先复用 `D:/MDT/mindustry-upstream-v157.4` 里可直接沿用的原项目资源（如 assets、布局、文案、图标、字体），避免重复造轮子。
+- 当前短期优先级：暂停 Mods，优先可玩性与 UI；资源直接复用上游，黑/白屏修复优先；资源层优先复用 `D:/MDT/mindustry-upstream-v157.4` 里可直接沿用的原项目资源（如 assets、布局、文案、图标、字体），避免重复造轮子。
 - 当前 fast synthetic background 只是过渡方案，最终必须接入 cached/batched 的原版 `MenuRenderer`。
 - 本任务是将 Java Mindustry/MDT 完整重写为整体化、可游玩的 Rust 版，而不是独立模块；helper/plan 必须继续接入 runtime/render/backend 主链路。
 - 乱码优先 UTF-8：遇到乱码时先按 UTF-8 读取/保存，确认不是 UTF-8 后再尝试其他编码。
@@ -19,9 +19,37 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 940. CustomGame 真实地图 tile load 与 resize stale-click 修复
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮暂停 Mods，优先可玩性与 UI。
+- 本轮总体进度更新：约 **94.80%**，仍未达到完整可玩；继续优先 Campaign/CustomGame/Editor 真开局、黑屏/低帧率/输入命中问题收口、原版 UI/所有子菜单还原与真实资源复用。
+- 本轮主改动：
+  - `core/src/mindustry/io/save.rs`
+    - 新增 `read_deflated_map_snapshot(...)`，按 Java MapIO 语义读取 deflated `.msav` 地图，先读 meta 取得 width/height，再扫描后续 region chunks，兼容 modern `read_chunk_map` 与 legacy short-chunk `read_legacy_short_chunk_map`；
+    - 新增 `deflated_map_snapshot_reads_map_only_stream_without_save_tail`，锁定不要求完整 save tail 的地图读取。
+  - `core/src/mindustry/io/mod.rs`
+    - 导出 `read_deflated_map_snapshot`。
+  - `desktop/src/lib.rs`
+    - 新增 `local_map_snapshot_path_candidates(...)` / `read_local_map_snapshot_from_descriptor(...)` / `load_runtime_map_from_descriptor(...)`，从 `MapDescriptor.file` 定位 `core/assets/maps` 或上游资源中的真实 `.msav`；
+    - `DesktopMapCardActionKind::PlaySelected` 优先调用 `runtime.load_network_map_with_buildings(...)` 载入真实 tile/world/building snapshot，找不到或解析失败才回退原 smoke world；
+    - 新增 `desktop_launcher_play_selected_loads_real_asset_map_snapshot_when_available`，验证 `Archipelago` 真实资产进入后 `last_runtime_map_load_report.tiles > 0` 且 world 尺寸匹配地图；
+    - 新增 `invalidate_menu_pointer_state_after_surface_change()`，在 resize/scale-factor 改变时清空旧 cursor/pressed/drag 状态，避免旧坐标导致点击上下错位/点偏；
+    - 新增 `desktop_frame_loop_resize_clears_stale_menu_cursor_before_mouse_click`，锁定 resize 后未收到新 `CursorMoved` 时不会沿用旧 Settings 按钮坐标触发菜单。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-core deflated_map_snapshot_reads_map_only_stream_without_save_tail -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_play_selected_loads_real_asset_map_snapshot_when_available -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_frame_loop_resize_clears_stale_menu_cursor_before_mouse_click -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop map_play -- --nocapture`
+- 后续不可漏：
+  - Campaign 仍然没有真实 sector generator/loadout/rules 全链路；
+  - EditorInGame 当前仍优先走尺寸正确的 placeholder，需要继续接真实 editor map tile load；
+  - native OpenGL 可见帧/低 FPS 仍需继续排查，特别是 Screen resolve 诊断和 vsync/fps-cap 双重节流风险；
+  - 暂不处理 Mods，除非阻塞能玩或 UI 主线。
+
 ## 939. Editor shift-playtest 尺寸回归锁定
 
-- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续优先前端/UI/可玩性，不推进 Mods。
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮暂停 Mods，优先可玩性与 UI。
 - 本轮总体进度更新：约 **94.73%**，仍未达到完整可玩；继续优先 Campaign/CustomGame/Editor 真开局、真实 map/world tile load、黑屏/低帧率/输入命中问题收口、原版 UI/所有子菜单还原与真实资源复用。
 - 本轮主改动：
   - `desktop/src/lib.rs`

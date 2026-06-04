@@ -15,8 +15,8 @@ use crate::mindustry::{
         write_i64, write_java_utf, write_u16,
     },
     io::versions::{
-        read_chunk_map, read_legacy_team_blocks, write_chunk_map, write_legacy_team_blocks,
-        LegacyShortChunkMap, LegacyTeamBlocks,
+        read_chunk_map, read_legacy_short_chunk_map, read_legacy_team_blocks, write_chunk_map,
+        write_legacy_team_blocks, LegacyShortChunkMap, LegacyTeamBlocks,
     },
 };
 
@@ -918,6 +918,57 @@ pub fn read_deflated_map_info<R: Read>(read: R, custom: bool) -> io::Result<Save
     Ok(SaveMapInfo::from_meta(version, custom, &meta))
 }
 
+pub fn read_deflated_map_snapshot<R: Read>(read: R) -> io::Result<LegacyShortChunkMap> {
+    let mut decoder = ZlibDecoder::new(read);
+    let _version = read_header(&mut decoder)?;
+    let meta = read_meta_region(&mut decoder)?;
+    let expected_width = parse_i32(&meta.tags, "width");
+    let expected_height = parse_i32(&meta.tags, "height");
+    let mut fallback = None;
+
+    while let Some(payload) = read_optional_chunk(&mut decoder)? {
+        for map in read_map_payload_candidates(payload.as_slice()) {
+            if expected_width > 0
+                && expected_height > 0
+                && map.width as i32 == expected_width
+                && map.height as i32 == expected_height
+            {
+                return Ok(map);
+            }
+            if fallback.is_none() {
+                fallback = Some(map);
+            }
+        }
+    }
+
+    fallback.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "deflated map stream did not contain a readable map region",
+        )
+    })
+}
+
+fn read_map_payload_candidates(payload: &[u8]) -> Vec<LegacyShortChunkMap> {
+    let mut maps = Vec::new();
+
+    let mut modern = payload;
+    if let Ok(map) = read_chunk_map(&mut modern) {
+        if modern.is_empty() {
+            maps.push(map);
+        }
+    }
+
+    let mut legacy = payload;
+    if let Ok(map) = read_legacy_short_chunk_map(&mut legacy) {
+        if legacy.is_empty() {
+            maps.push(map);
+        }
+    }
+
+    maps
+}
+
 /// Reads the Java save metadata prefix from an already-inflated stream.
 ///
 /// This mirrors `SaveIO.getMeta(DataInputStream)`: it reads `MSAV`, the save
@@ -1003,6 +1054,25 @@ pub fn read_chunk<R: Read>(read: &mut R) -> io::Result<Vec<u8>> {
     let mut payload = vec![0; len as usize];
     read.read_exact(&mut payload)?;
     Ok(payload)
+}
+
+fn read_optional_chunk<R: Read>(read: &mut R) -> io::Result<Option<Vec<u8>>> {
+    let mut len_bytes = [0; 4];
+    match read.read_exact(&mut len_bytes) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(error) => return Err(error),
+    }
+    let len = i32::from_be_bytes(len_bytes);
+    if len < 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "negative chunk length",
+        ));
+    }
+    let mut payload = vec![0; len as usize];
+    read.read_exact(&mut payload)?;
+    Ok(Some(payload))
 }
 
 pub fn write_region<W, F>(write: &mut W, f: F) -> io::Result<()>
@@ -1931,6 +2001,7 @@ fn _keep_imports_used_for_future_save_versions(_: fn(&mut &[u8]) -> io::Result<i
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mindustry::io::versions::{LegacyMapBlockRecord, LegacyMapFloorRecord};
 
     #[test]
     fn save_header_roundtrips_msav_and_version() {
@@ -1994,6 +2065,61 @@ mod tests {
         assert_eq!(info.version, LATEST_SAVE_VERSION);
         assert_eq!(info.build, 1581);
         assert_eq!(info.tags.get("mapname").map(String::as_str), Some("io-map"));
+    }
+
+    #[test]
+    fn deflated_map_snapshot_reads_map_only_stream_without_save_tail() {
+        let map = LegacyShortChunkMap {
+            width: 2,
+            height: 2,
+            floors: vec![LegacyMapFloorRecord {
+                index: 0,
+                floor_id: 1,
+                ore_id: 0,
+                consecutives: 3,
+            }],
+            blocks: vec![LegacyMapBlockRecord {
+                index: 0,
+                block_id: 0,
+                packed_flags: 0,
+                has_entity: false,
+                has_old_data: false,
+                has_new_data: false,
+                is_center: true,
+                new_data: None,
+                old_data: None,
+                building: None,
+                consecutives: 3,
+            }],
+        };
+        let mut tags = BTreeMap::new();
+        tags.insert("width".into(), "2".into());
+        tags.insert("height".into(), "2".into());
+        tags.insert("build".into(), "1581".into());
+
+        let mut deflated = Vec::new();
+        {
+            let mut encoder = ZlibEncoder::new(&mut deflated, Compression::default());
+            write_header(&mut encoder, LATEST_SAVE_VERSION).unwrap();
+            write_meta_region(&mut encoder, &tags).unwrap();
+            write_region(&mut encoder, |payload| {
+                write_content_header_snapshot(payload, &ContentHeaderSnapshot::default())
+            })
+            .unwrap();
+            write_region(&mut encoder, |payload| {
+                write_content_patches(payload, &ContentPatchSet::default())
+            })
+            .unwrap();
+            write_region(&mut encoder, |payload| write_chunk_map(payload, &map)).unwrap();
+            encoder.finish().unwrap();
+        }
+
+        let decoded = read_deflated_map_snapshot(deflated.as_slice()).unwrap();
+        assert_eq!(decoded.width, 2);
+        assert_eq!(decoded.height, 2);
+        assert_eq!(decoded.tile_count(), 4);
+        assert_eq!(decoded.floors, map.floors);
+        assert_eq!(decoded.blocks, map.blocks);
     }
 
     #[test]
