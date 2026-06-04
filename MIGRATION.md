@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 905. Binding.fullscreen/F11 接入输入到窗口同步链
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `Binding.java` / `Control.java`。
+- 本轮总体进度更新：约 **94.39%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `Binding.fullscreen` 默认键位是 `F11`；
+  - `Control.update()` 检测 `Binding.fullscreen` 后切换 `graphics.setFullscreen(!full)` 并回写 `settings.put("fullscreen", !full)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - native winit `KeyboardInput` 映射为 `DesktopInputTickEvent::Key/Text`，保证真实客户端键盘事件进入 Rust frame loop；
+    - `F11/fullscreen` 作为全局 keybind 在 `apply_menu_input_events(...)` 早退前处理；
+    - `toggle_fullscreen_binding_like_java(...)` 复用 `set_setting_override("graphics", "fullscreen", ...)`，同时更新 settings override 与 `graphics_fullscreen_enabled`；
+    - KeybindDialog 捕获中不触发 fullscreen，避免重绑定时误切窗口。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop --lib desktop_launcher_fullscreen_binding_toggles_setting_like_java_control_update -- --nocapture`
+- 后续不可漏：
+  - 继续把其他 `Binding` 中直接影响前端/渲染的热键接入真实 action；
+  - 后续若引入完整 core input action 层，`fullscreen` 应从当前桌面最小链路收敛进统一 `DesktopInputAction`。
+
 ## 904. Settings 图形即时副作用接入 native/bloom/atlas
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `SettingsMenuDialog.java` / `Renderer.java` / `Control.java` 相关行为。
