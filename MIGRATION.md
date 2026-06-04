@@ -30854,3 +30854,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - EditorMapInfo 右侧信息区 ScrollPane 级别细节仍需继续审查；
   - 前端所有子菜单仍需继续逐项对齐 Java 原版；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 603. JoinDialog saved 列表搜索解耦
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.28%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `JoinDialog` 的 community search 不再错误影响 saved server 区域。
+- Java 对照证据：
+  - Java search field 位于 community 区块；
+  - `serverSearch` 只在 `refreshCommunity()` 的 group/host 过滤中使用；
+  - local / saved servers 不受 community search 文本过滤。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - saved server 滚动范围不再按 `join_search` 过滤；
+    - saved server 渲染窗口不再按 `join_search` 过滤；
+    - saved server hit-test 不再按 `join_search` 过滤；
+    - route lines 不再输出 saved `filter: @none.found` 诊断；
+    - 扩展 `desktop_launcher_join_route_scroll_hit_testing_matches_saved_server_rendering`，验证 community-only 查询不会隐藏 saved server。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route_scroll_hit_testing -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route_search_strips -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - JoinDialog community 搜索仍需进一步收敛到 Java 的“刷新时提交查询”而不是实时过滤；
+  - JoinDialog community group header/host card 结构仍需继续对齐；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
