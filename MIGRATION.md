@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 890. Mods GitHub 导入下载态 loadfrag 与取消闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
+- 本轮总体进度更新：约 **94.22%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `ModsDialog.githubImportMod(...)` 开始时设置 `modImportProgress = 0f`、`cancelledImport = false`，并显示 `ui.loadfrag.show("@downloading")`；
+  - loadfrag 的按钮会 `ui.loadfrag.hide()` 并设置 `cancelledImport = true`；
+  - 取消后各层回调先检查 `cancelledImport`，取消不进入失败弹窗。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopModsImportGithubDownloadState`，在手动 GitHub 导入和浏览器 Add/Reinstall/InstallRelease 进入 GitHub import 时记录下载中状态；
+    - 新增 `CancelModsImportGithubDownload` 路由动作与 `cancel_mods_import_github_download_like_java(...)`，取消只隐藏下载态并记录 cancelled，不写失败 guard；
+    - 抽出 `push_menu_loadfrag_overlay(...)`，Join 连接态和 Mods GitHub 下载态复用同一 Java-like loadfrag 遮罩、旋转图标和 `@cancel` 按钮；
+    - Mods route hit-test / 输入隔离在下载态时阻断底层按钮，只允许点击 loadfrag cancel 或 Back/Escape 取消；
+    - Mods shell lines 在下载态输出 `loadfrag: @downloading`、下载 repo/progress/release 与 `button: @cancel`。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_import_github -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_mods_route_import_dialog_renders_and_records_file_request -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_browser -- --nocapture`
+- 后续不可漏：
+  - 当前是下载态/取消态前端闭环；下一步继续把 `JavaReleaseJar / BranchZip` resolved kind 接到真实 HTTP 下载、GitHub release asset/zipball 解析、临时文件写入、`complete_mods_import_file_selection`/`mods.importMod` 等价导入和 `importFail/modError` 错误弹窗。
+
 ## 889. Mods 手动 GitHub 导入接入 Java 仓库类型判定
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
