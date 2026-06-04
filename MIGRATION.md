@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 935. MapPlaySelected 写入选中地图状态
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续优先前端/UI/可玩性，不推进 Mods。
+- 本轮总体进度更新：约 **94.69%**，仍未达到完整可玩；继续优先 Campaign/CustomGame 真开局、黑屏/低帧率/输入命中问题收口、原版 UI/所有子菜单还原与真实资源复用。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMapCardActionKind::PlaySelected` 在 seed playable world 后，把 `runtime.state.map` 设置为 `map_list_cards[action.index]` 选中的真实 `MapDescriptor`；
+    - 保持既有 rules 选择、playtesting_map、network offline、UI 收口路径不变；
+    - 扩展 `desktop_launcher_map_card_dialog_buttons_dispatch_play_and_editor_actions`，断言普通 CustomGame 进入后 `game_state.map/runtime.state.map == Battle`，Editor playtest 进入后 `map == Playtest Me`，避免继续停留在 `rust-playable-smoke` 元数据。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_map_card_dialog_buttons_dispatch_play_and_editor_actions -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -j 1 -p mindustry-desktop --features opengl-native-runtime`
+- 后续不可漏：
+  - 这只是从 smoke-world 过渡到“选中 map 元数据 + rules”真实入口的一步，后续仍必须接入真正 map tiles/world load；
+  - Campaign 也需要类似从 smoke-world 过渡到真实 sector world/loadout/rules；
+  - 暂不处理 Mods，除非阻塞能玩或 UI 主线。
+
 ## 934. Load/Save 列表滚轮焦点对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续优先前端/UI/可玩性，不推进 Mods。
