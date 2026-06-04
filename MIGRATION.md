@@ -19,6 +19,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 962. JoinDialog 保存服务器动作按钮顺序
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.02%**，仍未达到完整可玩；本轮对齐 Java `JoinDialog.setupRemote()` 里保存服务器按钮从左到右 `Icon.upOpen -> Icon.downOpen -> Icon.refresh -> Icon.pencil -> Icon.trash` 的视觉顺序。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `join_route_server_card_action_button_rect()` 从右向左排布改为在总按钮宽度内按 `button_index` 从左向右排布；
+    - action 映射保持不变：0=上移、1=下移、2=刷新、3=编辑、4=删除；
+    - 扩展 `desktop_launcher_join_route_renders_server_browser_skeleton`，显式断言 `upOpen/downOpen/refresh/pencil/trash` 的 x 坐标从左到右递增，并保留每个按钮命中 action 的断言。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - JoinDialog 仍需处理可滚动服务器列表、社区 host per-entry 展示、搜索刷新语义与 reconnect 直到取消；
+  - LoadDialog 搜索匹配语义和底部按钮布局仍需继续对齐；
+  - 当前最高优先级仍是 UI 子菜单与 Java 原版对齐。
+
 ## 961. LoadDialog shown/setup 状态重置
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
