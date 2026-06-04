@@ -30579,3 +30579,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - MapPlayDialog / CustomRulesDialog 嵌套关闭栈和 mobile 横屏 preview 仍需继续审查；
   - Editor MapInfo 与 MapPlay 子弹窗仍需逐项像素级对齐；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 591. LoadDialog 可见计数收口
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.16%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `LoadDialog` 可见元素不要出现 Java 原版没有的 Rust-only 状态文本。
+- Java 对照证据：
+  - `LoadDialog` 搜索栏旁只保留模式过滤按钮；
+  - Java 不在模式过滤按钮旁渲染 `filtered / total` 计数文本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 删除 `push_load_game_route_page(...)` 中可见的 `filtered_indices.len() / load_game_slots.len()` 文本；
+    - 删除不再使用的 `load_game_mode_filter_summary_point(...)`；
+    - 更新 LoadDialog 模式过滤测试，锁住“不显示 Rust-only filtered/total 计数”的 Java 行为。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop load_game -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - LoadDialog 底部按钮层级与 BaseDialog 像素级位置仍需继续对齐；
+  - JoinDialog 社区 host 行、搜索触发语义、重连行为仍需继续细化；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
