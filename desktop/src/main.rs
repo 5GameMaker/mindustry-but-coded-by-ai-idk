@@ -821,12 +821,7 @@ fn desktop_native_opengl_prefers_legacy_context() -> bool {
             return enabled;
         }
     }
-    if let Ok(value) = std::env::var("MINDUSTRY_DESKTOP_GPU_VENDOR") {
-        if value.to_ascii_lowercase().contains("intel") {
-            return true;
-        }
-    }
-    cfg!(target_os = "windows")
+    false
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -3746,7 +3741,7 @@ mod tests {
                 ),
                 DesktopNativeOpenGlContextCandidate::generic()
             ],
-            "Java Windows/Intel compatibility branch only tries 2.x compatibility contexts"
+            "explicit legacy compatibility branch only tries 2.x compatibility contexts"
         );
     }
 

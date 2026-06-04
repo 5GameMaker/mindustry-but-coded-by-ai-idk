@@ -17,6 +17,21 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 883. Native OpenGL 默认现代上下文优先
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.15%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - `desktop_native_opengl_prefers_legacy_context()` 不再因为 Windows 或 `MINDUSTRY_DESKTOP_GPU_VENDOR=intel` 自动优先 2.x compatibility；
+    - 默认候选继续走现代 OpenGL 高版本 → 3.3/3.2/3.1 → 2.x fallback 的顺序，降低内置 `#version 150` shader 在 legacy context 下黑屏的概率；
+    - legacy/compatibility 分支仍可通过显式 `MINDUSTRY_DESKTOP_LEGACY_GL=true` 或 `-compatibilityGl` 使用。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop native_opengl_context_candidates -- --nocapture`
+  - `git diff --check`
+- 后续不可漏：
+  - 若用户机器仍黑屏，下一步优先加 shader compile/link 失败可见诊断、启动日志中记录实际 context label，并继续检查 DPI 坐标统一转换。
+
 ## 882. Sprite texture upload plan 延迟刷新
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
