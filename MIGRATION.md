@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 972. SchematicsDialog 卡片 SchematicImage 真实预览
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.34%**，仍未达到完整可玩；本轮继续对齐 Java `SchematicsDialog.java` 卡片区 `b.stack(new SchematicImage(s).setScaling(Scaling.fit), ...)`：列表卡片有真实 schematic tile 时优先绘制 block sprite 预览，不再在预览区域显示 Rust-only `source:`、tags、description 或 `WxH | blocks` 摘要文本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_schematic_preview_tiles()` 增加 layer base 参数，详情弹窗和卡片可共用同一真实 tile → block full icon sprite 渲染链路；
+    - `push_schematics_card()` 在 `schematic-background` 上优先绘制真实 block sprite；只有缺少可渲染 tile 时才保留旧摘要 fallback；
+    - 卡片预览的 sprite 层级降到卡片内部，避免打开 modal 时底层卡片 sprite 漏到弹窗层上方；
+    - 新增 `desktop_launcher_schematics_card_preview_renders_schematic_image_tiles_like_java`，断言卡片预览区域出现 `router` sprite，且不出现 `source:` / `WxH | blocks` 诊断摘要。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop schematics_card_preview -- --nocapture`
+  - `cargo test -p mindustry-desktop schematics_route -- --nocapture`
+  - `cargo test -p mindustry-desktop schematics_info_dialog -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - Schematics 仍需继续把预览提升到 Java `Schematics.getPreview(...)` 同款离屏/缓存纹理；
+  - 继续细化导入、导出、编辑、删除、workshop、tag 过滤/编辑等子菜单完整 UI；
+  - 主菜单与 Settings 行为顺序已基本对齐，后续应继续处理可见差异而不是测试诊断数据。
+
 ## 971. SchematicsDialog 详情预览 block sprite 接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
