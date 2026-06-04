@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 916. LoadGame/SaveGame pending 接入 LoadingFragmentState 进度
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只继续接入本地 `LoadingFragment.java` / `UI.loadAnd(...)` 对应加载前端链路。
+- 本轮总体进度更新：约 **94.50%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopLoadGamePendingLoad` / `DesktopSaveGamePendingSave` 新增基于 `frames_remaining` 的进度计算；
+    - `start_load_game_pending_load(...)` / `tick_load_game_pending_load(...)` / `complete_load_game_pending_load(...)` / `fail_load_game_pending_load(...)` 同步 `loading_fragment_state`；
+    - `start_save_game_pending_save(...)` / `tick_save_game_pending_save(...)` / `complete_save_game_pending_save(...)` 同步 `loading_fragment_state`；
+    - 新增 `desktop_launcher_pending_load_and_save_sync_loading_fragment_state`，锁定 pending load/save 能产出 desktop load frame 与正确进度。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_pending_load_and_save_sync_loading_fragment_state -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_loading_fragment_state_builds_java_like_load_frames -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_save_dialog -- --nocapture`
+- 后续不可漏：
+  - Join 连接中/reconnect、Mods GitHub 下载等 loadfrag 仍需继续接入同一个 `LoadingFragmentState`；
+  - 现有 route overlay 视觉仍保留，后续要逐步统一到 Java-like LoadingFragment/LoadFramePlan 消费链；
+  - 继续优先前端完整还原，不能把 LoadingFragmentState 停成独立状态器。
+
 ## 915. 菜单叶子项点击按 Java fadeOutMenu 渐隐子菜单
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `MenuFragment.java` 与 Rust 菜单状态机。
