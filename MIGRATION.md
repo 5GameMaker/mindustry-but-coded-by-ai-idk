@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 899. ContentInfoDialog blockInfo/F1 关闭语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ContentInfoDialog.java` / `Binding.java`。
+- 本轮总体进度更新：约 **94.31%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `ContentInfoDialog` 监听 `Binding.blockInfo`；
+  - `Binding.blockInfo` 默认键是 `F1`；
+  - 按下后关闭当前 ContentInfoDialog。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `is_database_block_info_key(...)`；
+    - Database 详情弹窗打开时，`F1/block_info/blockInfo` 会分发 `CloseDatabaseContent`；
+    - 扩展 Database 前端测试，验证 F1 关闭详情页。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell -- --nocapture`
+- 后续不可漏：
+  - 后续如果 settings/keybind override 已完整接入，需要让该关闭逻辑读取用户自定义 `block_info` 绑定，而不是只认默认 F1。
+
 ## 898. ContentInfoDialog credit 字段与 createdby 行
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ContentInfoDialog.java`。
