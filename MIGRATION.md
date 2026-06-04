@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 909. Database block tag 补全与 ContentInfo hideDetails 锁定
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `DatabaseDialog.java`、`ContentInfoDialog.java` 与 `Block.java`。
+- 本轮总体进度更新：约 **94.43%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `Block.postInit()` 在 `databaseTag` 为空时使用 `category.name()`，且 `Block.category` 默认是 `distribution`；
+  - `DatabaseDialog` 按 `databaseCategory` / `databaseTag` 分组，非 `default` tag 需要保留 tag 标题；
+  - `ContentInfoDialog` 在 `content.details != null` 时，如果内容未解锁且 `hideDetails=true`，显示 `Iconc.lock + unlock.incampaign`，不能泄露真实 details。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `database_block_tag_key(...)` 补齐 payload/sandbox/light/legacy/基础块等 Java category 映射，未知基础块按 Java 默认落到 `distribution`；
+    - Database 回归覆盖 `payload-conveyor/payload-source/power-source/item-source/liquid-source/illuminator/legacy-mech-pad/air` 的 Java category-derived tag；
+    - 新增 `database_content_hide_details(...)` 与 `database_content_resolved_details_like_java(...)`，ContentInfo 绘制与 `@viewfields` 布局都共用 resolved details；
+    - 当 `hideDetails=true` 且内容锁定时，详情页显示 `unlock.incampaign` 锁定提示，不显示真实 details。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell -- --nocapture`
+- 后续不可漏：
+  - 更理想的长期收敛是给 Rust `Block` 元数据真正补 `category/databaseTag` 字段，并在 content loader/finalize 阶段像 Java `postInit()` 一样派生，而不是长期依赖 UI 层 `BlockDef` 映射；
+  - `ContentInfoDialog` 仍需继续补完整 `displayExtra(table)` 扩展点与 `Stats.useCategories/StatCat` 分类标题，当前只完成最小可见锁定分支。
+
 ## 908. About contributors 资源加载与标准特效帧复用
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `AboutDialog.java` 与当前 Rust render/frame 主链。
