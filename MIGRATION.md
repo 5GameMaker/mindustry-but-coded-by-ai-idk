@@ -19,6 +19,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 924. Playing 世界帧可见性回归保护
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，继续优先 UI/前端可玩性与黑屏防护，不推进 Mods。
+- 本轮总体进度更新：约 **94.58%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率/输入命中问题收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 补强 `desktop_launcher_world_graphics_frame_is_not_affected_by_menu_or_load_renderer_state`，在原有“菜单/Loading 状态不污染世界帧”的基础上，额外断言 baseline 与 polluted 的 Playing/world render frame 至少包含一个屏幕可见 pass；
+    - 该断言直接锁住“已进入 Playing 但提交全不可见帧导致黑屏”的前端回归风险。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_world_graphics_frame_is_not_affected_by_menu_or_load_renderer_state -- --nocapture`
+- 后续不可漏：
+  - 继续扩展到 native OpenGL submit 层的黑屏诊断/可见 fallback 覆盖；
+  - 继续确认进入 Playing 后真实地图/单位/方块/地板/最小 UI 都能稳定产生命令，而不是只依赖 fallback；
+  - 鼠标命中继续保持窗口坐标只在 `menu_input_event_from_window_space(...)` 翻一次 Y。
+
 ## 923. 游玩入口成功后统一清理菜单状态
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，按用户最新要求暂不优先处理 Mods，继续优先“能玩”和 UI/前端稳定性。
