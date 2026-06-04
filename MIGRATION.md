@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 913. LoadingFragment 状态器与 desktop 可见加载帧回归
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `LoadingFragment.java`、`UI.java`、`LoadRenderer.java` 与 Rust 加载渲染链路。
+- 本轮总体进度更新：约 **94.47%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `LoadingFragment.show(...)` 显示全屏加载层时会隐藏进度条与取消按钮，并重置取消回调；
+  - `setProgress(...)` 后进度条才可见，`setButton(...)` 后取消按钮才可见；
+  - `hide()` 会禁用交互并隐藏加载层；
+  - `UI.loadAnd(...)` 的上层语义是加载任务执行期间提供可见、可阻塞、可退出的加载前端。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/load_renderer.rs`
+    - `LoadFrameInput` 新增 `progress_visible`，允许 Java-like `show()` 初始状态不画进度条；
+    - 新增 `LoadingFragmentState`，提供 `show/show_text/hide/set_progress/snap_progress/set_button/set_text/fail/complete/frame_input`，把命令式 LoadingFragment 生命周期映射到数据驱动 `LoadFrameInput`；
+    - `LoadRendererState::build_plan(...)` 仅在 `progress_visible=true` 时输出 `ProgressBar`，保留默认 `LoadFrameInput::new(...)` 继续显示进度条。
+  - `desktop/src/lib.rs`
+    - 加强 `desktop_launcher_load_frame_for_render_uses_load_payload_without_world_bundle`：确认 desktop load payload 能转为 `Custom("load")` render pass，并包含清屏、`@loading` 文本与全屏 LoadingFragment 遮罩，防止“有 payload 但上屏黑”。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-core loading_fragment_state -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-core load_renderer -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_load_frame_for_render_uses_load_payload_without_world_bundle -- --nocapture`
+- 后续不可漏：
+  - 该闭环补的是加载页生命周期输入和 desktop 可见帧回归；真正运行窗口消费 `DesktopFramePayload::Load` 的分支后续仍要继续审查并接实；
+  - 下一步继续补 `UI.java` 总控、`MenuFragment` 交互控制、设置/数据库/Mods 等子菜单完整行为，不能只停在 loading plan；
+  - `LoadingFragmentState` 必须继续接入真实加载任务/runtime，而不是长期停留为测试可用的孤立状态器。
+
 ## 912. Font glyph 上传计划加入前端帧缓存
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只沿用本地前端渲染链路和字体/图标资源表。

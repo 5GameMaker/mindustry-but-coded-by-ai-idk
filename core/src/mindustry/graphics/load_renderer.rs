@@ -255,13 +255,15 @@ impl LoadRendererState {
             overlay_color: [0.0, 0.0, 0.0, 0.80],
         });
 
-        commands.push(LoadRenderCommand::ProgressBar {
-            rect: LoadRect::new(bar_x, bar_y, bar_width, bar_height),
-            progress,
-            label: input.stage.label().to_string(),
-            fill_color: self.theme.accent_rgba,
-            track_color: self.theme.accent_alt_rgba,
-        });
+        if input.progress_visible {
+            commands.push(LoadRenderCommand::ProgressBar {
+                rect: LoadRect::new(bar_x, bar_y, bar_width, bar_height),
+                progress,
+                label: input.stage.label().to_string(),
+                fill_color: self.theme.accent_rgba,
+                track_color: self.theme.accent_alt_rgba,
+            });
+        }
 
         commands.push(LoadRenderCommand::StageLabel {
             text: status_text.clone(),
@@ -310,6 +312,7 @@ pub struct LoadFrameInput {
     pub delta: f32,
     pub stage: LoadStage,
     pub progress: f32,
+    pub progress_visible: bool,
     pub prompt: Option<String>,
     pub error: Option<String>,
     pub completion: Option<String>,
@@ -332,11 +335,133 @@ impl LoadFrameInput {
             delta,
             stage,
             progress,
+            progress_visible: true,
             prompt: None,
             error: None,
             completion: None,
             cancelable: false,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoadingFragmentState {
+    pub visible: bool,
+    pub stage: LoadStage,
+    pub progress: f32,
+    pub progress_visible: bool,
+    pub text: String,
+    pub error: Option<String>,
+    pub completion: Option<String>,
+    pub cancelable: bool,
+}
+
+impl Default for LoadingFragmentState {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            stage: LoadStage::Boot,
+            progress: 0.0,
+            progress_visible: false,
+            text: "@loading".to_string(),
+            error: None,
+            completion: None,
+            cancelable: false,
+        }
+    }
+}
+
+impl LoadingFragmentState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn show(&mut self) {
+        self.show_text("@loading");
+    }
+
+    pub fn show_text(&mut self, text: impl Into<String>) {
+        self.visible = true;
+        self.stage = LoadStage::Boot;
+        self.progress_visible = false;
+        self.cancelable = false;
+        self.error = None;
+        self.completion = None;
+        self.text = text.into();
+    }
+
+    pub fn hide(&mut self) {
+        self.visible = false;
+        self.cancelable = false;
+    }
+
+    pub fn set_stage(&mut self, stage: LoadStage) {
+        self.stage = stage;
+    }
+
+    pub fn set_progress(&mut self, progress: f32) {
+        self.progress = progress;
+        self.progress_visible = true;
+        if self.stage == LoadStage::Boot {
+            self.stage = LoadStage::LoadingAssets;
+        }
+    }
+
+    pub fn snap_progress(&mut self) {
+        self.progress_visible = true;
+    }
+
+    pub fn set_button(&mut self) {
+        self.cancelable = true;
+    }
+
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        self.text = text.into();
+    }
+
+    pub fn fail(&mut self, message: impl Into<String>) {
+        self.visible = true;
+        self.stage = LoadStage::Failed;
+        self.error = Some(message.into());
+        self.completion = None;
+        self.progress_visible = true;
+    }
+
+    pub fn complete(&mut self, message: impl Into<String>) {
+        self.visible = true;
+        self.stage = LoadStage::Complete;
+        self.progress = 1.0;
+        self.error = None;
+        self.completion = Some(message.into());
+        self.progress_visible = true;
+        self.cancelable = false;
+    }
+
+    pub fn frame_input(
+        &self,
+        graphics_width: f32,
+        graphics_height: f32,
+        scale: f32,
+        delta: f32,
+    ) -> Option<LoadFrameInput> {
+        if !self.visible {
+            return None;
+        }
+
+        let mut input = LoadFrameInput::new(
+            graphics_width,
+            graphics_height,
+            scale,
+            delta,
+            self.stage,
+            self.progress,
+        );
+        input.progress_visible = self.progress_visible;
+        input.prompt = Some(self.text.clone());
+        input.error = self.error.clone();
+        input.completion = self.completion.clone();
+        input.cancelable = self.cancelable;
+        Some(input)
     }
 }
 
@@ -916,6 +1041,7 @@ mod tests {
             delta: 0.5,
             stage: LoadStage::LoadingContent,
             progress: 0.42,
+            progress_visible: true,
             prompt: None,
             error: None,
             completion: None,
@@ -1017,6 +1143,106 @@ mod tests {
                 >= 4,
             "LoadingFragment should render the two WarningBar stripe/edge groups"
         );
+    }
+
+    #[test]
+    fn loading_fragment_state_show_hides_progress_and_cancel_until_setters_like_java() {
+        let mut fragment = LoadingFragmentState::new();
+        assert_eq!(fragment.frame_input(1280.0, 720.0, 1.0, 0.0), None);
+
+        fragment.show();
+        let input = fragment
+            .frame_input(1280.0, 720.0, 1.0, 0.0)
+            .expect("shown LoadingFragment should produce a load frame input");
+        assert_eq!(input.prompt.as_deref(), Some("@loading"));
+        assert!(!input.progress_visible);
+        assert!(!input.cancelable);
+
+        let mut renderer = LoadRendererState::default();
+        let shown_plan = renderer.build_plan(input);
+        assert!(!shown_plan
+            .commands
+            .iter()
+            .any(|command| matches!(command, LoadRenderCommand::ProgressBar { .. })));
+        let shown_pass = shown_plan
+            .to_render_pass()
+            .expect("shown LoadingFragment should render a visible pass");
+        let shown_texts = shown_pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(shown_texts.contains(&"@loading"));
+        assert!(!shown_texts.contains(&"@cancel"));
+
+        fragment.set_progress(0.37);
+        fragment.set_button();
+        let input = fragment
+            .frame_input(1280.0, 720.0, 1.0, 0.0)
+            .expect("visible LoadingFragment should keep producing load input");
+        assert_eq!(input.stage, LoadStage::LoadingAssets);
+        assert_eq!(input.progress, 0.37);
+        assert!(input.progress_visible);
+        assert!(input.cancelable);
+
+        let updated_plan = renderer.build_plan(input);
+        assert!(updated_plan
+            .commands
+            .iter()
+            .any(|command| matches!(command, LoadRenderCommand::ProgressBar { .. })));
+        let updated_pass = updated_plan
+            .to_render_pass()
+            .expect("updated LoadingFragment should render");
+        let updated_texts = updated_pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(updated_texts.contains(&"@cancel"));
+
+        fragment.hide();
+        assert_eq!(fragment.frame_input(1280.0, 720.0, 1.0, 0.0), None);
+    }
+
+    #[test]
+    fn loading_fragment_state_error_and_completion_emit_terminal_frames() {
+        let mut fragment = LoadingFragmentState::new();
+        fragment.show_text("loading assets");
+        fragment.set_progress(0.4);
+        fragment.fail("asset loader crashed");
+
+        let mut renderer = LoadRendererState::default();
+        let failed_plan = renderer.build_plan(
+            fragment
+                .frame_input(960.0, 540.0, 1.0, 0.1)
+                .expect("failed LoadingFragment should stay visible"),
+        );
+        assert_eq!(failed_plan.stage, LoadStage::Failed);
+        assert_eq!(failed_plan.stage_text, "asset loader crashed");
+        assert!(matches!(
+            failed_plan.commands.last().unwrap(),
+            LoadRenderCommand::ErrorBanner { .. }
+        ));
+
+        fragment.complete("all assets ready");
+        let complete_plan = renderer.build_plan(
+            fragment
+                .frame_input(960.0, 540.0, 1.0, 0.1)
+                .expect("complete LoadingFragment should stay visible"),
+        );
+        assert_eq!(complete_plan.stage, LoadStage::Complete);
+        assert_eq!(complete_plan.progress, 1.0);
+        assert_eq!(complete_plan.stage_text, "all assets ready");
+        assert!(matches!(
+            complete_plan.commands.last().unwrap(),
+            LoadRenderCommand::CompletionBanner { .. }
+        ));
     }
 
     #[test]
