@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 969. JoinDialog 搜索 Enter/zoom 刷新
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.09%**，仍未达到完整可玩；本轮对齐 Java `JoinDialog.java:398-403`，community 搜索行 `TextField.keyDown(KeyCode.enter, this::refreshCommunity)` 和右侧 `Icon.zoom` 按钮刷新行为。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Join 路由在搜索框聚焦、无加载/弹窗/删除/版本错误/免责声明阻塞时，`Enter`/`NumpadEnter` 会派发 `RefreshJoinServers`；
+    - 新增 `join_route_search_zoom_button_rect_for_panel()`，在搜索框右侧绘制独立 zoom 图标按钮；
+    - 命中优先级调整为 zoom 热区先返回 `RefreshJoinServers`，搜索框其它区域仍返回 `FocusJoinSearch`；
+    - 扩展 `desktop_launcher_join_route_renders_server_browser_skeleton`，覆盖 F5、Enter、zoom 三条刷新入口。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - JoinDialog community host 仍需从 group summary 改为 per-entry host 展示；
+  - Join 列表仍需接入 Java `ScrollPane` 式滚动，而不是固定 `.take(...)` 截断；
+  - reconnect 仍需补手动重试入口/按钮，与自动 server restarting reconnect 区分。
+
 ## 968. LoadRenderer 空计划可见加载帧兜底
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
