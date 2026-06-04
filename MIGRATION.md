@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 947. ResearchDialog 默认研究树 root 跟随当前星球
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.87%**，仍未达到完整可玩；本轮对齐 Java `ResearchDialog.shown(...)` 按当前 campaign planet/sector 切换 tech tree 的行为，避免 Rust ResearchDialog 一直默认 Serpulo 或继承 stale 手动 root。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `tech_tree_route_preferred_root_name()`，按 `CampaignPlanetDialogState.planet_name` / `GameState::get_planet_name()` 推导默认 root；
+    - `tech_tree_route_root()` 现在按顺序选择：当前打开的手动 root -> 当前 Campaign/Pause planet -> 首个候选 root；
+    - 从 Campaign 或 pause overlay 打开 TechTree 时清空 stale `tech_tree_selected_root`，让新打开的 ResearchDialog 回到当前星球 root；
+    - 保留当前 ResearchDialog 内 `SelectTechTreeRoot` 的手动切换能力；
+    - 新增 `desktop_launcher_techtree_root_follows_current_campaign_planet_like_java`，覆盖 Erekir `onset` sector、stale Serpulo root 清理、手动 root 仍可切换、重新从 Campaign 打开恢复 Erekir、pause Research 不创建 Campaign 返回栈但仍按当前 sector planet 选 root。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_techtree_root_follows_current_campaign_planet_like_java -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop techtree -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe build -p mindustry-desktop --features opengl-native-runtime --release`
+- 当前可查看客户端产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+- 并行探索结论已吸收，后续不可漏：
+  - Campaign 仍缺 `lastplanet`、`*-last-sector` settings 写回和真正 `SectorSelectDialog`；
+  - SaveDialog 后续应优先补保存后 slot preview PNG 生成，对齐 Java `SaveSlot.savePreview()`；
+  - MapList modded 地图 footer 文案/样式仍需收口。
+
 ## 946. Campaign -> ResearchDialog 返回栈对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
