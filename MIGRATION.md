@@ -19,6 +19,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 936. Campaign launch 写入 sector map 元数据
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续优先前端/UI/可玩性，不推进 Mods。
+- 本轮总体进度更新：约 **94.70%**，仍未达到完整可玩；继续优先 Campaign/CustomGame 真开局、黑屏/低帧率/输入命中问题收口、原版 UI/所有子菜单还原与真实资源复用。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `campaign_map_descriptor_for_sector_preset(...)`，从 `SectorPreset` 生成过渡 `MapDescriptor`，写入 name/planet/sector/difficulty 等 tags；
+    - `launch_campaign_smoke_world_from_menu(...)` 在 seed playable world 后，将 `runtime.state.map` 设置为当前选中 sector preset 的 map metadata，再同步 `game_state`；
+    - 扩展 `desktop_launcher_campaign_route_selecting_sector_updates_dialog_state_and_launch`，断言选择 `#101` 后 launch 的 sector 与 `game_state.map/runtime.state.map` 都是 `saltFlats`。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_campaign_route_selecting_sector_updates_dialog_state_and_launch -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_campaign_launch_button_seeds_playable_smoke_world -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -j 1 -p mindustry-desktop --features opengl-native-runtime`
+- 后续不可漏：
+  - 这仍是 metadata/rules 过渡，Campaign 必须继续接入真实 sector world/loadout/rules/tile load；
+  - CustomGame/Editor 也仍需从 smoke-world 彻底过渡到真实 map tile load；
+  - 暂不处理 Mods，除非阻塞能玩或 UI 主线。
+
 ## 935. MapPlaySelected 写入选中地图状态
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续优先前端/UI/可玩性，不推进 Mods。
