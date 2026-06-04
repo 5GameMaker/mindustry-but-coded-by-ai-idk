@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 941. EditorInGame 接入真实本地地图 snapshot
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮暂停 Mods。
+- 最新用户优先级：第一优先级改为 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。后续闭环必须先从 UI 子菜单对齐切入，除非可玩性阻塞会直接影响 UI 验证。
+- 本轮总体进度更新：约 **94.81%**，仍未达到完整可玩；EditorInGame 已不再仅限尺寸正确的 placeholder，但 Campaign 真实 sector/world 仍缺。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `edit_current_map_in_game()` 优先复用 `load_runtime_map_from_descriptor(...)` 读取真实本地 `.msav` map snapshot；
+    - 找不到或解析失败时继续回退 `seed_playable_smoke_world_with_dimensions(...)`，保留旧 fake-map 测试语义；
+    - 新增 `desktop_launcher_editor_ingame_loads_real_asset_map_snapshot_when_available`，验证 Archipelago 进入 EditorInGame 后 `last_runtime_map_load_report.tiles > 0`、world 尺寸与地图一致、无 smoke report。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_editor_ingame_loads_real_asset_map_snapshot_when_available -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_editor_route_has_ingame_button_and_enters_play_state_like_java -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+- 后续不可漏：
+  - 第一优先级：UI 所有子菜单逐项对齐 Java 原版，尤其 `MenuFragment`、`SettingsMenuDialog`、`MapListDialog`、`MapPlayDialog`、`PlanetDialog`、`EditorMapsDialog` 的布局/按钮/禁用态/返回栈/滚动焦点；
+  - 第二优先级：Campaign 真实 sector generator/loadout/rules，全局 playable runtime，原版一致的 world/block/entity 行为。
+
 ## 940. CustomGame 真实地图 tile load 与 resize stale-click 修复
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮暂停 Mods，优先可玩性与 UI。
