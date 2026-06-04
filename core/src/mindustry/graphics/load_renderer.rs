@@ -513,15 +513,6 @@ impl LoadFramePlan {
         let mut pass = RenderPass::new(RenderPassKind::Custom(LOAD_PASS_KIND.to_string()));
         pass.push(RenderCommand::clear([0.035, 0.040, 0.052, 1.0]));
         pass.push(RenderCommand::draw_text(
-            "load render plan empty",
-            RenderPoint::new(24.0, 48.0),
-            [0.95, 0.70, 0.28, 1.0],
-            18.0,
-            0.0,
-            RenderTextAlign::Start,
-            LOAD_STAGE_TEXT_LAYER,
-        ));
-        pass.push(RenderCommand::draw_text(
             format!(
                 "{} | {}",
                 if stage_text.is_empty() {
@@ -1404,8 +1395,7 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"load render plan empty"));
-        assert!(texts.contains(&"boot | booting"));
+        assert_eq!(texts, vec!["boot | booting"]);
 
         assert!(plan.into_render_pass().is_some());
     }

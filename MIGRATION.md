@@ -19,6 +19,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 968. LoadRenderer 空计划可见加载帧兜底
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.08%**，仍未达到完整可玩；本轮收紧加载页黑屏兜底，使空 `LoadFramePlan` fallback 更接近 Java `LoadRenderer` 总会清屏并显示加载阶段/提示的行为。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/load_renderer.rs`
+    - 保留空 commands 时生成可见 fallback `RenderPass` 的路径；
+    - 去除 Rust 独有诊断文案 `load render plan empty`，空计划只显示真实 stage/prompt 文本，例如 `boot | booting`；
+    - 调整 `empty_load_frame_plan_creates_visible_fallback_render_pass`，防止 fallback 退化为调试文本或空帧。
+- 已验证：
+  - `cargo test -p mindustry-core load_renderer -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - 加载页仍需继续对齐 Java 原版的 logo/planet/progress/prompt 动画细节；
+  - 黑屏防护要继续覆盖 route shell、Settings 子弹窗、Campaign 子弹窗和 native OpenGL present/pacing 链路。
+
 ## 967. Campaign PlanetDialog 星球选择按钮
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
