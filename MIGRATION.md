@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 906. Settings linear 动态切换下沉到 OpenGL sampler
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `SettingsMenuDialog.java` / atlas texture filter 行为。
+- 本轮总体进度更新：约 **94.40%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `linear` 勾选变化后，Java 会遍历已加载 atlas textures 并即时切换 linear/nearest filter；
+  - 不能只更新 atlas metadata，已经上传到 GPU 的 texture sampler 也必须重新应用。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendTextureResource` 新增 `applied_sampler`，记录当前已下发到 GPU 的 sampler；
+    - 新增 `DesktopGraphicsOpenGlBackendTextureUploadKind::SamplerParameters`，对已存在 texture 只下发 `TEXTURE_MIN_FILTER/TEXTURE_MAG_FILTER` 与 wrap 参数，不重传像素；
+    - texture resource table 在 `register_binding(...)` 后比较 `sampler` 与 `applied_sampler`，sampler 变化时进入 `pending_upload_plans()`；
+    - frame/backend upload refresh 改为消费 `pending_upload_plans()`，使 Settings `graphics.linear` 的动态切换能落到真实 OpenGL upload command。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_graphics_opengl_backend_reapplies_texture_sampler_when_linear_setting_changes -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_graphics_opengl_backend_executor_emits_texture_upload_plan_for_sprite_atlas_page -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_graphics_opengl_texture_upload_executor_uses_tex_sub_image_2d_for_existing_full_page -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-core texture_atlas_region_preserves_scale_and_linear_filter_metadata -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all -- --check`
+  - `git diff --check`
+- 后续不可漏：
+  - 继续把 bloom marker 降到完整 FBO blur shader 与资源生命周期；
+  - 继续补前端所有子菜单细节，避免只停留在主菜单或测试 helper。
+
 ## 905. Binding.fullscreen/F11 接入输入到窗口同步链
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `Binding.java` / `Control.java`。
@@ -74,7 +98,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 后续不可漏：
   - bloom 当前已进入 render frame / backend resolve 链，但仍需要继续把 marker 降到完整 FBO blur shader 与资源生命周期；
   - fullscreen 热键 `Binding.fullscreen` 还需继续接入窗口切换与 settings 回写；
-  - linear 的 GPU texture 实例即时重滤波还需在真实 texture resource table 层继续补齐。
+  - linear 的 GPU texture 实例即时重滤波已由第 906 项继续补齐，后续若重构 texture resource table 必须保留该 sampler-only update 语义。
 
 ## 903. Settings reset 恢复图形运行时副作用
 
