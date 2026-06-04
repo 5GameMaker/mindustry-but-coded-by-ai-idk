@@ -30482,3 +30482,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - JoinDialog 仍未完全重排为 Java `Table hosts + ScrollPane` 的像素级结构；
   - 当前滚动是最小稳定窗口滚动，后续还应继续收口 local/saved/global 分区在同一 hosts table 内的真实布局；
   - 联机协议、真实服务器兼容和完整可玩仍需继续推进，不能宣告目标完成。
+
+## 587. DatabaseDialog 搜索与重新打开状态对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.12%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `DatabaseDialog` 搜索、tab 和重新打开生命周期更贴近 Java 原版。
+- Java 对照证据：
+  - `DatabaseDialog.java` 搜索只按 `localizedName.toLowerCase(Locale.ROOT).contains(text)` 过滤；
+  - 搜索框文本不做 trim，前后空格属于查询内容；
+  - tab 列表只由 `databaseTabs` 汇总后 prepend `Planets.sun`，不会在空 tab 时用 catalog planets 额外补入口；
+  - `shown()` rebuild 时不会无条件清空搜索框，也不会每次都覆盖用户手动选中的 tab。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `database_visible_records_for_type(...)` 移除 raw name 宽匹配，改为只按 `database_content_display_name(...)` 过滤；
+    - 搜索文本不再 `trim()`；
+    - `database_tab_keys()` 删除空 tab 时从 `catalog().planets` 补 landable planet 的 Rust-only fallback；
+    - 新增 `database_route_initialized`，首次打开才按当前星球选择默认 tab，后续重开保留 search 和手动 tab；
+    - 保留重开时关闭详情 modal / reset scroll 的现有安全收口。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop database -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - DatabaseDialog 仍需继续核对 ContentInfoDialog 内部字段/统计/按钮的像素级布局；
+  - 其他 UI 子菜单，尤其 Campaign `planetLaunch` 模式仍未补齐；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
