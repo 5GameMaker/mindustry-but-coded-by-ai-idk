@@ -49,7 +49,10 @@ pub fn load_or_panic() -> Vec<Loadout> {
 }
 
 fn read_loadout(name: &str, base64: &str) -> io::Result<Loadout> {
-    read_schematic_base64(base64).map(|schematic| Loadout::new(name, schematic))
+    read_schematic_base64(base64).map(|mut schematic| {
+        schematic.file = Some(format!("{name}.msch"));
+        Loadout::new(name, schematic)
+    })
 }
 
 #[cfg(test)]
@@ -85,6 +88,11 @@ mod tests {
 
         for (loadout, (name, width, height, block, x, y)) in loadouts.iter().zip(expected) {
             assert_eq!(loadout.name, name);
+            let expected_file = format!("{name}.msch");
+            assert_eq!(
+                loadout.schematic.file.as_deref(),
+                Some(expected_file.as_str())
+            );
             assert_eq!(loadout.schematic.width, width);
             assert_eq!(loadout.schematic.height, height);
             assert_eq!(loadout.schematic.tiles.len(), 1);
