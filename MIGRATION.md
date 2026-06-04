@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 974. LoadDialog 错误态仅保留 Java 式 modal
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.36%**，仍未达到完整可玩；本轮对齐 Java `LoadDialog.runLoadSave()` 失败路径：腐坏存档等错误通过 `ui.showErrorMessage("@save.corrupted")` 弹出 modal，不在存档列表区域额外渲染 Rust-only `save slots: error | ...` 横幅。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_load_game_route_page()` 在 `load_game_error` 存在时直接渲染现有错误 modal，不再画列表内 inline error banner；
+    - 更新 `desktop_launcher_run_load_save_reports_corrupted_when_primary_and_backup_fail`，断言错误帧不出现 `save slots: error | @save.corrupted`，仍保留 `@error.title`、`@save.corrupted` 和单个 `@ok` modal 行为；
+    - 保留内部 route line 状态诊断，不作为可见 UI；后续若要清理测试辅助文本，应单独收口。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_run_load_save_reports_corrupted_when_primary_and_backup_fail -- --nocapture`
+  - `cargo test -p mindustry-desktop load_game_route -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - LoadDialog 仍需继续对齐真实 `SaveSlot.previewTexture()` 加载、导入/导出文件 chooser、重命名输入框与删除确认；
+  - 继续推进 MapPlayDialog / CustomRulesDialog / EditorMapsDialog 的可见细节；
+  - 保持最终目标：完整可玩、整体化 Rust 版 Mindustry/MDT。
+
 ## 973. SchematicsDialog Workshop 按钮按 steam 条件显示
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
