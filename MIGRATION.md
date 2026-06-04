@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 932. Campaign route sector 选择闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续优先前端/UI/可玩性，不推进 Mods。
+- 本轮总体进度更新：约 **94.66%**，仍未达到完整可玩；继续优先 Campaign/CustomGame 真开局、原版 UI/所有子菜单还原、黑屏/低帧率/输入命中问题收口与真实资源复用。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopMenuRouteShellAction::SelectCampaignSector(i32)`，把 Campaign route 的 sector strip 点击接到 `CampaignPlanetDialogState.selected_sector_id`；
+    - 新增 Campaign route 内容区、sector card、selector area/button rect helper，渲染和 hit-test 共用同一几何；
+    - 新增 `campaign_route_sector_selector_ids(...)`，优先 selected/new/unlocked，再从同 planet presets 补足最多 5 个 selector；
+    - `push_campaign_route_page(...)` 在 sector card 右侧渲染 `#sector` selector，高亮当前选中 sector；
+    - 点击 selector 只更新前端会话态，不触发 runtime；`LaunchCampaign` 继续通过 `campaign_selected_sector_from_dialog()` 读取最新选中的 sector。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_campaign_route_selecting_sector_updates_dialog_state_and_launch -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_campaign_menu_route_shell_uses_content_start_sector -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -j 1 -p mindustry-desktop --features opengl-native-runtime`
+- 后续不可漏：
+  - Campaign 仍需继续从 smoke-world 过渡到真正 sector world/loadout/rules 启动链路；
+  - Campaign 仍需补更完整的 PlanetDialog sector grid、locked/canPlay/no-source/threat/resource 状态与 difficulty 入口；
+  - 暂不处理 Mods，除非阻塞能玩或 UI 主线。
+
 ## 931. Load/Save 首键输入焦点稳定
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续优先前端/UI/可玩性，不推进 Mods。
