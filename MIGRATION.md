@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 950. EditorMapsDialog 地图信息页按钮对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.90%**，仍未达到完整可玩；本轮对齐 Java `EditorMapsDialog.showMap(...)` 的地图信息页按钮结构：详情弹窗只保留 Open In Editor、Delete/View Workshop、Back，不再额外显示 Playtest。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 移除 `DesktopMapCardActionKind::Playtest` 和地图信息页专用 Playtest 命中/渲染入口；
+    - 保留 Editor 顶部工具栏 `EditorPlaytest` 行为，确保 playtest 功能仍通过 route toolbar 进入，而不是塞进 `showMap()` 子弹窗；
+    - 更新 `desktop_launcher_map_card_dialog_buttons_dispatch_play_and_editor_actions`，先断言地图信息页不含 `Playtest`，关闭信息页后再通过 toolbar 触发 `EditorPlaytest`。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_card_dialog_buttons_dispatch_play_and_editor_actions -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop editor_map -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop map_list -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+- 后续不可漏：
+  - Campaign P0 继续推进 `PlanetDialog -> sector stats/resources -> LaunchLoadoutDialog -> launch`；
+  - Settings 继续补 `PlanetChooser` back 优先级回归、DynamicCategory 真实表格页/Data 双层窗结构细节；
+  - SaveDialog 后续应优先补保存后 slot preview PNG 生成，对齐 Java `SaveSlot.savePreview()`。
+
 ## 949. Editor MapList 类型 footer 对齐 Java
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
