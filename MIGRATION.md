@@ -30715,3 +30715,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - HostDialog/JoinDialog 的其他细节仍需继续逐项压到 Java dialog/ScrollPane 行为；
   - Settings、Load/Save、Campaign/MapPlay 等前端子菜单仍需继续逐项审查和修复；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 597. SaveDialog 覆盖确认文案对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.22%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `SaveDialog` 覆盖确认框正文严格对齐 Java。
+- Java 对照证据：
+  - `SaveDialog` 覆盖存档时调用 `ui.showConfirm("@overwrite", "@save.overwrite", ...)`；
+  - confirm body 只显示 `@save.overwrite`，不追加 slot name 或其他诊断文本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_save_game_overwrite_dialog(...)` 的正文从 `@save.overwrite | {slot_name}` 收敛为精确 `@save.overwrite`；
+    - 扩展 `desktop_launcher_save_dialog_creates_and_overwrites_save_slots`，断言覆盖确认框含 `@overwrite` / `@save.overwrite` 且不再出现 `@save.overwrite | ...`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop save_dialog_creates_and_overwrites -- --nocapture`
+  - `cargo test -p mindustry-desktop save_game -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - SaveDialog 预览 PNG 写入、Load/Save 其他 BaseDialog 像素级布局仍需继续审查；
+  - 前端所有子菜单仍需继续逐项对齐 Java 原版；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
