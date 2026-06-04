@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 976. Campaign 发射校验与 MapList 行星过滤状态对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；当前仍优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.39%**，仍未达到完整可玩；本轮继续对齐 Java `LaunchLoadoutDialog` / `CampaignRulesDialog.hidden()` / `MapListDialog.showMapFilters()` 的状态语义。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Campaign `LaunchLoadoutDialog` 的 `@launch.text` 按 Java 使用源 sector 资源校验，资源不足时不可点击并显示 `@sector.missingresources`；
+    - Campaign rules 弹窗在 route 隐藏/关闭时按 Java `hidden()` 保存并应用 draft rules；
+    - 非子菜单根路由按钮打开时清理旧桌面子菜单，但子菜单叶子按钮仍保持 Java fade-out；
+    - MapList 主过滤弹窗不显示 `<Any>`，`<Any>` 只在 planet select 子弹窗；旧断言已回归 Java 结构；
+    - MapList planet filter 按 Java 保留未知/stale planet 名称，只用当前可用 planet 决定按钮高亮、过滤是否生效和右键/长按清空范围。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop map_list_filter --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_non_submenu_route_clears_open_desktop_submenu_like_java_menu_fragment --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_submenu_item_click_keeps_fade_out_like_java_menu_fragment --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 当前可查看客户端产物：`D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`。
+- 后续继续：
+  - Campaign `LaunchLoadoutDialog` 仍需补 schematic 选择列表、preset description fallback、资源 4 列表格布局；
+  - MapPlay/CustomRules/Loadout 子弹窗仍需继续对齐 Java 大弹窗尺寸、按钮热区与各子弹窗视觉；
+  - 继续推进完整可玩、整体 runtime 接入与 Java↔Rust 联机兼容。
+
 ## 975. CustomGame/Editor 去除 MapPlay 诊断 route 文案
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
