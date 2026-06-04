@@ -30557,3 +30557,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `show_campaign_planet_launch_like_java(...)` 目前是 UI 状态 helper，仍需接入真实 launch pad / launch sector 运行时入口；
   - PlanetDialog 的 projection hover、locked/nolaunch 文案和跨星球 launch 资源链仍需继续细化；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 590. MapListDialog 搜索语义对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.15%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 Custom Game / Editor 的 `MapListDialog` 搜索语义与 Java 原版一致。
+- Java 对照证据：
+  - `MapListDialog` 搜索对 `plainName/plainAuthor/plainDescription/plainModName` 做 `toLowerCase().contains(searchString)`；
+  - Java 不折叠 `-` / `_` / 标点，也不走 schematic/tag 那套强归一化；
+  - author/description/mod name 仍受对应搜索开关控制。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `filtered_map_card_indices()` 的 query 改为 `self.map_list_search.to_lowercase()`；
+    - `map_list_filter_matches_query(...)` 改为对 plain name/author/description/mod name 直接 lowercase contains；
+    - 更新 MapList 搜索测试，用 `Arena-17` 与 `arena_17` 锁住“不折叠标点”的 Java 行为。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop map_list -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - MapPlayDialog / CustomRulesDialog 嵌套关闭栈和 mobile 横屏 preview 仍需继续审查；
+  - Editor MapInfo 与 MapPlay 子弹窗仍需逐项像素级对齐；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
