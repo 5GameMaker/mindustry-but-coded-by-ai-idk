@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 931. Load/Save 首键输入焦点稳定
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续优先前端/UI/可玩性，不推进 Mods。
+- 本轮总体进度更新：约 **94.65%**，仍未达到完整可玩；继续优先原版 UI/所有子菜单还原、黑屏/低帧率/输入命中问题收口与真实资源复用。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuRouteShellAction::SaveGameNew` 打开新建保存文本框时显式让继承自 `LoadDialog` 的背景搜索框失焦，对齐 Java `ui.showTextInput(...)` 接管键盘焦点；
+    - 新增 `desktop_launcher_save_game_new_dialog_and_load_search_focus_are_stable`，覆盖 `LoadDialog.show()` / `SaveDialog` 初始搜索焦点、`@save.new` 文本框首键输入、Backspace、Enter 确认、`@saving` 遮罩期间背景搜索与滚动阻断；
+    - 保持 `SaveDialog.addSetup()` 新建保存后刷新列表且不隐藏、覆盖保存 `save(slot)` 延迟后隐藏的 Java 行为差异。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_save_game_new_dialog_and_load_search_focus_are_stable -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_save_dialog_creates_and_overwrites_save_slots -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -j 1 -p mindustry-desktop --features opengl-native-runtime`
+- 后续不可漏：
+  - 继续优先 Campaign/CustomGame/Settings/Load/Save 等可玩前端与子菜单 UI 还原；
+  - 暂不处理 Mods，除非阻塞能玩或 UI 主线。
+
 ## 930. MapPlayDialog mobile 横屏预览尺寸对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，继续优先前端/UI/可玩性，不推进 Mods。
