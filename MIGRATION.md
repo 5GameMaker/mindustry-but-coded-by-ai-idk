@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 973. SchematicsDialog Workshop 按钮按 steam 条件显示
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.35%**，仍未达到完整可玩；本轮对齐 Java `SchematicsDialog.showImport()` / `showExport(Schematic)` 的 `steam` 条件：`@schematic.browseworkshop` 只在 steam 平台显示，`@schematic.shareworkshop` 只在 steam 且蓝图没有 Steam ID 时显示。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Import modal 渲染与 hit-test 都按 `host_steam_enabled()` 决定是否提供 `BrowseWorkshop`；
+    - Export modal 渲染与 hit-test 都按 `host_steam_enabled() && !entry.has_steam_id` 决定是否提供 `ShareWorkshop`；
+    - 调整默认非 steam 测试，断言 Browse/Share Workshop 不显示且不可点；
+    - 新增 `desktop_launcher_schematics_workshop_buttons_follow_java_steam_flag`，覆盖 steam flag 开启时 Browse/Share Workshop 的可见与命中。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop schematics_import_export_edit -- --nocapture`
+  - `cargo test -p mindustry-desktop schematics_workshop_buttons -- --nocapture`
+  - `cargo test -p mindustry-desktop schematics_route -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - 继续收口 Schematics 导入剪贴板/文件、导出文件、复制、删除、workshop 查看等真实动作；
+  - 继续推进 Settings / Load / CustomGame / Editor / Pause 等高频子菜单可见 UI 对齐；
+  - 主线仍是完整可玩 Rust 版，不允许把 UI helper 停留为孤立模块。
+
 ## 972. SchematicsDialog 卡片 SchematicImage 真实预览
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
