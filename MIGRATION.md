@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 958. HostDialog hostinfo 与 PlanetDataDialog 星球按钮文案
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.98%**，仍未达到完整可玩；本轮对齐 Java `HostDialog.java` 的 `Core.settings.getBoolOnce("hostinfo", ...)` 与 `SettingsMenuDialog.java` 的 `PlanetDataDialog` 星球选择按钮颜色 markup。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `HOST_INFO_SETTINGS_KEY`，将 HostDialog 非 Steam 首次 `@host.info` 提示从内存态改为 settings-backed 一次性提示；
+    - `DesktopMenuRoute::Host` 初始化时通过 `host_info_seen_once()` 判断是否打开提示，并在首次打开后写入 `settings_overrides["hostinfo"]="true"`；
+    - 新增 `settings_selected_planet_button_label()`，按 Java 的 `[#planet.iconColor]localizedName` 格式生成 `settings.planetselect` 按钮文案；
+    - 保持 `settings_selected_planet_label()` 为纯文本，确保 `clearplanetresearch` / `clearplanetcampaignsaves` 确认文案不会继承颜色 markup；
+    - 扩展 Host 与 Settings/Data 测试，覆盖 Host 一次性提示持久化、星球按钮颜色前缀与确认弹窗纯文本。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_opens_host_dialog_route -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `cargo test -p mindustry-desktop settings -- --nocapture`
+  - `cargo test -p mindustry-desktop host_route -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - Campaign/PlanetDialog 仍需继续补齐 `LaunchLoadoutDialog` 真实 loadout 流程、sector stats/resources 细节和真实 sector/world runtime；
+  - Play 子菜单下一批优先对齐 `MapPlayDialog` mobile 横屏预览尺寸、Campaign sectorlist/规则/launch 子窗余量，以及 Join/Load/CustomGame 可见细节；
+  - 前端/UI 后续仍需逐个子菜单与 Java 原版对照，当前目标不是只做主菜单，而是完整还原原版前端并保证可玩。
+
 ## 957. Campaign sector submission 外链入口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
