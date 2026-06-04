@@ -19,6 +19,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 915. 菜单叶子项点击按 Java fadeOutMenu 渐隐子菜单
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `MenuFragment.java` 与 Rust 菜单状态机。
+- 本轮总体进度更新：约 **94.49%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `MenuFragment.buttons(...)` 点击叶子项时执行 `currentMenu = null; fadeOutMenu(); b.runnable.run();`；
+  - `fadeOutMenu()` 会先保持 `submenu` children 并执行 alpha 渐隐，结束后再 `clearChildren()`；
+  - Rust 旧路径在子菜单打开后点击叶子项/非子菜单项时直接 `reset_desktop_root()`，导致子菜单瞬间清空，不符合 Java 过渡行为。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增 `fade_out_desktop_submenu_like_java()`，保留当前 submenu root 与 alpha，从 1.0 渐隐到 0.0；
+    - `tick_submenu_alpha(...)` 在 fade-out 到 0 后才清理 `submenu_root`，避免 `has_active_desktop_submenu()` 永久保持真。
+  - `desktop/src/lib.rs`
+    - `dispatch_menu_action(...)` 在“子菜单已开、点击叶子项/非子菜单项”时改用 Java-like fade-out helper，而不是硬 reset；
+    - 新增 `desktop_launcher_submenu_item_click_keeps_fade_out_like_java_menu_fragment`，锁定动作已派发但子菜单仍在渐隐帧中可见，动画结束后才消失。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-core menu_renderer_state_fades_out_and_in_current_desktop_submenu_like_java_actions -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_submenu_item_click_keeps_fade_out_like_java_menu_fragment -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-core menu_renderer_state_switches_desktop_submenu_roots -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_frame_loop_main_menu_uses_single_window_to_surface_flip -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_campaign_menu_route_shell_uses_content_start_sector -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_menu_frame_applies_pressed_button_down_drawable_and_release_clears -- --nocapture`
+- 后续不可漏：
+  - 坐标翻转目前已有单次转换回归；若用户仍看到错位，下一步应优先抓真实窗口截图/trace 对比，不要盲目二次翻转；
+  - 继续补 `MenuFragment` 的 release/click 时机、菜单按钮 margin/skin 和各子菜单完整行为；
+  - 本闭环只修子菜单关闭状态机，仍不能把前端还原停在主菜单。
+
 ## 914. DesktopLauncher 接入 LoadingFragmentState
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只继续接入本地 `LoadingFragment.java` 对应前端链路。

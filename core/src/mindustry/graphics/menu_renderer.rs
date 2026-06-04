@@ -2384,6 +2384,9 @@ impl MenuRendererState {
             self.submenu_alpha = self.submenu_target_alpha;
             self.submenu_animation_from_alpha = self.submenu_target_alpha;
             self.submenu_animation_elapsed = 0.0;
+            if self.submenu_target_alpha <= f32::EPSILON {
+                self.submenu_root = None;
+            }
         }
     }
 
@@ -2423,6 +2426,17 @@ impl MenuRendererState {
                 || self.submenu_root.is_some()
                 || self.submenu_alpha > f32::EPSILON
                 || self.submenu_target_alpha > f32::EPSILON)
+    }
+
+    pub fn fade_out_desktop_submenu_like_java(&mut self) {
+        if self.config.mobile {
+            return;
+        }
+        if !self.has_active_desktop_submenu() {
+            return;
+        }
+        self.active_root = None;
+        self.start_submenu_alpha_animation(0.0, Some(1.0));
     }
 
     pub fn reset_desktop_root(&mut self) {
@@ -4229,6 +4243,7 @@ mod tests {
         let faded_out = state.render_plan(input(MENU_SUBMENU_FADE_OUT_SECONDS));
         assert_eq!(state.submenu_alpha, 0.0);
         assert_eq!(faded_out.ui.submenu_alpha, 0.0);
+        assert!(!state.has_active_desktop_submenu());
         assert!(faded_out
             .ui
             .buttons
