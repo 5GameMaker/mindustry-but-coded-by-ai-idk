@@ -30670,3 +30670,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings 子弹窗仍需继续逐项像素级对齐 Java 独立 dialog 栈；
   - 前端所有子菜单仍需继续逐项审查；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 595. Settings 子窗点击遮罩与 Back 栈
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.20%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `Settings` 的 child dialog / confirm dialog 更接近 Java 独立 dialog 栈。
+- Java 对照证据：
+  - `SettingsMenuDialog` 的 data confirm / planet data、`LanguageDialog`、`KeybindDialog` 都是独立 dialog；
+  - child/confirm 打开时背景 Settings 页点击不应穿透；
+  - Back / Esc 应按 dialog 栈从上到下关闭：confirm → child → Settings page。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Settings Back 键优先取消 `pending_settings_confirm_action`，再关闭 `settings_child_dialog`，最后才 `BackToMain`；
+    - 新增/修正 `desktop_launcher_settings_child_dialog_overlay_and_back_stack_match_java`；
+    - 测试命中点改为 `PlanetDataDialog` 内的 `settings_planet_data_button_rect(..., 1)`，确保覆盖 child 内确认弹窗，而不是父 Data 页按钮。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop settings_child_dialog_overlay -- --nocapture`
+  - `cargo test -p mindustry-desktop settings -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Settings 子弹窗仍需继续逐项像素级对齐 Java 独立 dialog 栈；
+  - 前端所有子菜单仍需继续逐项审查；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
