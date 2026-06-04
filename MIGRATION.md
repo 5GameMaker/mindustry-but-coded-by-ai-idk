@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 970. JoinDialog community host per-entry 展示
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **95.10%**，仍未达到完整可玩；本轮对齐 Java `JoinDialog.java:426-457,507-547` 的 community host 逐条展示方向：同一个 server group 中已有多个 resolved host 时，Rust 不再只渲染/连接 `hosts.first()`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `visible_join_community_entries()`，将可见 community group 展开为 per-host entry；没有 resolved host 时保留旧地址 fallback；
+    - 新增 `ConnectJoinCommunityHost(group_index, host_index)`，逐 host 点击可连接对应 host，并沿用免责声明/版本校验流程；
+    - community 渲染 loop 改为按 entry 绘制，favorite/hidden/save 仍是 group 级动作，卡片主体连接 host 级目标；
+    - route-shell lines 保留旧 `community[i]: ... addresses:` group summary，同时新增 `entry[...]`/`host[...]` 行，避免破坏旧 group 顺序测试；
+    - 扩展 `desktop_launcher_join_route_tracks_community_groups_like_java_server_group`，覆盖同一 group 两个 host 的两张 entry、第二 host 命中与免责声明目标。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - JoinDialog 仍需接入 Java `ScrollPane` 式滚动，解决 `.take(...)` 固定截断；
+  - community refresh/ping 仍需进一步对齐 Java 每个 address ping 后逐 host 回填；
+  - reconnect 仍需补手动 retry/reconnect 入口。
+
 ## 969. JoinDialog 搜索 Enter/zoom 刷新
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
