@@ -110,6 +110,25 @@ impl DataPatcherState {
         !self.patches.is_empty()
     }
 
+    pub fn is_patched_content(&self, content_type: &str, name: &str) -> bool {
+        let content_type = content_type.trim().to_ascii_lowercase();
+        let name = name.trim().to_ascii_lowercase();
+        let typed = format!("{content_type}:{name}");
+        let typed_slash = format!("{content_type}/{name}");
+        self.patches.iter().any(|patch| {
+            let patch = patch.trim().to_ascii_lowercase();
+            patch == name
+                || patch == typed
+                || patch == typed_slash
+                || patch.contains(&format!("\"name\":\"{name}\""))
+                || patch.contains(&format!("\"name\": \"{name}\""))
+                || patch.contains(&format!("\"type\":\"{content_type}\""))
+                    && patch.contains(&format!("\"name\":\"{name}\""))
+                || patch.contains(&format!("\"type\": \"{content_type}\""))
+                    && patch.contains(&format!("\"name\": \"{name}\""))
+        })
+    }
+
     pub fn clear(&mut self) {
         self.patches.clear();
         self.warnings.clear();
@@ -781,6 +800,23 @@ mod tests {
         assert!(!context.legacy_launch_pads);
         assert!(!context.advanced_launch_pad_present);
         assert!(!context.advanced_launch_pad_unlocked);
+    }
+
+    #[test]
+    fn data_patcher_tracks_patched_content_by_type_and_name_like_java() {
+        let patcher = DataPatcherState {
+            patches: vec![
+                "item:copper".into(),
+                r#"{"type":"block","name":"core-shard"}"#.into(),
+            ],
+            warnings: Vec::new(),
+        };
+
+        assert!(patcher.is_patched());
+        assert!(patcher.is_patched_content("item", "copper"));
+        assert!(patcher.is_patched_content("block", "core-shard"));
+        assert!(!patcher.is_patched_content("item", "lead"));
+        assert!(!patcher.is_patched_content("liquid", "water"));
     }
 
     #[test]

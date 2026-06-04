@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 897. Database patched 标记改为内容级
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `DatabaseDialog.java` / `ContentInfoDialog.java`。
+- 本轮总体进度更新：约 **94.29%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `DatabaseDialog` 的 `Icon.fileSmall` 叠加使用 `state.patcher.isPatched(unlock)`；
+  - `ContentInfoDialog` 的 `@database.patched` 同样是按当前内容判断，而不是只要存在任意 patch 就全局显示。
+- 本轮主改动：
+  - `core/src/mindustry/core/game_state.rs`
+    - `DataPatcherState` 新增 `is_patched_content(content_type, name)`，支持 `type:name`、`type/name` 与简单 JSON patch 文本匹配；
+    - 增加 core 单测锁定内容级命中/不命中。
+  - `desktop/src/lib.rs`
+    - Database grid 的 `fileSmall` overlay 改为内容级判断；
+    - ContentInfoDialog 的 `@database.patched` 改为内容级判断；
+    - 既有 Database 前端测试从全局 `test-patch` 调整为 `item:copper`。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-core data_patcher_tracks_patched_content_by_type_and_name_like_java -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell -- --nocapture`
+- 后续不可漏：
+  - 继续补 `ContentInfoDialog` 的 `credit` 与 `displayExtra(table)`，以及更完整的结构化 Stats。
+
 ## 896. 菜单帧循环 uncapped delta 对齐 Java
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ClientLauncher.java` / `Renderer.java` / `MenuRenderer.java`。
