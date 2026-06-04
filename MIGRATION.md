@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 954. Campaign 首次战役选择与 Serpulo rework notice
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.94%**，仍未达到完整可玩；本轮对齐 Java `PlanetDialog.java:181-221` 的 `shown(...)` 首次进入战役分支：无 base 且未设置 `campaignselect` 时显示 `@campaign.select`，否则在 `hadSerpuloRemaps` 且 `serpulo-remaps-notice` 未见过时显示 Serpulo rework notice。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `CAMPAIGN_SELECT_SETTINGS_KEY` / `SERPULO_REMAPS_NOTICE_SETTINGS_KEY`，对应 Java `campaignselect` 与 `serpulo-remaps-notice`；
+    - `CampaignPlanetDialogState` 新增 `look_at_planet(...)`，确认首次选择后可直接重建到 Serpulo/Erekir 对应 planet；
+    - `DesktopMenuRouteShellAction` 新增 `SelectCampaignIntroSerpulo` / `SelectCampaignIntroErekir` / `ConfirmCampaignIntroPlanet` / `CloseCampaignIntroSelect` / `CloseCampaignSerpuloReworkNotice`；
+    - `DesktopLauncher` 新增 `campaign_intro_select_dialog_open`、`campaign_intro_selected_planet`、`campaign_serpulo_rework_notice_open`、`campaign_had_serpulo_remaps`；后者后续由真实 Saves remap 检测写入；
+    - 新增 `show_campaign_intro_dialogs_like_java(...)`、`confirm_campaign_intro_planet_like_java(...)`、`campaign_intro_start_sector_id_for_planet(...)` 等 helper；
+    - Campaign route 进入时自动执行 intro 判断；切路由、CloseRoute、Back、reset、play-entry 清理均清掉对应 modal 状态；
+    - 新增 `push_campaign_intro_select_dialog(...)` 与 `push_campaign_serpulo_rework_notice_dialog(...)`，渲染 `@campaign.select`、`@campaign.none`、`@campaign.serpulo`、`@campaign.erekir`、`@campaign.rework.title`、`@campaign.rework.serpulo`、`@ok`；
+    - 补 `desktop_launcher_campaign_route_shows_initial_campaign_select_like_java` 与 `desktop_launcher_campaign_route_shows_serpulo_rework_notice_once_like_java`，覆盖 OK 禁用、选择星球、确认写入 settings、重建 PlanetDialog、notice getBoolOnce。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop campaign -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - Campaign P0 仍缺原版 `sectorlist` 折叠/搜索/attacked 计数；
+  - P1 继续补 `@campaign.difficulty` / `CampaignRulesDialog` 与 `@sectors.viewsubmission`；
+  - `campaign_had_serpulo_remaps` 仍需在真实 Saves remap/迁移逻辑中写入，当前先完成 UI route/action/render 链路。
+
 ## 953. Campaign sector stats/info 详情弹窗
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
