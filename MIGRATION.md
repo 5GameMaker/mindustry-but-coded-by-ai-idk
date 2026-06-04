@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 914. DesktopLauncher 接入 LoadingFragmentState
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只继续接入本地 `LoadingFragment.java` 对应前端链路。
+- 本轮总体进度更新：约 **94.48%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `loading_fragment_state: LoadingFragmentState`，并在初始化与 reset 中同步清理；
+    - 新增 `show_loading_fragment_like_java(...)`、`hide_loading_fragment_like_java(...)`、`set_loading_fragment_progress_like_java(...)`、`set_loading_fragment_button_like_java(...)`；
+    - 新增 `loading_fragment_frame_for_surface(...)`，把 desktop surface 与当前 `LoadingFragmentState` 转成 `DesktopFramePayload::Load`，避免 core 状态器停留为孤立 helper。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_loading_fragment_state_builds_java_like_load_frames -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_load_frame_for_render_uses_load_payload_without_world_bundle -- --nocapture`
+- 后续不可漏：
+  - 下一步要把真实 pending load/join/mod import 等路径逐步改为使用 desktop `LoadingFragmentState`，不能长期只由测试调用；
+  - 菜单子代理已定位：坐标翻转本身已是单次处理，下一轮优先修 `MenuFragment.fadeOutMenu()` 对应的子菜单渐隐关闭，而不是硬 reset；
+  - 继续保证所有前端 helper 都接入 DesktopLauncher/runtime 主链路。
+
 ## 913. LoadingFragment 状态器与 desktop 可见加载帧回归
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `LoadingFragment.java`、`UI.java`、`LoadRenderer.java` 与 Rust 加载渲染链路。
