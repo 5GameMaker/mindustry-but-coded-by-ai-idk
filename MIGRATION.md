@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 953. Campaign sector stats/info 详情弹窗
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.93%**，仍未达到完整可玩；本轮对齐 Java `PlanetDialog.showStats(Sector sector)` 的可见子弹窗骨架，把 Campaign sector card 上的 `@stats` 从纯文本提示推进为可点击、可关闭、阻塞底层点击的详情弹窗。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuRouteShellAction` 新增 `OpenCampaignSectorStats` / `CloseCampaignSectorStats` / `CampaignSectorAbandon`；
+    - `DesktopLauncher` 新增 `campaign_sector_stats_dialog_open`，并接入 Back、CloseRoute、reset、Campaign route entry 的状态清理；
+    - 新增 `campaign_sector_stats_snapshot(...)`、`campaign_sector_play_time_label(...)`、`campaign_sector_stat_item_lines(...)` 等 helper，读取运行时 sector / dialog fallback，并把 `ExportStat.mean` 转成 Java-like per-minute 行；
+    - 新增 `push_campaign_sector_stats_dialog(...)`，渲染 sector 标题、preset description、`@sectors.time`、`@sectors.attempts`、`@sectors.wave`、`@sectors.threat`、`@sectors.resources`、`sector.lockdown`、`@sectors.production`、`@sectors.export`、`@sectors.import`、`@sectors.stored` 与 `@sector.abandon`；
+    - 修正 Campaign route hit-test 顺序，`@stats` 按钮优先于 sector selector，避免点击 stats 被误判为 `SelectCampaignSector(...)`；
+    - 扩展 `desktop_launcher_campaign_route_renders_planetdialog_like_sector_stats`，覆盖 stats 按钮命中、弹窗打开、Java 关键字段渲染、Back/close 关闭链路。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_renders_planetdialog_like_sector_stats -- --nocapture`
+  - `cargo test -p mindustry-desktop campaign -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续：
+  - Campaign P0 仍缺首次进入战役的 `@campaign.select` 星球选择弹窗、Serpulo rework notice、原版 `sectorlist` 折叠/搜索/attacked 计数；
+  - P1 继续补 `@campaign.difficulty` / `CampaignRulesDialog` 与 `@sectors.viewsubmission` 条件外链；
+  - 最终仍必须把 Campaign 从 smoke world 过渡到真实 sector/world load/generator/runtime 链路。
+
 ## 952. Campaign LaunchLoadoutDialog 启动装备选择骨架
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
