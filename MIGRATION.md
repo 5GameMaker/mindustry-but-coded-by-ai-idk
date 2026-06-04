@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 946. Campaign -> ResearchDialog 返回栈对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.86%**，仍未达到完整可玩；本轮收口 Campaign -> TechTree/ResearchDialog 的返回层级，让从 Campaign/PlanetDialog 打开的 ResearchDialog 关闭后恢复 Campaign route，而不是直接退出菜单 route。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `tech_tree_return_route: Option<DesktopMenuRoute>`，只在 `OpenCampaignTechTree` 时记录 `Campaign` 返回目标；
+    - `OpenCampaignTechTree` 不再清掉 `campaign_planet_dialog`，对齐 Java `ResearchDialog` 盖在 `PlanetDialog` 上方的对话框栈语义；
+    - `CloseRoute` / Back/Esc 先尝试 `restore_tech_tree_return_route_like_java()`，存在返回目标时只关闭 TechTree 的 select dialog/node detail，并恢复 Campaign route；
+    - 普通主菜单切换、pause overlay 直接打开 TechTree、play-entry 清理都会清空返回目标，避免错误继承；
+    - 新增 `desktop_launcher_campaign_techtree_back_restores_planet_dialog_like_java`，覆盖 CloseRoute、Back/Esc、pause Research 直接入口不设置返回 route。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_campaign_techtree_back_restores_planet_dialog_like_java -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop techtree -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -p mindustry-desktop --features opengl-native-runtime`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe build -p mindustry-desktop --features opengl-native-runtime --release`
+- 当前可查看客户端产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+- 后续不可漏：
+  - Campaign 仍缺 Java `PlanetDialog` 的 3D planet renderer、sector hover/zoom/drag、`SectorSelectDialog` 独立搜索列表、lastplanet/last-sector settings 持久化；
+  - TechTree 默认 root 仍需继续对齐 Java：应按当前 campaign planet/sector 自动切换，而不是只靠手动 root 选择；
+  - Campaign launch 仍偏 smoke world，后续必须接真实 sector generator/loadout/rules 与完整可玩流程。
+
 ## 945. Controls 本地化搜索与中文主菜单 label sprite 对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
