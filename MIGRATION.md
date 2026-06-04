@@ -30906,3 +30906,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - JoinDialog community group header/host card 结构仍需继续对齐；
   - SaveDialog 预览 PNG sidecar / UI 懒加载仍需补齐；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 605. SaveDialog 预览 PNG sidecar
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.30%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `SaveDialog.save()` 后的 slot preview 文件契约对齐 Java。
+- Java 对照证据：
+  - `Saves.savePreview()` 写入 `previewFile().writePng(renderer.minimap.getPixmap())`；
+  - `SavePreviewLoader` 把 `.spreview` 请求映射到同名 sibling `.png`；
+  - 因此保存侧应写 `previews/save_slot_<index>.png`，而不是写 `.spreview` 文件。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 RGBA8888 PNG 编码 helper，供保存预览 sidecar 使用；
+    - `write_save_game_slot_snapshot(...)` 在写 `.msav` 后同步写 `previews/save_slot_<index>.png`；
+    - 写完 sidecar 后刷新 Load/Save slot 列表，使 preview atlas 能立即加载 `save_slot_<index>`；
+    - 扩展 `desktop_launcher_save_dialog_creates_and_overwrites_save_slots`，覆盖新建保存写 PNG、覆盖保存重写 PNG、且不生成 `.spreview` 文件。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop save_game -- --nocapture`
+  - `cargo test -p mindustry-desktop save_dialog -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 当前 sidecar 写入点已建立，但真实 Java minimap pixmap 像素仍需后续接入该函数入口；
+  - JoinDialog community group header/host card 结构仍需继续对齐；
+  - Settings / Schematics / Editor 等子菜单仍需继续逐项对齐 Java 原版；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
