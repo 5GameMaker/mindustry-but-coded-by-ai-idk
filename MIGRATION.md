@@ -30962,3 +30962,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Schematics 详情 ScrollPane / 真实 SchematicImage 预览仍需继续逼近 Java；
   - JoinDialog community group header/host card 结构仍需继续对齐；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 607. SchematicsDialog 详情标题单数键
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.32%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `SchematicInfoDialog` 标题使用 Java 原版单数 `@schematic`。
+- Java 对照证据：
+  - `SchematicsDialog.SchematicInfoDialog.show(...)` 调用 `title.setText("[[" + Core.bundle.get("schematic") + "] " + schem.name())`；
+  - 详情标题应是单数 `Schematic` 样式，不应显示复数 `Schematics: name`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_schematic_info_dialog(...)` 标题从 `@schematics: name` 改为 `[Schematic] name`；
+    - 扩展 `desktop_launcher_schematics_info_dialog_renders_and_dispatches_buttons`，断言不再出现旧复数标题。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop schematics_info_dialog -- --nocapture`
+  - `cargo test -p mindustry-desktop schematic_info_dialog -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Schematics 详情 ScrollPane / 真实 SchematicImage 预览仍需继续逼近 Java；
+  - JoinDialog community group header/host card 结构仍需继续对齐；
+  - Settings / Editor 等子菜单仍需继续逐项对齐 Java 原版；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
