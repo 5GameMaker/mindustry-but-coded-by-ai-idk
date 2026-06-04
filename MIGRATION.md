@@ -30830,3 +30830,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - JoinDialog search 文本归一化和 community group header/host card 结构仍需继续对齐；
   - 前端所有子菜单仍需继续逐项对齐 Java 原版；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 602. EditorMapInfo 打开失败提示对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **95.27%**，仍未达到完整可玩；继续优先前端/UI 子菜单对齐，目标是让 `EditorMapsDialog.showMap` 的 `Open In Editor` 失败反馈对齐 Java。
+- Java 对照证据：
+  - `EditorMapsDialog.showMap` 点击 `@editor.openin` 后调用 `beginEditMap(map.file)`；
+  - `beginEditMap` 抛错时 catch 并调用 `ui.showErrorMessage("@error.mapnotfound")`；
+  - 失败时不应静默，也不应切换到缺失地图。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `begin_edit_map_from_index(...)` 对 custom map 增加本地候选文件存在性检查；
+    - `OpenInEditor` 失败时设置 `last_menu_info_message = "@error.mapnotfound"`；
+    - 成功路径测试补写 dummy `.msav` fixture，保持 custom map 的 Java `map.file` 前置条件；
+    - 新增 `desktop_launcher_editor_map_info_open_in_editor_failure_shows_mapnotfound_error_like_java`，验证 missing custom map 保留 MapInfo 子窗并显示错误提示。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop editor_map_info -- --nocapture`
+  - `cargo test -p mindustry-desktop map_card_dialog_buttons -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - EditorMapInfo 右侧信息区 ScrollPane 级别细节仍需继续审查；
+  - 前端所有子菜单仍需继续逐项对齐 Java 原版；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
