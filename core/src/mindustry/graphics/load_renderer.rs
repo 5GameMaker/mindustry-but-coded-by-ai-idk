@@ -480,19 +480,69 @@ impl LoadFramePlan {
     }
 
     pub fn into_render_pass(self) -> Option<RenderPass> {
-        let commands = self
-            .commands
+        let LoadFramePlan {
+            stage,
+            stage_text,
+            prompt_text,
+            commands,
+            ..
+        } = self;
+        let commands = commands
             .into_iter()
             .flat_map(LoadRenderCommand::into_render_commands)
             .collect::<Vec<_>>();
 
         if commands.is_empty() {
-            return None;
+            return Some(Self::empty_fallback_render_pass(
+                stage,
+                stage_text,
+                prompt_text,
+            ));
         }
 
         let mut pass = RenderPass::new(RenderPassKind::Custom(LOAD_PASS_KIND.to_string()));
         pass.extend(commands);
         Some(pass)
+    }
+
+    fn empty_fallback_render_pass(
+        stage: LoadStage,
+        stage_text: String,
+        prompt_text: String,
+    ) -> RenderPass {
+        let mut pass = RenderPass::new(RenderPassKind::Custom(LOAD_PASS_KIND.to_string()));
+        pass.push(RenderCommand::clear([0.035, 0.040, 0.052, 1.0]));
+        pass.push(RenderCommand::draw_text(
+            "load render plan empty",
+            RenderPoint::new(24.0, 48.0),
+            [0.95, 0.70, 0.28, 1.0],
+            18.0,
+            0.0,
+            RenderTextAlign::Start,
+            LOAD_STAGE_TEXT_LAYER,
+        ));
+        pass.push(RenderCommand::draw_text(
+            format!(
+                "{} | {}",
+                if stage_text.is_empty() {
+                    stage.label().to_string()
+                } else {
+                    stage_text
+                },
+                if prompt_text.is_empty() {
+                    stage.default_prompt().to_string()
+                } else {
+                    prompt_text
+                }
+            ),
+            RenderPoint::new(24.0, 24.0),
+            [0.68, 0.78, 0.86, 1.0],
+            12.0,
+            0.0,
+            RenderTextAlign::Start,
+            LOAD_PROMPT_TEXT_LAYER,
+        ));
+        pass
     }
 }
 
@@ -1326,7 +1376,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_load_frame_plan_does_not_create_render_pass() {
+    fn empty_load_frame_plan_creates_visible_fallback_render_pass() {
         let plan = LoadFramePlan {
             stage: LoadStage::Boot,
             progress: 0.0,
@@ -1335,8 +1385,29 @@ mod tests {
             commands: Vec::new(),
         };
 
-        assert_eq!(plan.to_render_pass(), None);
-        assert_eq!(plan.into_render_pass(), None);
+        let pass = plan
+            .to_render_pass()
+            .expect("empty load plan should still render a visible fallback pass");
+        assert_eq!(
+            pass.kind,
+            RenderPassKind::Custom(LOAD_PASS_KIND.to_string())
+        );
+        assert!(matches!(
+            pass.commands.first(),
+            Some(RenderCommand::Clear { .. })
+        ));
+        let texts = pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"load render plan empty"));
+        assert!(texts.contains(&"boot | booting"));
+
+        assert!(plan.into_render_pass().is_some());
     }
 
     #[test]

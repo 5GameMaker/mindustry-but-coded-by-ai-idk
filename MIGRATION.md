@@ -19,6 +19,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 933. LoadRenderer 空帧可见兜底
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续优先前端/UI/可玩性，不推进 Mods。
+- 本轮总体进度更新：约 **94.67%**，仍未达到完整可玩；继续优先黑屏/低帧率/输入命中问题收口、Campaign/CustomGame 真开局、原版 UI/所有子菜单还原与真实资源复用。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/load_renderer.rs`
+    - `LoadFramePlan::into_render_pass(...)` 不再在转换后 commands 为空时返回 `None`；
+    - 新增 `empty_fallback_render_pass(...)`，生成 `Custom("load")` pass，至少包含清屏与 `load render plan empty` 诊断文本；
+    - `empty_load_frame_plan_does_not_create_render_pass` 更新为 `empty_load_frame_plan_creates_visible_fallback_render_pass`，锁定加载阶段异常计划也不会静默黑屏。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-core empty_load_frame_plan_creates_visible_fallback_render_pass loading_plan_includes_background_logo_planet_progress_and_prompt -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_load_frame_for_render_uses_load_payload_without_world_bundle desktop_launcher_loading_fragment_state_builds_java_like_load_frames -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe check -j 1 -p mindustry-desktop --features opengl-native-runtime`
+- 后续不可漏：
+  - 继续排查 native OpenGL pacing/redraw 是否造成低 FPS；
+  - 继续压缩菜单 UI 命令重复构建；
+  - 暂不处理 Mods，除非阻塞能玩或 UI 主线。
+
 ## 932. Campaign route sector 选择闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续优先前端/UI/可玩性，不推进 Mods。
