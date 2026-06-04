@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 907. Bloom capture 命令进入 OpenGL buffer/resolve 主链
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `Renderer.java` 的 `bloom.capture/render` 插层行为。
+- 本轮总体进度更新：约 **94.41%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `Renderer.draw()` 在 `Layer.bullet - 0.02f` 插入 `bloom::capture`，在 `Layer.effect + 0.02f` 插入 `bloom::render`；
+  - `bloom` 每帧同步 `intensity` 与 `blurPasses`；
+  - Bloom 不能只停留在审计 marker，必须进入 framebuffer/resolve 后端路径。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `bloom_render_pass(...)` 不再只输出 `bloom-capture/bloom-render` 两个 `Custom`，而是清空 `bloom-buffer`、切到 additive、克隆 bullet/effect layer 范围内的源 draw command 到 bloom pass、恢复 normal，再执行 `bloom-render` marker 与 `ShaderBlit` resolve；
+    - 新增 `bloom_capture_commands_from_frame(...)`，统一控制 Java layer 捕获范围；
+    - `DesktopGraphicsOpenGlBackendAdapterAction` 增加 `BloomCapture/BloomRender`，backend action 不再只能看到普通 `Custom`；
+    - `opengl_backend_bloom_action_from_custom(...)` 解析 `captureLayer/renderLayer/intensity/blurPasses`，为后续 native blur pipeline 留出明确接入口。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_launcher_bloom_settings_emit_renderer_pass_like_java_bullet_effect_capture -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_graphics_opengl_backend_bloom_capture_renders_layer_commands_and_shader_blits -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop desktop_graphics_opengl_resolve_shader_blit_translates_to_fullscreen_quad_draw_commands -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all -- --check`
+  - `git diff --check`
+- 后续不可漏：
+  - 这还不是完整 Java/Arc `Bloom` 的高斯 blur pipeline；后续必须继续补 blur framebuffer ping-pong、intensity 混合与 resize/dispose 生命周期；
+  - 继续优先前端和真实资源复用，不能把 Bloom/backend helper 当作最终完成。
+
 ## 906. Settings linear 动态切换下沉到 OpenGL sampler
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `SettingsMenuDialog.java` / atlas texture filter 行为。
