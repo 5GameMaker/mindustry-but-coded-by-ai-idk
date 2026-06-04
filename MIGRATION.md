@@ -17,6 +17,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 877. Mods browser repo icon response 接入上传链
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.09%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `last_mods_browser_icon_symbols` 与 `apply_mods_browser_icon_response(...)`，把 repo icon PNG 响应写入 `mod_texture_source_bytes`，并为对应 browser icon symbol 插入 `texture_atlas`；
+    - 新增 `mods_browser_icon_atlas_symbol(repo)`，将 `Beta/Override` 等 repo 规范化为稳定 atlas symbol；
+    - Mods browser 卡片在图标响应前继续绘制 `Tex.nomap`，响应后按 repo 映射替换为实际 icon symbol；
+    - 新增 OpenGL 上传链回归，确认 browser icon bytes 会通过 `DesktopGraphicsOpenGlBackendFramePlan::from_frame(...)` 进入 `source_png_bytes`，并在 `drive_texture_upload_sink(...)` 中生成 `ArchivePngBytes` 的 `TexImage2D` 上传。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_graphics_frame_plan_carries_browser_icon_bytes_into_texture_upload -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries -- --nocapture`
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop mods -- --nocapture`
+  - `git diff --check`
+- 后续不可漏：
+  - 当前已经覆盖“响应 bytes → atlas symbol → frame → OpenGL upload plan”的本地主链；仍需把 `DesktopModsBrowserIconRequest` 接真实 HTTP 完成/失败调度，让 Java 同款异步图标请求自动调用响应入口，失败时保持 `Tex.nomap`。
+
 ## 876. Mods browser repo icon lazy request 状态入口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
