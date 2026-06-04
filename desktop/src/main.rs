@@ -1418,10 +1418,11 @@ impl DesktopNativeOpenGlRuntime {
         self.window.request_redraw();
     }
 
-    fn sync_surface_after_scale_factor_changed(&mut self) {
+    fn sync_surface_after_scale_factor_changed(&mut self) -> mindustry_desktop::DesktopSurfaceSize {
         let size = self.window_surface_size();
         self.resize_native_surface(size);
         self.request_redraw();
+        size
     }
 
     fn update_window_title_diagnostic(&mut self, diagnostic: Option<String>) {
@@ -3485,15 +3486,23 @@ impl winit::application::ApplicationHandler for DesktopNativeOpenGlApp<'_> {
             }
         }
 
-        if matches!(&event, winit::event::WindowEvent::ScaleFactorChanged { .. }) {
-            if let Some(renderer) = self.graphics_renderer.as_mut() {
-                renderer.runtime.sync_surface_after_scale_factor_changed();
-            }
-        }
+        let scale_factor_surface_size =
+            if matches!(&event, winit::event::WindowEvent::ScaleFactorChanged { .. }) {
+                self.graphics_renderer
+                    .as_mut()
+                    .map(|renderer| renderer.runtime.sync_surface_after_scale_factor_changed())
+            } else {
+                None
+            };
 
         let should_present = matches!(&event, winit::event::WindowEvent::RedrawRequested);
-        self.pending_events
-            .extend(mindustry_desktop::desktop_frame_loop_events_from_winit_window_event(&event));
+        self.pending_events.extend(
+            mindustry_desktop::desktop_frame_loop_events_from_winit_window_event(&event),
+        );
+        if let Some(size) = scale_factor_surface_size {
+            self.pending_events
+                .push(mindustry_desktop::DesktopFrameLoopEvent::Resize(size));
+        }
 
         if should_present {
             if let Some(result) = self.drain_present_frame() {

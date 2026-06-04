@@ -17,6 +17,21 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 884. ScaleFactorChanged 同步 frame-loop surface size
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
+- 本轮总体进度更新：约 **94.16%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - `sync_surface_after_scale_factor_changed()` 返回当前 native window surface size；
+    - `WindowEvent::ScaleFactorChanged` 除了更新 scale factor 和 native surface，还向 frame loop 追加 `DesktopFrameLoopEvent::Resize(size)`；
+    - 避免 DPI/缩放变化后 native surface 已经 resize，但 frame-loop/effect-buffer/menu hit-test 仍沿用旧 surface size，降低点击偏移、拉伸和黑屏/闪烁风险。
+- 已验证：
+  - `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0 -C codegen-units=1' cargo test -j 1 -p mindustry-desktop native_opengl -- --nocapture`
+  - `git diff --check`
+- 后续不可漏：
+  - 若点击仍偏移，继续把 winit physical/logical position、surface physical size、menu hit-test surface-space 统一记录到 trace，并补高 DPI 多屏移动的集成 smoke。
+
 ## 883. Native OpenGL 默认现代上下文优先
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地实现。
