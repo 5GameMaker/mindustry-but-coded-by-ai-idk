@@ -19,6 +19,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 901. Mods GitHub Java release 无 Jar 失败收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
+- 本轮总体进度更新：约 **94.33%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `githubImportJavaMod(...)` 找不到 `.jar` asset 时抛出 “No JAR file found...”；
+  - 该失败应等价进入 `modError/importFail`，隐藏 `loadfrag` 并展示错误弹窗，而不是只留下后台 guard。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Java release 无 jar 分支改为 `record_mods_import_github_error_like_java(...)`；
+    - 失败时隐藏下载态、记录失败结果、显示 Mods GitHub 错误模态；
+    - 更新 Mods GitHub 测试断言，确认无 jar 后不再保持 loadfrag。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop mods_import_github -- --nocapture`
+- 后续不可漏：
+  - 真实 HTTP executor 接入后，HTTP 状态错误、解析错误、写入错误都要走同一 `modError/importFail` 收口。
+
 ## 900. Mods GitHub branch zipball Location 重定向
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `ModsDialog.java`。
