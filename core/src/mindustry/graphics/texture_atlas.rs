@@ -1334,11 +1334,15 @@ impl<T> TextureAtlasPlan<T> {
         }
     }
 
-    pub fn with_linear_filter(mut self, linear_filter: bool) -> Self {
+    pub fn set_linear_filter(&mut self, linear_filter: bool) {
         self.linear_filter = linear_filter;
         for page in &mut self.pages {
             page.set_linear_filter(linear_filter);
         }
+    }
+
+    pub fn with_linear_filter(mut self, linear_filter: bool) -> Self {
+        self.set_linear_filter(linear_filter);
         self
     }
 
@@ -2129,6 +2133,19 @@ mod tests {
                 .linear_filter
         );
         assert!(!nearest.lookup("half").unwrap().region.pack_meta.edge_bleed);
+
+        let mut restored = nearest.clone();
+        restored.set_linear_filter(true);
+        assert!(restored.linear_filter());
+        assert!(
+            restored
+                .lookup("half")
+                .unwrap()
+                .region
+                .pack_meta
+                .linear_filter
+        );
+        assert!(restored.lookup("half").unwrap().region.pack_meta.edge_bleed);
     }
 
     #[test]

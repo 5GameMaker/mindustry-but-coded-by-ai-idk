@@ -907,6 +907,7 @@ pub enum RenderPassKind {
     Minimap,
     Lighting,
     Darkness,
+    Bloom,
     Ui,
     Custom(String),
 }
@@ -927,6 +928,7 @@ impl RenderPassKind {
             Self::Minimap => "minimap",
             Self::Lighting => "lighting",
             Self::Darkness => "darkness",
+            Self::Bloom => "bloom",
             Self::Ui => "ui",
             Self::Custom(name) => name.as_str(),
         }
@@ -947,6 +949,7 @@ impl RenderPassKind {
             Self::Minimap => 40,
             Self::Lighting => 50,
             Self::Darkness => 70,
+            Self::Bloom => 105,
             Self::Ui => 60,
             Self::Custom(_) => 1_000,
         }
@@ -967,6 +970,7 @@ impl RenderPassKind {
             Self::Minimap => RendererDrawStage::Debug,
             Self::Lighting => RendererDrawStage::Lighting,
             Self::Darkness => RendererDrawStage::Darkness,
+            Self::Bloom => RendererDrawStage::BlockOverdraw,
             Self::Ui => RendererDrawStage::Ui,
             Self::Custom(_) => RendererDrawStage::Debug,
         }
@@ -1631,6 +1635,12 @@ mod tests {
                 "darkness",
                 70,
                 RendererDrawStage::Darkness,
+            ),
+            (
+                RenderPassKind::Bloom,
+                "bloom",
+                105,
+                RendererDrawStage::BlockOverdraw,
             ),
             (RenderPassKind::Ui, "ui", 60, RendererDrawStage::Ui),
         ];

@@ -19,6 +19,43 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 904. Settings 图形即时副作用接入 native/bloom/atlas
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `SettingsMenuDialog.java` / `Renderer.java` / `Control.java` 相关行为。
+- 本轮总体进度更新：约 **94.38%**，仍未达到完整可玩；继续优先前端/UI、所有子菜单还原、黑屏/低帧率收口、真实资源复用与 Java↔Rust 联机兼容。
+- Java 对照点：
+  - `vsync` 勾选后调用 `Core.graphics.setVSync(...)`；
+  - `fullscreen` 勾选后调用 `Core.graphics.setFullscreen(...)`；
+  - `linear` 勾选后遍历已加载 atlas textures 并切换 linear/nearest；
+  - `bloom` 勾选后走 `renderer.toggleBloom(...)`；
+  - `bloomintensity` / `bloomblur` 由渲染循环读取并应用到 bloom pass。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - 给 `TextureAtlasPlan` 增加可变 `set_linear_filter(...)`，Settings 能即时重刷已有 atlas plan/page/region metadata；
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 增加 `RenderPassKind::Bloom`，挂入 Java renderer draw stage 排序体系；
+  - `desktop/src/lib.rs`
+    - `apply_setting_override_side_effect(...)` 接入 `vsync/fullscreen/linear/bloom/bloomintensity/bloomblur`；
+    - `linear` 直接作用到 `texture_atlas`，不再停留在设置文本；
+    - `bloom` 生成真实 `RenderFramePlan` pass，携带 capture/render marker、intensity、blurPasses 与 ShaderBlit resolve；
+    - 图形页 reset 会恢复上述运行时状态；
+  - `desktop/src/main.rs`
+    - native OpenGL app 初始化时同步 Settings/CLI 的 vsync/fullscreen；
+    - 运行中 Settings 变化会更新 swap interval、frame pacing 与 winit fullscreen。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt --all`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-core texture_atlas_region_preserves_scale_and_linear_filter_metadata -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-core java_renderer_stage_and_pass_mapping_is_exhaustive_and_ordered -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop --lib desktop_launcher_settings_immediate_side_effects_match_upstream_menu_expectations -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop --lib desktop_launcher_settings_reset_current_page_restores_graphics_side_effects_like_java -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop --lib desktop_launcher_bloom_settings_emit_renderer_pass_like_java_bullet_effect_capture -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop native_opengl_app_initializes_window_flags_from_settings_overrides_like_java -- --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -j 1 -p mindustry-desktop native_opengl_app_keeps_cli_window_flags_when_settings_are_default -- --nocapture`
+- 后续不可漏：
+  - bloom 当前已进入 render frame / backend resolve 链，但仍需要继续把 marker 降到完整 FBO blur shader 与资源生命周期；
+  - fullscreen 热键 `Binding.fullscreen` 还需继续接入窗口切换与 settings 回写；
+  - linear 的 GPU texture 实例即时重滤波还需在真实 texture resource table 层继续补齐。
+
 ## 903. Settings reset 恢复图形运行时副作用
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮未联网，只对照本地 `SettingsMenuDialog.java` 的 reset-to-defaults 行为。

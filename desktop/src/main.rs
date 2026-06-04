@@ -1418,6 +1418,20 @@ impl DesktopNativeOpenGlRuntime {
         self.window.request_redraw();
     }
 
+    fn set_vsync(&self, enabled: bool) {
+        let interval = if enabled {
+            SwapInterval::Wait(NonZeroU32::new(1).expect("non-zero vsync interval"))
+        } else {
+            SwapInterval::DontWait
+        };
+        let _ = self.surface.set_swap_interval(&self.context, interval);
+    }
+
+    fn set_fullscreen(&self, enabled: bool) {
+        self.window
+            .set_fullscreen(enabled.then(|| winit::window::Fullscreen::Borderless(None)));
+    }
+
     fn sync_surface_after_scale_factor_changed(&mut self) -> mindustry_desktop::DesktopSurfaceSize {
         let size = self.window_surface_size();
         self.resize_native_surface(size);
@@ -3379,8 +3393,24 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
 impl<'a> DesktopNativeOpenGlApp<'a> {
     fn new(
         launcher: &'a mut mindustry_desktop::DesktopLauncher,
-        native_config: mindustry_desktop::DesktopNativeOpenGlRuntimeConfig,
+        mut native_config: mindustry_desktop::DesktopNativeOpenGlRuntimeConfig,
     ) -> Self {
+        if launcher
+            .setting_override_value("graphics", "vsync")
+            .is_some()
+        {
+            native_config.vsync = launcher.graphics_vsync_enabled;
+        } else {
+            launcher.graphics_vsync_enabled = native_config.vsync;
+        }
+        if launcher
+            .setting_override_value("graphics", "fullscreen")
+            .is_some()
+        {
+            native_config.fullscreen = launcher.graphics_fullscreen_enabled;
+        } else {
+            launcher.graphics_fullscreen_enabled = native_config.fullscreen;
+        }
         let frame_loop = mindustry_desktop::DesktopFrameLoopState::new(
             native_config.surface.clone(),
             desktop_native_opengl_frame_pacing(launcher, &native_config),
@@ -3395,6 +3425,28 @@ impl<'a> DesktopNativeOpenGlApp<'a> {
             runtime_init_error: None,
             effect_renderer: mindustry_desktop::HeadlessDesktopEffectRenderer::default(),
             pending_events: Vec::new(),
+        }
+    }
+
+    fn sync_graphics_settings_to_native_runtime(&mut self) {
+        let settings_vsync = self.launcher.graphics_vsync_enabled;
+        if self.native_config.vsync != settings_vsync {
+            self.native_config.vsync = settings_vsync;
+            if let Some(renderer) = self.graphics_renderer.as_ref() {
+                renderer.runtime.set_vsync(settings_vsync);
+            }
+            self.frame_loop.pacing =
+                desktop_native_opengl_frame_pacing(self.launcher, &self.native_config);
+            self.next_redraw_at = std::time::Instant::now();
+        }
+
+        let settings_fullscreen = self.launcher.graphics_fullscreen_enabled;
+        if self.native_config.fullscreen != settings_fullscreen {
+            self.native_config.fullscreen = settings_fullscreen;
+            if let Some(renderer) = self.graphics_renderer.as_ref() {
+                renderer.runtime.set_fullscreen(settings_fullscreen);
+                renderer.runtime.request_redraw();
+            }
         }
     }
 
@@ -3424,6 +3476,7 @@ impl<'a> DesktopNativeOpenGlApp<'a> {
             graphics_renderer,
             &mut self.effect_renderer,
         );
+        self.sync_graphics_settings_to_native_runtime();
         if desktop_native_trace_enabled() {
             desktop_native_trace(format!(
                 "app.frame: done index={} presented={}",
@@ -3496,9 +3549,8 @@ impl winit::application::ApplicationHandler for DesktopNativeOpenGlApp<'_> {
             };
 
         let should_present = matches!(&event, winit::event::WindowEvent::RedrawRequested);
-        self.pending_events.extend(
-            mindustry_desktop::desktop_frame_loop_events_from_winit_window_event(&event),
-        );
+        self.pending_events
+            .extend(mindustry_desktop::desktop_frame_loop_events_from_winit_window_event(&event));
         if let Some(size) = scale_factor_surface_size {
             self.pending_events
                 .push(mindustry_desktop::DesktopFrameLoopEvent::Resize(size));
@@ -3666,6 +3718,59 @@ mod tests {
             mindustry_desktop::DesktopFramePacing::uncapped(),
             "Java treats fpscap > 240, including the UI sentinel 245, as uncapped"
         );
+    }
+
+    #[test]
+    fn native_opengl_app_initializes_window_flags_from_settings_overrides_like_java() {
+        let mut launcher = mindustry_desktop::DesktopLauncher::new(Vec::new());
+        launcher.set_setting_override("graphics", "vsync", "false");
+        launcher.set_setting_override("graphics", "fullscreen", "true");
+        let native_config = mindustry_desktop::DesktopNativeOpenGlRuntimeConfig::from_surface(
+            mindustry_desktop::DesktopSurfaceConfig {
+                title: "Native Test Settings".into(),
+                size: mindustry_desktop::DesktopSurfaceSize::new(960, 540),
+                scale_factor: 1.0,
+                resizable: true,
+                maximized: false,
+                visible: false,
+            },
+        );
+
+        let app = DesktopNativeOpenGlApp::new(&mut launcher, native_config);
+
+        assert!(!app.native_config.vsync);
+        assert!(app.native_config.fullscreen);
+        assert_eq!(
+            app.frame_loop.pacing,
+            mindustry_desktop::DesktopFramePacing::from_java_fps_cap(
+                mindustry_desktop::DESKTOP_JAVA_DEFAULT_RUNTIME_FPS_CAP
+            ),
+            "Java SettingsMenuDialog.setVSync callback should drive runtime frame pacing when vsync is off"
+        );
+    }
+
+    #[test]
+    fn native_opengl_app_keeps_cli_window_flags_when_settings_are_default() {
+        let mut launcher = mindustry_desktop::DesktopLauncher::new(Vec::new());
+        let mut native_config = mindustry_desktop::DesktopNativeOpenGlRuntimeConfig::from_surface(
+            mindustry_desktop::DesktopSurfaceConfig {
+                title: "Native Test CLI Flags".into(),
+                size: mindustry_desktop::DesktopSurfaceSize::new(960, 540),
+                scale_factor: 1.0,
+                resizable: true,
+                maximized: false,
+                visible: false,
+            },
+        );
+        native_config.vsync = false;
+        native_config.fullscreen = true;
+
+        let app = DesktopNativeOpenGlApp::new(&mut launcher, native_config);
+
+        assert!(!app.native_config.vsync);
+        assert!(app.native_config.fullscreen);
+        assert!(!app.launcher.graphics_vsync_enabled);
+        assert!(app.launcher.graphics_fullscreen_enabled);
     }
 
     #[test]
