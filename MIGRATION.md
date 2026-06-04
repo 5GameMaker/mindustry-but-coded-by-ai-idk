@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 957. Campaign sector submission 外链入口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
+- 最新用户优先级：第一优先级是 UI 部分所有子菜单与原版对齐；第二优先级是确保游戏能够正常游玩并在代码层面上和原版实现一致。前端必须还原原版子菜单，不只是主菜单。
+- 本轮总体进度更新：约 **94.97%**，仍未达到完整可玩；本轮对齐 Java `PlanetDialog.java:1327-1334` 与 `SectorSubmissions.java` 的 `@sectors.viewsubmission` 条件外链入口。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuRouteShellAction` 新增 `OpenCampaignSectorSubmission(i32)`；
+    - `DesktopLauncher` 新增 `campaign_show_sector_submissions` 与 `last_campaign_sector_submission_action`，默认保持 Java `Vars.showSectorSubmissions=false`；
+    - 新增 `DesktopCampaignSectorSubmissionAction`，记录 sector id、URI 与 `Platform::open_uri` 返回值；
+    - 新增 Java `SectorSubmissions` 等价链接表，按隐藏 Serpulo sector id 返回提交链接，并按 `generateEnemyBase` / hidden preset / `hasBase && look` / `alwaysUnlocked` 条件决定是否展示；
+    - Campaign sector card 新增 `@sectors.viewsubmission` clear/link 按钮，点击后打开对应 Discord submission URI；
+    - 新增 `desktop_launcher_campaign_route_opens_sector_submission_link_like_java`，覆盖默认隐藏、开启后渲染、命中 action 与平台 `open_uri` 调用。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_opens_sector_submission_link_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop campaign -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --release --features opengl-native-runtime`
+- 后续继续：
+  - Campaign 仍需从 smoke world 过渡到真实 sector/world load/generator/runtime 链路；
+  - `SectorSubmissions` 后续应下沉到 core `maps` 等价模块，并与真实 planet sector registry 的 `generateEnemyBase` 状态打通；
+  - 前端下一轮继续按 Settings/Data/Controls/Mods 与 Play/Join/Host/Load/Campaign 子菜单差异收口。
+
 ## 956. CampaignRulesDialog 战役难度/规则弹窗
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续暂停 Mods，优先 UI 子菜单与可玩性。
@@ -42,7 +66,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo check -p mindustry-desktop --features opengl-native-runtime`
 - 后续继续：
   - `CampaignRulesDialog` 仍需接入真实 planet saveRules 持久化、tooltip/info 文案完全本地化，以及与多人/Call.setRules 等价链路；
-  - Campaign 仍缺 `@sectors.viewsubmission` 条件外链；
+  - `@sectors.viewsubmission` 条件外链已在 957 接入；后续需下沉到 core maps/sector registry；
   - Campaign 仍需从 smoke world 过渡到真实 sector/world load/generator/runtime 链路。
 
 ## 955. Campaign PlanetDialog sectorlist 折叠列表与搜索
