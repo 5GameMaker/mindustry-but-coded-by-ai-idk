@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1009. LaunchLoadout picker 候选与资源拆分对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，并推进 Campaign 启动前 `LaunchLoadoutDialog` 的可玩性关键路径。
+- 本轮总体进度更新：约 **95.72%**，仍未达到完整可玩；本轮修正 Campaign `LaunchLoadoutDialog` schematic picker 和资源汇总两个 Java 差异。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_campaign_launch_loadout_dialog(...)` 的资源汇总括号拆分从 Rust 旧硬编码 `copper => 100` 改为读取当前选中 schematic 的真实 `requirements`，对齐 Java `selected.requirements()` + `universe.getLaunchResources()` 的 `(launch + schematic)` 显示；
+    - `campaign_launch_loadout_picker_candidate_rect(...)`、渲染和 hit-test 去掉 `take(4)` / `min(4)` 硬截断，候选不再只能显示/命中前四个；
+    - 扩展 `desktop_launcher_campaign_launch_loadout_picker_selects_and_commits_like_java`，锁定选中 Foundation 后资源汇总使用真实 schematic requirement；
+    - 新增 `desktop_launcher_campaign_launch_loadout_picker_supports_more_than_four_candidates_like_java`，人工注入第 5 个 eligible loadout，验证可渲染、可命中、可选择、确认后按 Java source-core key 写回 `lastloadout-*`。
+- Java 对齐依据：
+  - `LaunchLoadoutDialog.java` 使用 `selected.requirements()` 计算 schematic 资源，显示 `total[gray] (launch + schematic)`；
+  - Java 遍历 `schematics.getLoadouts()` 中全部符合 core size 的 loadout，并按列换行，不截断前四个。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_picker --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop campaign_launch_loadout --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_campaign_launch_resources_opens_child_loadout_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe build -p mindustry-desktop --bin mindustry-desktop --release`
+- 本轮 release 客户端：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+- 后续继续：
+  - LaunchLoadout picker 视觉仍需继续向 Java `SchematicImage` 卡片靠拢；
+  - 主菜单 submenu 仍需补 `scene_margin + menu_ui_scale + hit-test` 联合回归，并继续接真实平台 safe-area 来源。
+
 ## 1008. MapPlay CustomRules 右侧重复入口全部退场
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续第一优先级 UI 子菜单对齐，按 Java `CustomRulesDialog` 主 ScrollPane 结构收口 MapPlay CustomRules 右侧重复 rail。
