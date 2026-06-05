@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1002. Pause CustomRules 隐藏 allowedit inline 行
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，修正 Pause 与 MapPlay 的 `CustomRulesDialog(false/true)` 差异：Pause 侧不应在 teams 主内容流显示 `@rules.allowedit`，MapPlay 侧继续保留。
+- 本轮总体进度更新：约 **95.65%**，仍未达到完整可玩；本轮让 Pause teams inline 从 `allowedit -> playerteam -> enemyteam -> baseTeams` 改为 `playerteam -> enemyteam -> baseTeams`，避免暂停自定义规则出现 Java 默认构造器不会提供的 allowedit 行。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `pause_custom_rules_inline_teams_visible()` 不再因 `@rules.allowedit` 搜索命中而显示 teams 分组；
+    - Pause teams 内容高度去掉 allowedit 行的 `36.0`；
+    - 新增/使用 pause 专用 selector/section 起点几何，让 player/enemy selector 与 base team collapser 整体上移，不留下空白 allowedit 槽；
+    - `pause_overlay_action_at_surface_point(...)` 不再在 Pause 主内容区命中 `TogglePauseAllowEditRules`；
+    - `push_pause_overlay_custom_rules_modal(...)` 不再渲染 Pause inline allowedit 行；
+    - 更新 `desktop_launcher_paused_world_overlay_custom_rules_teams_inline_like_java`，断言旧 allowedit 区域不会返回 `TogglePauseAllowEditRules`，并改用 pause 专用 selector rect。
+- Java 对齐依据：
+  - `PausedDialog.java` 使用 `new CustomRulesDialog()`，即 `showRuleEditRule=false`；
+  - `CustomRulesDialog.java` 只有 `showRuleEditRule` 为真时才在 teams 分类加入 `@rules.allowedit`，MapPlay 使用 `new CustomRulesDialog(true)` 因此仍保留该行。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_teams_inline_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_resource_environment_entries_inline_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_custom_rules_teams_inline_like_java --lib -- --test-threads=1 --nocapture`
+- 后续继续：
+  - 继续审查 Pause CustomRules 是否还有 child rail/主内容重复项与 Java `setupMain()` 不一致；
+  - 对 CustomRules 之外的 P0 可见差异继续推进，例如 Workshop 可见性与 desktop submenu scene-margin hitbox。
+
 ## 1001. MapPlay CustomRules resourcesbuilding policy 尾部内联
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，对照 Java `CustomRulesDialog.category("resourcesbuilding")` 尾部，把 `@rules.hidebannedblocks` 与 `@bannedblocks.whitelist` 从 MapPlay 旧 policy stack 收敛到 `@bannedblocks` 后方。
