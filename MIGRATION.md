@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 984. MapPlay CustomRules resourcesbuilding 入口内联
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续优先对齐 Java `CustomRulesDialog.resourcesbuilding` 主内容流。
+- 本轮总体进度更新：约 **95.47%**，仍未达到完整可玩；本轮把 MapPlay CustomRules 的 `@configure` / `@bannedblocks` 从仅依赖右侧快捷 rail，推进为 Java 式 `resourcesbuilding` 内容区 inline 入口。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_play_customize_inline_resource_buttons(...)` 与对应 rect/y 轴 helper，使 `@configure` 和 `@bannedblocks` 按搜索条件参与 CustomRules 主内容流布局；
+    - 在 `push_map_play_customize_dialog(...)` 的 `@rules.title.resourcesbuilding` 分类中渲染 inline `@configure` / `@bannedblocks` 按钮，保留旧右侧 rail 作为过渡兼容；
+    - 将 inline `@configure` 命中接入现有 `OpenLoadout`，继续复用 `LoadoutDialog` draft、max、reset、back 与 `PlaySelected` pending 提交语义；
+    - 将 inline `@bannedblocks` 命中接入现有 `OpenBannedContent(Blocks)`，继续复用 Java 式 BannedContentDialog 网格、搜索、分类与 pending 规则编辑；
+    - 调整 hit-test 顺序，使后绘制的 number / banned policy 行优先于 resources inline 入口，避免当前无 ScrollPane 过渡布局下热区重叠导致点击错路由。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_loadout_child_dialog_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_environment_toggles_match_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,703,360` 字节。
+- 后续继续：
+  - MapPlay CustomRules 仍缺 Java ScrollPane 式完整垂直流，当前 inline resources 入口在小视口下仍采用紧凑行作为过渡；
+  - `@bannedunits` 仍需回到 Java `unit` 分类 inline 入口；
+  - 下一优先级建议推进 environment 分类顺序，尤其把 `solarMultiplier` 从 Rust 独立 number rows 进一步收敛到 Java environment 流。
+
 ## 983. MapPlay 行星默认环境属性同步
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续围绕 Java `Planet.applyRules(rules, true)` 语义收敛。
