@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1010. Desktop submenu margin/scale 命中联合回归
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续第一优先级 UI 子菜单对齐，收口主菜单 desktop submenu 在 scene margin 与非默认 UI scale 下的 hitbox 风险。
+- 本轮总体进度更新：约 **95.73%**，仍未达到完整可玩；本轮没有改生产逻辑，补强 Java `MenuFragment` 风格的布局=命中联合回归。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_menu_submenu_hit_test_uses_scene_margins_and_ui_scale_like_java`；
+    - 测试设置 `menu_scene_margin_top=18`、`menu_scene_margin_bottom=11`、`menu_ui_scale=1.35`、非默认 frame delta；
+    - 先命中 `Database` root，再打开 Database submenu，验证 `ContentDatabase` 子按钮中心点仍通过 `menu_button_at_surface_point(...)` 命中，并能 dispatch 到 `DesktopMenuRoute::Database`。
+- Java 对齐依据：
+  - `MenuFragment.java` desktop submenu 由同一 Scene2D Table 布局与命中，scene margin spacer 决定子项偏移；
+  - Rust `MenuUiPlan` 与 `hit_test_ui(...)` 应共享相同 `MenuFrameInput`，特别是 scene margin 与 `Scl.scl(...)` 过渡 scale。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_menu_submenu_hit_test_uses_scene_margins_and_ui_scale_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-core menu_ui_plan_desktop_submenu_anchor_respects_scene_margins_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe build -p mindustry-desktop --bin mindustry-desktop --release`
+- 本轮 release 客户端：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+- 后续继续：
+  - 真实平台 safe-area 来源仍需接入 launcher/menu frame input；
+  - LaunchLoadout picker 视觉继续向 Java `SchematicImage` 卡片靠拢；
+  - Workshop/Editor/Mods/Schematics 相关入口继续审查 steam 条件与真实平台动作。
+
 ## 1009. LaunchLoadout picker 候选与资源拆分对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，并推进 Campaign 启动前 `LaunchLoadoutDialog` 的可玩性关键路径。
