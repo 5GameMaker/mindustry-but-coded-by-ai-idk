@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1005. MapPlay CustomRules configure 右侧重复入口退场
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，缩减 MapPlay CustomRules 右侧 child rail 中已由 resourcesbuilding 主 ScrollPane 承担的重复入口。
+- 本轮总体进度更新：约 **95.68%**，仍未达到完整可玩；本轮让 MapPlay `@configure` 只通过 resourcesbuilding inline 按钮打开 LoadoutDialog，右侧 index `8 -> OpenLoadout` rail 不再渲染、不再命中。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_map_play_customize_dialog(...)` 渲染右侧 rail 时跳过 index `8` 的 `@configure`；
+    - `active_menu_route_shell_action_at_surface_point(...)` 移除 MapPlay rail index `8 -> OpenLoadout` 的 hit-test 分支；
+    - 更新 `desktop_launcher_map_play_custom_rules_loadout_child_dialog_like_java`，断言 inline `@configure` 仍能打开 loadout，旧 rail configure 坐标不再返回 `OpenLoadout`。
+- Java 对齐依据：
+  - `CustomRulesDialog.java` 的 `@configure` 是 resourcesbuilding 分类内部 `current.button("@configure", ...)`，不是右侧独立 rail；
+  - Rust 仍保留 `OpenLoadout` action 和 loadout dialog 本体，作为 inline button 的真实目标。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_custom_rules_loadout_child_dialog_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --test-threads=1 --nocapture`
+- 后续继续：
+  - MapPlay rail 后续继续逐项退 `bannedblocks/bannedunits/weather/planet/ambient`；
+  - Pause rail 后续继续逐项退 `bannedblocks/bannedunits/weather/planet/ambient/configure`。
+
 ## 1004. Pause CustomRules teams 右侧重复入口退场
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，按 Java `CustomRulesDialog.setupMain()` 主 ScrollPane 语义，开始缩减 Pause CustomRules 右侧 child rail 的重复入口。
