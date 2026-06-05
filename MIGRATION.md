@@ -19,6 +19,42 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 991. MapPlay teams 每队独立折叠态
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续优先推进 UI 子菜单与 Java 原版一致，聚焦 `CustomRulesDialog.java` 中 `Team.baseTeams` 循环里每个 team 独立 `boolean[] shown` 的折叠语义。
+- 本轮总体进度更新：约 **95.54%**，仍未达到完整可玩；本轮把 MapPlay CustomRules teams inline 从单选展开改为每个 base team 独立展开/收起，避免把 inline collapser 状态和 TeamRules child dialog 的 selected team 混用。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_play_inline_team_rules_expanded_teams: BTreeSet<usize>`，专门承载 MapPlay CustomRules 主内容区的 Java collapser 展开状态；
+    - `map_play_team_rules_selected_team` 继续保留给右侧/child TeamRules dialog 使用，不再承担 inline 展开状态；
+    - `map_play_custom_rules_toggle_content_height(...)` 按 expanded set 数量累计每队展开字段高度；
+    - `map_play_customize_inline_team_section_rects(...)` 与 `map_play_customize_inline_team_field_rects(...)` 改用 expanded set 动态布局，多队展开时每个展开字段块都会压低其后的 section；
+    - `ToggleTeamRuleSection` 在 child dialog 打开时仍更新 `map_play_team_rules_selected_team`，在 inline 主内容中则只 toggle expanded set；
+    - `ToggleTeamRule` / `AdjustTeamRuleNumber` 在 inline 来源下保持对应 team 展开，但不污染 child dialog selected team；
+    - 关闭 MapPlay 或关闭 Customize 时清理 expanded set，避免下一次打开残留旧折叠状态；
+    - teams section 渲染的高亮/`up-open`/`down-open` 图标改用 expanded set 判断，贴近 Java 每个按钮独立 checked/upOpen 状态。
+- 测试更新：
+  - `desktop_launcher_map_play_custom_rules_teams_inline_like_java`
+    - section 点击后断言 `map_play_team_rules_selected_team == None`，确保 inline collapser 不复用 child dialog selected team；
+    - 断言 expanded set 包含当前展开 team；
+    - 直接展开第二个 team 后断言两个 team 都在 expanded set 中，字段 rect 数量为 `JAVA_ORDER.len() * 2`；
+    - 再次 toggle 第一个 team 后断言只收起该 team，第二个 team 保持展开，对齐 Java 每队独立 `shown[]`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_teams_inline_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_back_key_closes_nested_child_dialogs_like_java_stack --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,735,616` 字节。
+- 后续继续：
+  - Pause CustomRules 仍需要复用 MapPlay 当前的 `JAVA_ORDER/enabled/expanded set` 方案；
+  - MapPlay teams inline 视觉仍需继续对齐 Java `Styles.togglet` 的 260x55 按钮、marginLeft 14、padBottom 2 和 collapser 动画/间距；
+  - `@rules.allowedit` 仍需继续按 Java `showRuleEditRule` 精确显示；
+  - 如果多队同时展开导致默认视口下字段过长，后续要继续优化 ScrollPane 的滚动起点/可见性，使视觉和 Java `ScrollPane` 更一致。
+
 ## 990. MapPlay teams 完整字段顺序内联与 disabled 条件
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续优先推进 UI 子菜单与 Java 原版一致，聚焦 `CustomRulesDialog.category("teams")` 的每队折叠字段完整顺序。
