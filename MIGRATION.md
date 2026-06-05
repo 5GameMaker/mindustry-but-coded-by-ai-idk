@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 992. TeamRules child dialog 字段顺序复用 Java teams 顺序
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续优先推进 UI 子菜单对齐，聚焦过渡期仍保留的 MapPlay/Pause `TeamRules` child dialog，避免它们和 MapPlay inline teams 的 Java 字段顺序继续漂移。
+- 本轮总体进度更新：约 **95.55%**，仍未达到完整可玩；本轮把 MapPlay/Pause TeamRules child dialog 的字段命中、渲染和 tooltip 统一切到 `DesktopInlineTeamRuleField::JAVA_ORDER`，并复用 Java condition 对应的 `enabled(...)` disabled 语义。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 删除旧的 `DesktopTeamRuleToggle::ALL` / `DesktopTeamRuleNumber::ALL`，避免 child dialog 继续按“先全部 toggle、再全部 number”的非 Java 顺序布局；
+    - MapPlay TeamRules child dialog hit-test 改为按 `JAVA_ORDER` 扫描字段，toggle/number 分支复用同一 row index；
+    - Pause TeamRules child dialog hit-test 同步改为 `JAVA_ORDER`，并在 disabled 时跳过 action；
+    - MapPlay/Pause child dialog 渲染改为 `JAVA_ORDER`，label、toggle、`-`、`+` 和 value 都按 `enabled(...)` 切换灰态；
+    - TeamRules hover tooltip 从旧 `DesktopTeamRuleToggle::ALL` 改为 `JAVA_ORDER` 中的 toggle 字段，保证 `protectcores.info` 等 tooltip 跟随新 row 位置；
+    - 受影响测试坐标不再硬编码“ProtectCores 在第 0 行 / BlockHealth 在 toggle offset 后”，而是通过 `JAVA_ORDER.position(...)` 获取 Java 行号。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_team_rules_child_dialog_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_back_key_closes_nested_child_dialogs_like_java_stack --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,736,128` 字节。
+- 后续继续：
+  - Pause CustomRules 主内容仍未像 MapPlay 一样拥有 teams inline 分类，应继续迁移；
+  - child dialog 仍是过渡路径，最终应以 Java `CustomRulesDialog.setupMain()` 主内容流为准；
+  - 当前 child dialog 仅复用字段顺序/disabled 语义，按钮样式、collapser 视觉和 ScrollPane 行为仍需继续对齐。
+
 ## 991. MapPlay teams 每队独立折叠态
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续优先推进 UI 子菜单与 Java 原版一致，聚焦 `CustomRulesDialog.java` 中 `Team.baseTeams` 循环里每个 team 独立 `boolean[] shown` 的折叠语义。
