@@ -19,6 +19,38 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 997. MapPlay CustomRules unit 分类 bannedunits 主内容内联
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，按 Java `CustomRulesDialog.setupMain()` 的 `waves -> resourcesbuilding -> unit -> enemy -> environment -> planet -> teams` 主内容顺序补齐 MapPlay `unit` 分类。
+- 本轮总体进度更新：约 **95.60%**，仍未达到完整可玩；本轮把 MapPlay CustomRules 的 `@bannedunits` 从仅右侧 child rail 入口推进为 unit 分类主内容 inline 按钮，并同步加入 MapPlay unit toggle 组，使 MapPlay/Pause 的 CustomRules 主流进一步收敛。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `MAP_PLAY_CUSTOM_RULE_UNIT_TOGGLES`，并把 `@rules.title.unit` 插入 `MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS` 的 resourcesbuilding 与 enemy 之间；
+    - 新增 `map_play_customize_inline_unit_buttons()` 与 `map_play_customize_inline_unit_button_rects(...)`，搜索命中 `@bannedunits` 时返回 `OpenBannedContent(Units)` 主内容按钮；
+    - `map_play_customize_toggle_rects(...)`、`map_play_custom_rules_toggle_content_height(...)`、`map_play_customize_y_after_toggle_groups(...)`、environment inline rect helper 同步计入 resource/unit/environment 内联行高度，避免插入 unit 后后续分组 y 轴错位；
+    - `push_map_play_customize_dialog(...)` 在主 ScrollPane 渲染 unit 分类标题、unit toggles 和 `@bannedunits` inline 按钮；
+    - `active_menu_route_shell_action_at_surface_point(...)` 在 MapPlay CustomRules 主内容 hit-test 中接入 inline unit 按钮；
+    - 扩展 `desktop_launcher_map_play_dialog_opens_help_customize_and_highscore`，覆盖 `Units` 分类标题、inline `@bannedunits` rect、hit-test、打开 Units BannedContentDialog，并修正旧测试对关闭后底层坐标与默认空搜索可见性的假设。
+- Java 对齐依据：
+  - `core/src/mindustry/ui/dialogs/CustomRulesDialog.java` 中 `category("unit")` 位于 resourcesbuilding 后、enemy 前；
+  - `@bannedunits` 在 unit 分类内部，按钮行为是 `bannedUnits.show(rules.bannedUnits)`，不是独立顶层分类；
+  - MapPlay 原版使用 `new CustomRulesDialog(true)`，应复用同一主 ScrollPane 规则流。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_scrolls_rows_like_java_scrollpane --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_planet_picker_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_teams_inline_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_resource_environment_entries_inline_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,798,080` 字节。
+- 后续继续：
+  - 继续把 Java `category("unit")` 中 unit 数值项（如 `@rules.unitcap`、`@rules.unitdamagemultiplier` 等）从通用 number stack 收敛到 unit 分类主内容流；
+  - 审查 Pause `CustomRulesDialog(false)` 与 MapPlay `CustomRulesDialog(true)` 的差异，尤其 Pause 是否还应显示 `@rules.allowedit`；
+  - 顶部/右侧 child rail 仍为过渡兼容，应继续向 Java `setupMain()` 的单 ScrollPane 主内容流收敛。
+
 ## 996. Pause CustomRules planet 区主内容内联
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，按 Java `CustomRulesDialog.setupMain()` 的真实分类顺序把 Pause `@rules.title.planet` 从顶部 child 入口推进到主 ScrollPane 内容流。
