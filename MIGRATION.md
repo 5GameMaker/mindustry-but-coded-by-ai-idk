@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1006. Pause CustomRules configure 右侧重复入口退场
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续第一优先级 UI 子菜单对齐，缩减 Pause CustomRules 右侧 child rail 中已由 resourcesbuilding 主 ScrollPane 承担的重复 `@configure` 入口。
+- 本轮总体进度更新：约 **95.69%**，仍未达到完整可玩；本轮让 Pause `@configure` 只通过 resourcesbuilding inline 按钮打开 LoadoutDialog，右侧 index `4 -> OpenPauseLoadout` rail 不再渲染、不再命中。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_pause_overlay_custom_rules_modal(...)` 渲染右侧 child rail 时同时跳过 index `3` 的 teams 和 index `4` 的 `@configure`；
+    - `pause_overlay_action_at_surface_point(...)` 移除 Pause rail index `4 -> OpenPauseLoadout` 的 hit-test 分支；
+    - 更新 `desktop_launcher_paused_world_overlay_custom_rules_loadout_child_dialog_like_java`，断言 inline `@configure` 仍能打开 loadout，旧 rail configure 坐标不再返回 `OpenPauseLoadout`；
+    - 将 Pause CustomRules inline 入口测试中的英文搜索词改为实际本地化 key 文案，避免中文资源下误判。
+- Java 对齐依据：
+  - `CustomRulesDialog.java` 的 `@configure` 是 resourcesbuilding 分类内部 `current.button("@configure", ...)`，不是右侧独立 rail；
+  - Pause 使用 `new CustomRulesDialog()`，右侧重复入口应逐步退场，保留主 ScrollPane inline 真实路径。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_loadout_child_dialog_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_resource_environment_entries_inline_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe build -p mindustry-desktop --bin mindustry-desktop --release`
+- 本轮已生成客户端：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+- 后续继续：
+  - Pause rail 后续继续逐项退 `bannedblocks/bannedunits/weather/planet/ambient`；
+  - MapPlay rail 后续继续逐项退 `bannedblocks/bannedunits/weather/planet/ambient`；
+  - 继续以 Java 主 ScrollPane 子菜单结构为准，优先修 UI 子菜单，再推进可玩性和整体 runtime 接入。
+
 ## 1005. MapPlay CustomRules configure 右侧重复入口退场
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，缩减 MapPlay CustomRules 右侧 child rail 中已由 resourcesbuilding 主 ScrollPane 承担的重复入口。
