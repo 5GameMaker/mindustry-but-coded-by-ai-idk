@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1012. LaunchLoadout picker Java 宽度分列
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，修正 Campaign `LaunchLoadoutDialog` 的 loadout picker 布局。
+- 本轮总体进度更新：约 **95.75%**，仍未达到完整可玩；本轮没有改生产逻辑，专门对齐 Campaign 启动前 loadout 选择器的 Java 网格行为。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `CAMPAIGN_LAUNCH_LOADOUT_PICKER_TARGET_WIDTH` 与 picker row gap；
+    - `campaign_launch_loadout_picker_columns(...)` 按 `picker.width / 230` 计算列数，而不是按候选总数压成一整行；
+    - `campaign_launch_loadout_picker_candidate_rect(...)` 改为宽度分列并在 picker 区域内换行，避免 5 个以上候选时卡片被挤成窄条；
+    - `campaign_launch_loadout_items_rect(...)` 给 picker 网格留出独立垂直区域，避免第二行候选覆盖资源表；
+    - 新增 `desktop_launcher_campaign_launch_loadout_picker_uses_java_width_based_columns` 锁定 Java 宽度分列行为。
+- Java 对齐依据：
+  - `LaunchLoadoutDialog.java` 使用 `int cols = Math.max((int)(Core.graphics.getWidth() / Scl.scl(230)), 1)`；
+  - 每个候选按钮 `size(200f)`，遍历候选时 `if(++i[0] % cols == 0) t.row()`，即按屏幕宽度换行而非按候选数平均压缩。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_picker_uses_java_width_based_columns --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_picker_supports_more_than_four_candidates_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_picker_selects_and_commits_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_campaign_launch_resources_opens_child_loadout_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe build -p mindustry-desktop --bin mindustry-desktop --release`
+- 本轮 release 客户端：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+- 后续继续：
+  - Loadout picker 仍可继续向 Java `SchematicImage` 真实预览推进；
+  - Settings Controls/Language 的 Dialog chrome 与 Java `BaseDialog` 风格仍需继续收敛。
+
 ## 1011. 主菜单字体阴影回归修复
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮按前端第一优先级处理主菜单字体观感退化，目标是让主菜单文字继续贴近 Java `Styles.flatToggleMenut` + `Fonts.def` 的阴影层次，而不是裸白字或生硬贴图。
