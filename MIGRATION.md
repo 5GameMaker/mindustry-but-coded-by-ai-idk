@@ -19,6 +19,52 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 990. MapPlay teams 完整字段顺序内联与 disabled 条件
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续优先推进 UI 子菜单与 Java 原版一致，聚焦 `CustomRulesDialog.category("teams")` 的每队折叠字段完整顺序。
+- 本轮总体进度更新：约 **95.53%**，仍未达到完整可玩；本轮把 MapPlay CustomRules teams inline 从前三个字段扩展为 Java `Team.baseTeams` collapser 的完整 21 字段顺序，并补入 Java `condition` 对应的 disabled 行为。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopInlineTeamRuleField::JAVA_FIRST` 升级为 `JAVA_ORDER`，按 Java `CustomRulesDialog.java:303-329` 顺序覆盖：
+      - `blockhealthmultiplier`、`blockdamagemultiplier`
+      - `rtsai`、`rtsminsquadsize`、`rtsmaxsquadsize`、`rtsminattackweight`
+      - `buildai`、`buildaitier`
+      - `protectcores`、`extracorebuildradius`、`checkplacement`
+      - `infiniteresources`、`fillitems`
+      - `buildspeedmultiplier`、`unitfactoryactivation`
+      - `unitdamagemultiplier`、`unitcrashdamagemultiplier`、`unitminespeedmultiplier`
+      - `unitbuildspeedmultiplier`、`unitcostmultiplier`、`unithealthmultiplier`
+    - 新增 `DesktopInlineTeamRuleField::enabled(...)`，对齐 Java `check/number/numberi(..., Boolp condition)` 的 disabled 语义：
+      - `rtsai`：`team != rules.defaultTeam`
+      - RTS squad/weight：`teams.rtsAi`
+      - `buildai`：`team != rules.defaultTeam && rules.env != Planets.erekir.defaultEnv && !rules.pvp`
+      - `buildaitier`：`teams.buildAi && rules.env != Planets.erekir.defaultEnv && !rules.pvp`
+      - `extracorebuildradius`：`!rules.polygonCoreProtection && teams.protectCores`
+    - 内联字段 hit-test 在 disabled 时直接跳过，避免 disabled 字段仍能修改规则；
+    - 内联渲染按 enabled 状态切换背景透明度、label/value 颜色，并使用 `push_settings_text_button_enabled` 让 `-`/`+`/toggle 呈现禁用态；
+    - 修正 `SelectDefaultTeam` / `SelectWaveTeam`：如果来自 MapPlay inline 主内容，只修改规则，不再误改 `map_play_team_rules_selected_team`；只有 TeamRules child dialog 已打开时才同步 selected team，贴近 Java team 色块选择不会展开 collapser 的行为。
+- 测试更新：
+  - `desktop_launcher_map_play_custom_rules_teams_inline_like_java`
+    - 断言展开后 inline 字段数等于 `DesktopInlineTeamRuleField::JAVA_ORDER.len()`；
+    - 断言 `rtsAi=false` 时 `rtsminsquadsize +` 不返回 action；
+    - 切换 `rtsAi` 后再断言 `rtsminsquadsize +` 可命中并修改 pending `TeamRule.rts_min_squad`；
+    - 保留 `allowedit`、`playerteam`、section 展开、`blockhealthmultiplier`、`rtsai` 的主内容流不弹 child dialog 断言。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_teams_inline_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_back_key_closes_nested_child_dialogs_like_java_stack --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,727,936` 字节。
+- 后续继续：
+  - 当前 Rust 仍用单个 `map_play_team_rules_selected_team` 做单选展开；Java 为每个 team 一个独立 `boolean[] shown`，后续应迁移为每队独立展开状态；
+  - Pause CustomRules 仍需接入同一套 `JAVA_ORDER/enabled` inline teams 字段，避免 MapPlay/Pause 漂移；
+  - Java `showRuleEditRule` 对 `@rules.allowedit` 的显示门槛仍需要更精确复刻，当前 Rust 仍偏“始终提供 inline allowedit”；
+  - teams 字段已经完整出现在 MapPlay inline，但 UI 尺寸/滚动体验仍需继续对照 Java `Styles.togglet`、`collapser` 和 260x55 按钮视觉细节。
+
 ## 989. MapPlay teams 折叠字段首批内联
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续对齐 Java `CustomRulesDialog.category("teams")`，把 Java 每队 `collapser` 的首批字段推进到 MapPlay CustomRules 主内容区，而不是继续依赖 TeamRules 子弹窗。
