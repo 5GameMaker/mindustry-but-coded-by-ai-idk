@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 987. MapPlay CustomRules ambient/weather 入口内联与 ScrollPane 对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续优先对齐 Java `CustomRulesDialog.environment`，并补齐 MapPlay CustomRules 主内容区的 Java ScrollPane 等价行为。
+- 本轮总体进度更新：约 **95.50%**，仍未达到完整可玩；本轮把 MapPlay `@rules.ambientlight` / `@rules.weather` 从仅右侧 rail/modal 过渡推进为 environment 主内容流里的 inline 入口，并让 MapPlay CustomRules 使用滚动内容区承载完整 Java 风格规则流，而不是在面板底部空间不足时直接丢弃下方行。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_play_custom_rules_scroll_offset`，并实现 `map_play_custom_rules_*_content_height(...)`、`map_play_custom_rules_max_scroll_offset(...)`、`map_play_custom_rules_scrolled_content_rect(...)`，使 MapPlay CustomRules 和 pause overlay 一样拥有 Java `ScrollPane` 式滚动偏移；
+    - 将 MapPlay CustomRules 主内容渲染改为 `set_clip(content)` + `scrolled_content` 布局 + `clear_clip()`，避免默认 1280x720 下 environment 底部入口被硬截断；
+    - hit-test 改用同一 scrolled content，并在输入滚轮事件中接入 `apply_map_play_custom_rules_scroll_delta(...)`，确保渲染、鼠标滚轮和点击命中使用同一偏移；
+    - 新增/收敛 `map_play_customize_inline_environment_buttons(...)` 与对应 rect helper，让 `@rules.ambientlight` / `@rules.weather` 按 Java environment 顺序在主内容区暴露，仍保留右侧 rail 作为过渡兼容；
+    - 搜索输入、清空搜索和重新打开 Customize 时复位 scroll offset，保持 Java `ruleSearch` 重建列表后的可见位置语义；
+    - 新增 `desktop_launcher_map_play_custom_rules_scrolls_rows_like_java_scrollpane`，覆盖默认全量列表下 weather 初始位于 clip 外、滚动后可见可点、滚轮输入推进 offset、渲染存在 SetClip/ClearClip。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_ambient_light_picker_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_scrolls_rows_like_java_scrollpane --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,718,208` 字节。
+- 后续继续：
+  - `Pause` 侧 `@rules.ambientlight` / `@rules.weather` 仍主要保留 child rail/modal 入口，后续应继续回收到 Java environment 主内容流；
+  - `@bannedunits` 仍需回到 Java `unit` 分类 inline 入口，`teams` 整块仍需从 child dialog 推进为 Java 主内容区 teams 分类；
+  - 继续收敛右侧 rail 过渡路径，最终让 MapPlay/Pause CustomRules 都以 Java `setupMain()` 的 `waves -> resourcesbuilding -> unit -> enemy -> environment -> planet -> teams` 顺序为主。
+
 ## 986. Pause CustomRules solarMultiplier 归入 environment 流
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续让 pause overlay 的 CustomRules 与 Java `CustomRulesDialog.environment` 分类一致。
