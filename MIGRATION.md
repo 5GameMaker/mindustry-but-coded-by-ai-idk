@@ -19,6 +19,42 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1014. Default/Outline 真字体 atlas 接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，处理主菜单/前端文字仍落到 placeholder glyph 的高可见偏差。
+- 本轮总体进度更新：约 **95.84%**，仍未达到完整可玩；本轮把 `RenderFontId::Default` / `RenderFontId::Outline` 从纯 placeholder 文字推进为基于上游 `fonts/font.woff` 的真实 glyph atlas quads，`Icon/IconLarge` 暂不改变，placeholder 仍作为 atlas/glyph 缺失兜底。
+- 主改动：
+  - `desktop/Cargo.toml`
+    - 新增最小字体栅格化依赖 `ab_glyph = "0.2.32"`；`Cargo.lock` 已存在对应包条目，本轮没有额外 lock diff。
+  - `desktop/src/lib.rs`
+    - 新增 WOFF1 -> sfnt 解包，复用现有 `flate2` 读取上游 `fonts/font.woff`；
+    - 新增 `DesktopRealFontAtlas` / glyph UV / RGBA atlas 生成与缓存；
+    - `DesktopFontGlyphUploadPlan` 携带真实 RGBA atlas pixels，OpenGL runtime texture upload 使用 `source_png_bytes` 上传真实 font atlas；
+    - `DrawText` 对 `RenderFontId::Default/Outline` 优先生成 `runtime-texture:font-glyph-atlas` sprite quads，不再直接落到 `primitive:DrawText`；
+    - `RenderFontId::Outline` 本身触发 outline 层，菜单版本号显式使用 `RenderFontId::Outline`，对齐 Java `Fonts.outline.draw(...)`；
+    - seed 字符集包含 ASCII 与常见英文/中文前端菜单词；发现并修正过一次子代理带入的乱码 seed，继续按 UTF-8 处理。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_default_uses_real_font_atlas_not_placeholder -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_outline_uses_real_font_atlas_not_placeholder -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_executor_preserves_draw_text_style -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_font_glyph_upload_plan_emits_runtime_texture_upload_when_ready -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_font_rasterization_plan_bridges_fonts_icons_and_texture_atlas -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay -- --nocapture`
+  - `cargo build --release -p mindustry-desktop`
+  - `git diff --check`
+- 当前限制：
+  - atlas 仍是预烘焙字符集，不是按每帧文本动态增量收集；
+  - `Fonts.outline` 仍是真实 glyph + outline layer 近似，未完整复刻 Java FreeType border rasterization；
+  - `Icon/IconLarge/Logic/Monospace/Tech` 真 glyph atlas 仍待继续；
+  - 上游字体若缺某些中文 glyph，仍会 fallback placeholder。
+- 后续继续：
+  - 扩展动态 glyph cache / atlas update；
+  - 接入 `fonts/icon.ttf` / `iconLarge` 真字体；
+  - 继续推进 Settings 动态分类、`textPref`、`areaTextPref` 等子菜单真实控件。
+
 ## 1013. MapList/Editor route-shell 可见诊断收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，清理 `MapListDialog` / `EditorMapsDialog` 路由层会暴露的 Rust-only 诊断文案。
