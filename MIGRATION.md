@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 982. MapPlay CustomRules 行星选择内联
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；当前第一优先级仍是 UI 所有子菜单与 Java 原版对齐。
+- 本轮总体进度更新：约 **95.45%**，仍未达到完整可玩；本轮把 MapPlay `CustomRulesDialog` 的 Planet 区从 Rust 旧的文字摘要/右侧入口依赖，推进为 Java 式主内容区 inline 行星按钮表。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_play_customize_inline_planet_*` 几何 helper，按 Java `140x50` planet button 表构造主面板内联选择区；
+    - 在 MapPlay CustomRules 主内容流中渲染 `@rules.title.planet`、各 landable planet 和 `@rules.anyenv`，选中项用 accent stroke 标出；
+    - 将 inline planet/anyenv 按钮接入真实 hit-test，点击直接走现有 `SelectPlanet(index)` / `SelectAnyEnv`，写入 pending `map_play_rules.planet/env`，并保持 `PlaySelected` 前不提交到 `game_state/runtime`；
+    - 保留旧右侧 `OpenPlanet` 弹窗路径作为过渡兼容，后续再单独收敛 rail/弹窗双实现；
+    - 扩展 `desktop_launcher_map_play_custom_rules_planet_picker_like_java`，同时覆盖 Java 风格 inline 选择和旧 modal 兼容路径。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_planet_picker_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_back_key_closes_nested_child_dialogs_like_java_stack --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,686,464` 字节。
+- 后续继续：
+  - `SelectPlanet` 目前仍只写 `planet/env`，还需要继续对齐 Java `Planet.applyRules(rules, true)` 的默认 attributes/env 应用语义；
+  - CustomRules 右侧快捷 rail 仍需逐步拆除：`@configure`、banned blocks/units、ambient light、weather、planet、teams 应回到 Java row flow，`@edit`/reset 只保留在对应编辑按钮区；
+  - Team Rules 仍是独立 modal，后续需推进 Java inline collapsers、上下文 disabled 约束、搜索过滤和 tooltip/info 语义；
+  - 继续推进完整可玩、整体 runtime 接入与 Java↔Rust 联机兼容。
+
 ## 981. BannedContentDialog 图标网格对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；当前第一优先级是 UI 所有子菜单与 Java 原版对齐，第二优先级是确保完整可玩和代码层面一致。
