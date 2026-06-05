@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 995. Pause CustomRules unit 分类 bannedunits 入口内联
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单优先级，补齐 Java `CustomRulesDialog.category("unit")` 中 `@bannedunits` 的主内容入口。
+- 本轮总体进度更新：约 **95.58%**，仍未达到完整可玩；本轮把 Pause CustomRules 的 `@bannedunits` 从仅顶部 child button 过渡为 unit 分类主内容 ScrollPane 内联入口，并继续保留旧 child button / `BannedContentDialog(Units)` 兼容路径。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `pause_custom_rules_inline_unit_buttons()` 与 `pause_custom_rules_inline_unit_button_rects(...)`，按 Java unit 分类在 unit toggles 后放置 `@bannedunits`；
+    - `pause_custom_rules_toggle_content_height(...)`、`pause_custom_rules_y_after_toggle_groups(...)`、`pause_overlay_custom_rules_toggle_rects(...)` 同步计入 unit inline 按钮高度，避免后续 environment/teams 的 y 轴漂移；
+    - `push_pause_overlay_custom_rules_modal(...)` 在 unit 分类渲染 `@bannedunits` 内联按钮；
+    - `pause_overlay_action_at_surface_point(...)` 在主内容区命中 `@bannedunits` 并分发 `OpenPauseBannedContent(Units)`；
+    - 扩展 `desktop_launcher_paused_world_overlay_custom_rules_resource_environment_entries_inline_like_java`，覆盖 `@bannedunits` inline rect、hit-test 与子窗打开。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_resource_environment_entries_inline_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_banned_content_child_dialog_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_search_filters_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_scrolls_rows_like_java_scrollpane --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,775,040` 字节。
+- 后续继续：
+  - Pause `@rules.title.planet` 仍应像 MapPlay 一样进入主内容 inline planet/env selector；
+  - MapPlay 侧也应审查 `@bannedunits` 是否需要加入 Java unit 分类主内容流，避免 Pause/MapPlay CustomRules 继续分叉；
+  - 顶部 child rail 仍为过渡兼容，应继续向 Java `setupMain()` 的单 ScrollPane 主内容流收敛。
+
 ## 994. Pause CustomRules resources/environment 入口内联
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续执行 UI 子菜单优先级，聚焦 `CustomRulesDialog.java` 中 resourcesbuilding/environment 分类的主内容入口。
