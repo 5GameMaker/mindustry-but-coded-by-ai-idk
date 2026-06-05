@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1013. MapList/Editor route-shell 可见诊断收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，清理 `MapListDialog` / `EditorMapsDialog` 路由层会暴露的 Rust-only 诊断文案。
+- 本轮总体进度更新：约 **95.82%**，仍未达到完整可玩；本轮不改变真实卡片/导入/编辑器动作数据链，专门把 route-shell 从 `dialog:` / `button:` / `maps:` / `card[...]` / `file chooser:` / `event:` 这类内部描述收敛为原版可见 label 或真实状态数据。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - `map_list_route_lines(...)` 只保留 `@customgame/@maps/@back/@editor.search/@editor.filters`、空态提示与 Editor 类型 label，不再输出卡片数量、每张卡 summary、pane/search/filter debug；
+    - `editor_maps_route_lines()` 只保留 `@editor.newmap/@editor.importmap/@editor.export/@editor.ingame/@editor.playtest/@editor.publish.workshop/@view.workshop` 等真实 label，并把错误/导入/覆盖状态压回原版可见 key/文本；
+    - 删除 `DesktopMapListCardSummary` 与仅用于 debug route-line 的 map-list summary/filter summary helper；
+    - 相关测试改为断言真实渲染帧、真实 `map_list_cards`、真实 `FileChooserRequest`，不再依赖 Rust-only route debug 串。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_pending_menu_routes_use_upstream_dialog_structure -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_custom_and_editor_routes_render_map_list_cards_when_seeded -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_refresh_map_cards_seeds_actual_client_map_list -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_cards_render_java_map_list_type_footer -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_import_map_reads_msav_rejects_images_and_refreshes_custom_maps -- --nocapture`
+  - `cargo build --release -p mindustry-desktop`
+- 注意：误跑过一次全量 `cargo test -p mindustry-desktop`，其中 16 个既有失败与本轮 MapList/Editor cleanup 无关；定向测试和 release 构建已通过。测试生成的 `desktop/data/previews/save_slot_0.png` 已清理。
+- 后续继续：
+  - P0：字体仍走 placeholder glyph，需把 Default/Outline 字体路径接到真实 atlas；
+  - P0/P1：Settings 动态分类和 `textPref/areaTextPref` 仍需对齐 Java `SettingsTable`；
+  - 继续清理其他 route shell 中会影响用户观感的 Rust-only 文案，但每次必须改成真实渲染/状态断言。
+
 ## 1012. LaunchLoadout picker Java 宽度分列
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，修正 Campaign `LaunchLoadoutDialog` 的 loadout picker 布局。
