@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 983. MapPlay 行星默认环境属性同步
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续围绕 Java `Planet.applyRules(rules, true)` 语义收敛。
+- 本轮总体进度更新：约 **95.46%**，仍未达到完整可玩；本轮把 MapPlay 选择行星后的默认环境属性接入 runtime/game_state，而不是只改 `Rules.planet/env`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 引入 `Attributes`，新增 `planet_default_env_attrs_for_loader(...)`，从 `PlanetContent.default_attributes` 生成运行时环境属性表；
+    - 在 `PlaySelected` 提交 MapPlay pending rules 后，同步 `runtime.state.env_attrs`，随后克隆到 `game_state`；
+    - 在暂停 CustomRules 应用时同步 `game_state.env_attrs` 与 `runtime.state.env_attrs`，避免运行中改 planet 后环境属性仍停留旧值；
+    - 新增 `desktop_launcher_map_play_custom_rules_select_planet_applies_planet_defaults_like_java`，验证选择 Erekir 后 `heat=0.8` 在 `PlaySelected` 后进入 runtime/game_state，且提交前仍保持 pending。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_select_planet_applies_planet_defaults_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,697,728` 字节。
+- 后续继续：
+  - `Rules` 本身仍没有 Java `rules.attributes` 字段，当前等价接线落在 `GameState.env_attrs`；后续如迁移 Java `Rules.attributes`，需要把此 helper 下沉到 core runtime；
+  - Planet inline/UI 双实现和右侧 rail 仍需继续收敛；
+  - 继续推进 CustomRules Team inline collapsers、环境分组顺序与完整可玩联机链路。
+
 ## 982. MapPlay CustomRules 行星选择内联
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；当前第一优先级仍是 UI 所有子菜单与 Java 原版对齐。
