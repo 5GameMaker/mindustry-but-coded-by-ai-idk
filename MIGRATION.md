@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1001. MapPlay CustomRules resourcesbuilding policy 尾部内联
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，对照 Java `CustomRulesDialog.category("resourcesbuilding")` 尾部，把 `@rules.hidebannedblocks` 与 `@bannedblocks.whitelist` 从 MapPlay 旧 policy stack 收敛到 `@bannedblocks` 后方。
+- 本轮总体进度更新：约 **95.64%**，仍未达到完整可玩；本轮让 MapPlay resourcesbuilding 顺序推进为 `resource toggles -> build/block numbers -> @configure -> @bannedblocks -> @rules.hidebannedblocks -> @bannedblocks.whitelist`，MapPlay 通用 banned policy stack 不再重复承载 block/unit whitelist。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `MAP_PLAY_CUSTOM_RULE_RESOURCE_SUFFIX_TOGGLES`，承载 `HideBannedBlocks` 与 `BlockWhitelist`；
+    - 新增 `map_play_customize_visible_resource_suffix_toggles()`，按搜索条件控制 resourcesbuilding 尾部 policy 行可见性；
+    - `map_play_customize_toggle_rects(...)` 在 resource buttons 后返回 hide/block whitelist 的真实 inline rect；
+    - unit/environment/planet/teams 相关 y 轴 helper 与 `map_play_custom_rules_toggle_content_height(...)` 同步计入 resource suffix 高度；
+    - `push_map_play_customize_dialog(...)` 在 `@bannedblocks` 后绘制 `@rules.hidebannedblocks` 与 `@bannedblocks.whitelist`；
+    - `map_play_custom_rules_visible_banned_policy_toggles()` 对 MapPlay 旧 policy stack 排除 hide/block/unit 三个已内联开关，避免重复显示或残留 hit-test；
+    - 扩展 `desktop_launcher_map_play_dialog_opens_help_customize_and_highscore`，覆盖 hide banned blocks、block whitelist、unit whitelist 全部通过主内容 inline toggle 命中，旧 policy row 不再保留可点击槽位。
+- Java 对齐依据：
+  - `core/src/mindustry/ui/dialogs/CustomRulesDialog.java:181-191` 中 `@rules.hidebannedblocks` 与 `@bannedblocks.whitelist` 紧跟 `@bannedblocks`；
+  - `core/src/mindustry/ui/dialogs/CustomRulesDialog.java:207-209` 中 `@bannedunits.whitelist` 属于 unit 分类，不应与 block policy 混在通用 MapPlay policy rows 中。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --test-threads=1 --nocapture`
+- 后续继续：
+  - 审查 Pause `CustomRulesDialog(false)` 与 MapPlay `CustomRulesDialog(true)` 的差异，尤其 Pause 是否还应显示 `@rules.allowedit`；
+  - 继续缩减右侧 child rail 的过渡依赖，最终以 Java `setupMain()` 单 ScrollPane 主内容流为主；
+  - 对 CustomRules 之外的 P0 可见差异继续推进，例如 Workshop 可见性与 desktop submenu scene-margin hitbox。
+
 ## 1000. MapPlay CustomRules resourcesbuilding 数值项主内容内联
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，对照 Java `CustomRulesDialog.category("resourcesbuilding")`，把 MapPlay 的 build/block 相关数值项推进到 Resources & Building 分类主内容流。
