@@ -36,7 +36,7 @@ impl UnlockableContentBase {
             details: None,
             credit: None,
             always_unlocked: false,
-            inline_description: false,
+            inline_description: true,
             hide_details: true,
             hide_database: false,
             all_database_tabs: false,
@@ -124,6 +124,7 @@ mod tests {
 
         assert!(!content.hide_database);
         assert_eq!(content.credit, None);
+        assert!(content.inline_description);
         assert!(!content.all_database_tabs);
         assert!(content.database_tabs.is_empty());
         assert_eq!(content.database_category, None);
