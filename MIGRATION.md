@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1007. Pause CustomRules 右侧重复入口全部退场
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续第一优先级 UI 子菜单对齐，收口 Pause CustomRules 右侧 child rail 的剩余重复入口。
+- 本轮总体进度更新：约 **95.70%**，仍未达到完整可玩；本轮让 Pause CustomRules 右侧 index `0..=6` 全部不再渲染、不再命中，主路径改回 Java 风格的主 ScrollPane inline 分类入口。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `pause_overlay_action_at_surface_point(...)` 移除 Pause rail `0 -> @bannedblocks`、`1 -> @bannedunits`、`2 -> @rules.weather`、`5 -> @rules.ambientlight`、`6 -> @rules.title.planet` 的 hit-test 分支；此前已退场的 teams/configure 一并保持不可命中；
+    - `push_pause_overlay_custom_rules_modal(...)` 渲染 child rail 时跳过 `index 0..=6`，Pause CustomRules 顶层只保留 Java 对应的 edit/back 语义；
+    - 更新 banned/weather/ambient/planet/teams 相关测试：旧 rail 坐标不再返回对应 legacy action，legacy 子弹窗仍通过直接 action 保留过渡覆盖；
+    - 将 Pause CustomRules tests 中 `teams/planet` 等英文搜索词改为实际本地化 key 文案，避免中文资源下误判。
+- Java 对齐依据：
+  - `CustomRulesDialog.java` 的 `@bannedblocks`、`@bannedunits`、`@rules.weather`、`@rules.ambientlight`、`@rules.title.planet` 都位于主内容分组或 inline 子面板，不存在 Rust 旧实现的右侧重复 rail；
+  - Pause 使用 `new CustomRulesDialog()`，右侧 rail 旧入口属于迁移过渡 UI，当前已全部从 Pause 顶层退场。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe build -p mindustry-desktop --bin mindustry-desktop --release`
+- 本轮 release 客户端：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+- 后续继续：
+  - 按同一 Java 对齐策略处理 MapPlay CustomRules 剩余 right rail 重复入口；
+  - 继续检查其它菜单/子菜单是否存在“主内容 inline + 额外侧栏”双入口偏差。
+
 ## 1006. Pause CustomRules configure 右侧重复入口退场
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续第一优先级 UI 子菜单对齐，缩减 Pause CustomRules 右侧 child rail 中已由 resourcesbuilding 主 ScrollPane 承担的重复 `@configure` 入口。
