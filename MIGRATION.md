@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 985. MapPlay CustomRules solarMultiplier 归入 environment 流
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续对齐 Java `CustomRulesDialog.environment` 顺序。
+- 本轮总体进度更新：约 **95.48%**，仍未达到完整可玩；本轮把 MapPlay `@rules.solarmultiplier` 从 Rust 旧的独立 number rows，推进为 Java 式 `environment` 分类内 inline number 行。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 将 `DesktopCustomRulesNumber::SolarMultiplier` 从 MapPlay `DesktopCustomRulesNumber::ALL` 通用数值栈移出，pause `PAUSE_ALL` 暂保留，避免同一轮牵动暂停滚动高度；
+    - 新增 `map_play_customize_inline_environment_numbers(...)` 与 `map_play_customize_inline_environment_number_rects(...)`，在 `@rules.title.environment` 分组里按搜索条件暴露 solarMultiplier；
+    - 在 `push_map_play_customize_dialog(...)` 环境分组中渲染 inline solar number row，顺序跟随 Java：environment toggles / limitarea 子数字后、ambient/weather 子入口前；
+    - 将 inline solar +/- 命中接回现有 `AdjustCustomRuleNumber(SolarMultiplier, ±1)`，保持 pending `map_play_rules`、`PlaySelected` 提交到 `game_state/runtime` 的旧语义；
+    - 更新 `desktop_launcher_map_play_custom_rules_solar_multiplier_like_java`，不再依赖旧全局 number row slot，而是验证 environment inline row 的渲染、命中与提交。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_solar_multiplier_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,711,552` 字节。
+- 后续继续：
+  - pause CustomRules 的 solarMultiplier 仍在 `PAUSE_ALL` 通用数值栈，后续需要单独迁入 pause environment flow，并同步滚动高度与 hit-test；
+  - environment 分类的 `@rules.ambientlight` / `@rules.weather` 仍是右侧 rail/modal 双路径过渡，后续继续收敛到 Java 主内容区入口顺序；
+  - MapPlay CustomRules 仍缺完整 Java ScrollPane 垂直流，当前多处 inline 布局仍需过渡性紧凑排布。
+
 ## 984. MapPlay CustomRules resourcesbuilding 入口内联
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续优先对齐 Java `CustomRulesDialog.resourcesbuilding` 主内容流。
