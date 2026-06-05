@@ -176,8 +176,7 @@ pub const MENU_FLAT_TOGGLE_MENU_STYLE: MenuFlatToggleMenuStyle = MenuFlatToggleM
     text_style: RenderTextStyle::new(RenderTextAlign::Center)
         .with_vertical_align(RenderTextVerticalAlign::Center)
         .with_markup(true)
-        .with_integer_position(true)
-        .with_outline(true),
+        .with_integer_position(true),
     fill_layer: 101.0,
     drawable_layer: 101.05,
     text_layer: 101.1,
@@ -1058,8 +1057,7 @@ impl MenuUiPlan {
                     RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_markup(true)
-                        .with_integer_position(true)
-                        .with_outline(true),
+                        .with_integer_position(true),
                 )
             } else {
                 (button.rect.center(), style.text_style)
@@ -1167,11 +1165,10 @@ fn menu_push_icon_render_commands(
             color,
             size,
             0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_font(RenderFontId::Icon)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true)
-                .with_outline(true),
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_font(RenderFontId::Icon)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
             layer,
         ));
         return;
@@ -1424,8 +1421,7 @@ fn menu_push_icon_render_commands(
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true)
-                    .with_outline(true),
+                    .with_integer_position(true),
                 layer,
             ));
         }
@@ -4955,7 +4951,6 @@ mod tests {
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_markup(true)
                 .with_integer_position(true)
-                .with_outline(true)
         );
     }
 
@@ -5094,7 +5089,7 @@ mod tests {
                             < f32::EPSILON
                         && style.horizontal_align == RenderTextAlign::Start
                         && style.markup
-                        && style.outline
+                        && !style.outline
             )
         }));
     }
@@ -5606,7 +5601,7 @@ mod tests {
                     ..
                 } if text == label_text
                     && (*size - MENU_FLAT_TOGGLE_MENU_STYLE.desktop_text_size).abs() < f32::EPSILON
-                    && style.outline
+                    && !style.outline
                     && style.markup
                     && (*layer
                         - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
@@ -5644,7 +5639,10 @@ mod tests {
         let commands = plan.to_render_commands();
         assert!(commands.iter().any(|command| matches!(
             command,
-            RenderCommand::DrawText { text, style, .. } if text == label_text && style.outline
+            RenderCommand::DrawText { text, style, .. } if text == label_text
+                && !style.outline
+                && style.font == RenderFontId::Default
+                && style.markup
         )));
         assert!(!commands.iter().any(|command| matches!(
             command,
