@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 986. Pause CustomRules solarMultiplier 归入 environment 流
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续让 pause overlay 的 CustomRules 与 Java `CustomRulesDialog.environment` 分类一致。
+- 本轮总体进度更新：约 **95.49%**，仍未达到完整可玩；本轮把 pause `@rules.solarmultiplier` 从 Rust 旧的 `PAUSE_ALL` 通用数值栈，推进为 environment 分类内 inline number 行。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 将 `DesktopCustomRulesNumber::SolarMultiplier` 从 `PAUSE_ALL` 移出，避免暂停规则数值区继续把它当作独立右侧 number stack 项；
+    - 新增 `pause_custom_rules_inline_environment_numbers(...)`、`pause_custom_rules_inline_environment_number_rects(...)` 和 `pause_custom_rules_y_after_toggle_groups(...)`，让 pause 的 environment 流拥有 Java 式 solar number 承载点；
+    - `pause_custom_rules_toggle_content_height(...)` 同步计入 inline solar 行，保持 ScrollPane 高度、滚轮偏移和命中使用同一 scrolled content；
+    - `pause_overlay_action_at_surface_point(...)` 接入 inline solar +/- 命中，继续复用 `AdjustPauseCustomRuleNumber(SolarMultiplier, ±1)`；
+    - `push_pause_custom_rules_dialog` 的 environment 分组渲染 inline solar 行，并新增 `desktop_launcher_paused_world_overlay_custom_rules_solar_multiplier_like_java` 覆盖渲染、命中、pending 和关闭应用。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_solar_multiplier_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_scrolls_rows_like_java_scrollpane --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_extended_numbers_edit_rules --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,722,304` 字节。
+- 后续继续：
+  - environment 分类的 `@rules.ambientlight` / `@rules.weather` 仍需继续从右侧 rail/modal 双路径收敛到 Java 主内容区入口顺序；
+  - pause 与 MapPlay 的 environment inline number 目前各自保留 helper，后续可在 ScrollPane 主流稳定后再抽公共实现；
+  - CustomRules 仍缺完整 Java ScrollPane 主内容流和 `@bannedunits` 回到 unit 分类的 inline 入口。
+
 ## 985. MapPlay CustomRules solarMultiplier 归入 environment 流
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；本轮继续对齐 Java `CustomRulesDialog.environment` 顺序。
