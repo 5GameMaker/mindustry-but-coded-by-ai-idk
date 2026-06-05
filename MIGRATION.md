@@ -19,6 +19,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 993. Pause CustomRules teams 主内容内联
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续执行 UI 子菜单优先级，聚焦 `CustomRulesDialog.java` 的 `category("teams")` 在暂停自定义规则里的主内容区内联行为。
+- 本轮总体进度更新：约 **95.56%**，仍未达到完整可玩；本轮把 Pause CustomRules 的 teams 分类从“只能通过 TeamRules child dialog 编辑”推进为主内容 ScrollPane 内联：`@rules.allowedit`、`@rules.playerteam`、`@rules.enemyteam`、每个 base team 的独立折叠块，以及 Java `JAVA_ORDER` 21 个字段都可在暂停规则主流里命中/渲染。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `pause_inline_team_rules_expanded_teams: BTreeSet<usize>`，专门承载 Pause CustomRules 主内容区每队独立 `shown[]` 折叠状态；
+    - 新增 `pause_custom_rules_inline_teams_*` 几何/helper，复用 MapPlay 已经对齐的 `DesktopInlineTeamRuleField::JAVA_ORDER` 与 `enabled(...)` disabled 条件；
+    - `pause_custom_rules_toggle_content_height()` 将 teams inline 段和展开字段高度计入 ScrollPane 内容高度，避免主内容区截断；
+    - `pause_overlay_action_at_surface_point(...)` 在主内容区命中 allowedit、player/enemy team selector、team section、toggle/number 字段，inline 来源不再强制打开 child dialog；
+    - `dispatch_pause_overlay_action_with_platform(...)` 区分 child dialog 与 inline 来源：child 打开时继续维护 `pause_custom_rules_team_rules_selected_team`，inline 路径只维护 expanded set 并保持 pending edit；
+    - `push_pause_overlay_custom_rules_modal(...)` 在 clipped scrolled content 内渲染 teams 标题、allowedit 行、两行队伍色块、每队 section 和展开后的完整字段；旧 `OpenPauseTeamRules` child dialog 保留为过渡兼容入口；
+    - 旧滚动测试不再假设最大滚动位置一定是 toggle 行，而是扫描滚动偏移寻找可见且 enabled 的下方 toggle，继续锁定渲染与 hit-test 使用同一 scrolled content offset。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_teams_inline_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_team_rules_child_dialog_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_teams_inline_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_scrolls_rows_like_java_scrollpane --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_back_key_closes_nested_child_dialogs_like_java_stack --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,742,784` 字节。
+- 后续继续：
+  - Pause/MapPlay CustomRules 仍需继续把 `@configure`、banned blocks/units、weather、ambient light、planet 等右侧 rail/child 入口逐步回收到 Java `setupMain()` 主内容 row flow；
+  - teams inline 仍是紧凑几何，后续应继续对齐 Java `Styles.togglet`、`collapser` 动画/边距、按钮尺寸和禁用态视觉；
+  - 旧 TeamRules child dialog 仍保留为过渡兼容路径，最终应只作为必要 fallback，而不是 Java 主交互路径。
+
 ## 992. TeamRules child dialog 字段顺序复用 Java teams 顺序
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续优先推进 UI 子菜单对齐，聚焦过渡期仍保留的 MapPlay/Pause `TeamRules` child dialog，避免它们和 MapPlay inline teams 的 Java 字段顺序继续漂移。
