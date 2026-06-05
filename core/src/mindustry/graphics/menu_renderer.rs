@@ -8,9 +8,10 @@ use super::{
     RenderCamera, RenderCommand, RenderFontId, RenderPass, RenderPassKind, RenderPoint, RenderRect,
     RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderViewport,
 };
+#[cfg(test)]
+use crate::mindustry::ui::upstream_menu_bundle_value_for_locale;
 use crate::mindustry::ui::{
-    upstream_bundle_en_value, upstream_image_button_style_skin,
-    upstream_menu_bundle_value_for_locale, upstream_text_button_style_skin,
+    upstream_bundle_en_value, upstream_image_button_style_skin, upstream_text_button_style_skin,
     upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, UiDrawableAlias, UiDrawableTint,
 };
 
@@ -35,13 +36,6 @@ pub const MENU_MAX_NATIVE_COLOR_SPAN_TILES: usize = 4;
 pub const MENU_MOBILE_BUTTON_ICON_OFFSET_Y: f32 = 17.0;
 pub const MENU_MOBILE_BUTTON_LABEL_OFFSET_Y: f32 = -25.0;
 pub const MENU_MOBILE_BUTTON_ICON_TEXT_SIZE: f32 = 42.0;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct MenuLabelSprite {
-    symbol: &'static str,
-    width: f32,
-    height: f32,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct MenuIconSprite {
@@ -107,133 +101,6 @@ fn menu_icon_sprite_rect(center: RenderPoint, size: f32, mobile: bool) -> Render
     )
 }
 
-fn menu_label_sprite_for_text(label: &str) -> Option<MenuLabelSprite> {
-    let matches_bundle_value = |key: &str| {
-        upstream_menu_bundle_value_for_locale("zh_CN", key)
-            .is_some_and(|candidate| candidate == label)
-            || upstream_menu_bundle_value_for_locale("zh_TW", key)
-                .is_some_and(|candidate| candidate == label)
-    };
-
-    if matches_bundle_value("play") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-play",
-            width: 88.0,
-            height: 35.0,
-        })
-    } else if matches_bundle_value("database.button") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-database",
-            width: 67.0,
-            height: 35.0,
-        })
-    } else if matches_bundle_value("editor") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-editor",
-            width: 109.0,
-            height: 35.0,
-        })
-    } else if matches_bundle_value("mods") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-mods",
-            width: 46.0,
-            height: 35.0,
-        })
-    } else if matches_bundle_value("settings") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-settings",
-            width: 46.0,
-            height: 35.0,
-        })
-    } else if matches_bundle_value("quit") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-quit",
-            width: 46.0,
-            height: 35.0,
-        })
-    } else if matches_bundle_value("campaign") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-campaign",
-            width: 88.0,
-            height: 35.0,
-        })
-    } else if matches_bundle_value("joingame") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-join",
-            width: 88.0,
-            height: 35.0,
-        })
-    } else if matches_bundle_value("customgame") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-custom",
-            width: 109.0,
-            height: 35.0,
-        })
-    } else if matches_bundle_value("loadgame") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-load",
-            width: 88.0,
-            height: 35.0,
-        })
-    } else if matches_bundle_value("schematics") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-schematics",
-            width: 46.0,
-            height: 35.0,
-        })
-    } else if matches_bundle_value("database") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-content-database",
-            width: 109.0,
-            height: 35.0,
-        })
-    } else if matches_bundle_value("about.button") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-about",
-            width: 46.0,
-            height: 35.0,
-        })
-    } else if matches_bundle_value("workshop") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-workshop",
-            width: 88.0,
-            height: 35.0,
-        })
-    } else if matches_bundle_value("techtree") {
-        Some(MenuLabelSprite {
-            symbol: "menu-label-zh-tech-tree",
-            width: 67.0,
-            height: 35.0,
-        })
-    } else {
-        None
-    }
-}
-
-fn menu_label_sprite_rect(
-    sprite: MenuLabelSprite,
-    point: RenderPoint,
-    style: RenderTextStyle,
-) -> RenderRect {
-    let x = match style.horizontal_align {
-        RenderTextAlign::Start => point.x,
-        RenderTextAlign::Center => point.x - sprite.width * 0.5,
-        RenderTextAlign::End => point.x - sprite.width,
-    };
-    let y = match style.vertical_align {
-        RenderTextVerticalAlign::Top => point.y - sprite.height,
-        RenderTextVerticalAlign::Center => point.y - sprite.height * 0.5,
-        RenderTextVerticalAlign::Bottom => point.y,
-        RenderTextVerticalAlign::Baseline => point.y - sprite.height * 0.78,
-    };
-
-    if style.integer_position {
-        RenderRect::new(x.floor(), y.floor(), sprite.width, sprite.height)
-    } else {
-        RenderRect::new(x, y, sprite.width, sprite.height)
-    }
-}
-
 fn menu_push_label_render_command(
     commands: &mut Vec<RenderCommand>,
     label: &str,
@@ -244,32 +111,6 @@ fn menu_push_label_render_command(
     style: RenderTextStyle,
     layer: f32,
 ) {
-    if rotation.abs() <= f32::EPSILON {
-        if let Some(sprite) = menu_label_sprite_for_text(label) {
-            if style.outline && color[3] > f32::EPSILON {
-                commands.push(RenderCommand::draw_sprite(
-                    sprite.symbol,
-                    menu_label_sprite_rect(
-                        sprite,
-                        RenderPoint::new(point.x + 1.0, point.y - 2.0),
-                        style,
-                    ),
-                    [0.18, 0.18, 0.18, (color[3] * 0.78).clamp(0.0, 1.0)],
-                    0.0,
-                    layer - 0.0001,
-                ));
-            }
-            commands.push(RenderCommand::draw_sprite(
-                sprite.symbol,
-                menu_label_sprite_rect(sprite, point, style),
-                color,
-                0.0,
-                layer,
-            ));
-            return;
-        }
-    }
-
     commands.push(RenderCommand::draw_text_styled(
         label, point, color, size, rotation, style, layer,
     ));
@@ -5734,7 +5575,7 @@ mod tests {
     }
 
     #[test]
-    fn menu_ui_plan_desktop_chinese_menu_labels_use_upstream_label_sprites() {
+    fn menu_ui_plan_desktop_chinese_menu_labels_use_upstream_font_text() {
         let rect = RenderRect::new(128.0, 325.0, 230.0, 70.0);
         let label_text = upstream_menu_bundle_value_for_locale("zh_CN", "play")
             .expect("zh_CN bundle should provide a localized play label");
@@ -5754,57 +5595,34 @@ mod tests {
         };
 
         let commands = plan.to_render_commands();
-        let label = commands
-            .iter()
-            .find_map(|command| match command {
-                RenderCommand::DrawSprite {
-                    symbol,
-                    rect,
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText {
+                    text,
+                    size,
+                    style,
                     layer,
                     ..
-                } if symbol == "menu-label-zh-play"
+                } if text == label_text
+                    && (*size - MENU_FLAT_TOGGLE_MENU_STYLE.desktop_text_size).abs() < f32::EPSILON
+                    && style.outline
+                    && style.markup
                     && (*layer
                         - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
                             + MENU_BUTTON_LABEL_LAYER_OFFSET))
                         .abs()
-                        < f32::EPSILON =>
-                {
-                    Some((rect, layer))
-                }
-                _ => None,
-            })
-            .expect("localized Chinese menu label should emit a foreground prerendered sprite");
-
-        assert_eq!(label.0.width, 88.0);
-        assert_eq!(label.0.height, 35.0);
-        assert!(commands.iter().any(|command| {
-            matches!(
-                command,
-                RenderCommand::DrawSprite {
-                    symbol,
-                    rect,
-                    tint,
-                    layer,
-                    ..
-                } if symbol == "menu-label-zh-play"
-                    && rect.width == 88.0
-                    && rect.height == 35.0
-                    && tint[0] < 0.25
-                    && (*layer
-                        - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
-                            + MENU_BUTTON_LABEL_LAYER_OFFSET
-                            - 0.0001))
-                        .abs()
                         < f32::EPSILON
             )
         }));
-        assert!(!commands.iter().any(
-            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == label_text)
-        ));
+        assert!(!commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, .. } if symbol == "menu-label-zh-play"
+        )));
     }
 
     #[test]
-    fn menu_ui_plan_desktop_traditional_chinese_menu_labels_use_upstream_label_sprites() {
+    fn menu_ui_plan_desktop_traditional_chinese_menu_labels_use_upstream_font_text() {
         let rect = RenderRect::new(128.0, 325.0, 230.0, 70.0);
         let label_text = upstream_menu_bundle_value_for_locale("zh_TW", "play")
             .expect("zh_TW bundle should provide a localized play label");
@@ -5826,11 +5644,12 @@ mod tests {
         let commands = plan.to_render_commands();
         assert!(commands.iter().any(|command| matches!(
             command,
+            RenderCommand::DrawText { text, style, .. } if text == label_text && style.outline
+        )));
+        assert!(!commands.iter().any(|command| matches!(
+            command,
             RenderCommand::DrawSprite { symbol, .. } if symbol == "menu-label-zh-play"
         )));
-        assert!(!commands.iter().any(
-            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == label_text)
-        ));
     }
 
     #[test]
