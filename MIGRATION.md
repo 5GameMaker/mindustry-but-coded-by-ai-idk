@@ -19,6 +19,39 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 996. Pause CustomRules planet 区主内容内联
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，按 Java `CustomRulesDialog.setupMain()` 的真实分类顺序把 Pause `@rules.title.planet` 从顶部 child 入口推进到主 ScrollPane 内容流。
+- 本轮总体进度更新：约 **95.59%**，仍未达到完整可玩；本轮把 Pause CustomRules 的 planet 区接入主内容 inline selector，顺序保持 `environment -> planet -> teams`，并保留旧 `Planet` child dialog 作为过渡兼容路径。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `pause_custom_rules_inline_planet_visible()`、`pause_custom_rules_planet_section_title_y(...)`、`pause_custom_rules_y_after_planet_section(...)` 与 `pause_custom_rules_inline_planet_rects(...)`；
+    - `pause_custom_rules_toggle_content_height(...)` 计入 inline planet 按钮表高度，避免后续 teams/number/policy 区域被压缩或 y 轴漂移；
+    - `pause_custom_rules_inline_teams_title_y(...)` 改为从 `pause_custom_rules_y_after_planet_section(...)` 起算，确保 Pause 主内容顺序与 Java `environment -> planet -> teams` 一致；
+    - `pause_overlay_action_at_surface_point(...)` 在 teams 命中前先命中 inline planet/anyenv 按钮，并分发 `SelectPausePlanet(index)` / `SelectPauseAnyEnv`；
+    - `push_pause_overlay_custom_rules_modal(...)` 在 additional setup rows 后、teams 前渲染 `@rules.title.planet`、可 landable planet 候选和最后的 `@rules.anyenv` 按钮；当前选中项用 accent stroke 标出；
+    - 扩展 `desktop_launcher_paused_world_overlay_custom_rules_planet_picker_like_java`，同时覆盖 Pause inline planet 渲染、hit-test、pending edit、`@rules.anyenv` 与旧 child dialog 兼容路径。
+- Java 对齐依据：
+  - `core/src/mindustry/ui/dialogs/CustomRulesDialog.java` 的 `setupMain()` 分类注册顺序是 `environment -> planet -> teams`；
+  - planet 区候选来自 `content.planets().select(p -> p.accessible && p.visible && p.isLandable())`；
+  - `@rules.anyenv` 是最后一个按钮，行为是 `rules.env = Vars.defaultEnv` 且 `rules.planet = Planets.sun`；
+  - Pause 原版在 CustomRulesDialog 隐藏/关闭时才提交编辑后的 rules，本轮保持 Rust Pause inline 选择只写 `pause_custom_rules_edit`，关闭 modal 后再提交到 `game_state/runtime`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_planet_picker_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_scrolls_rows_like_java_scrollpane --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_resource_environment_entries_inline_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_teams_inline_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_planet_picker_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,781,184` 字节。
+- 后续继续：
+  - 审查 Pause `CustomRulesDialog(false)` 与 MapPlay `CustomRulesDialog(true)` 的差异，尤其 Pause 是否还应显示 `@rules.allowedit`；
+  - MapPlay 侧继续审查 `@bannedunits` 是否需要加入 Java unit 分类主内容流，避免 Pause/MapPlay CustomRules 分叉；
+  - 顶部/右侧 child rail 仍为过渡兼容，应继续向 Java `setupMain()` 的单 ScrollPane 主内容流收敛。
+
 ## 995. Pause CustomRules unit 分类 bannedunits 入口内联
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单优先级，补齐 Java `CustomRulesDialog.category("unit")` 中 `@bannedunits` 的主内容入口。
