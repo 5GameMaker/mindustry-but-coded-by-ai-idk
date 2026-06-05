@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前短期优先级：暂停 Mods，优先可玩性与 UI；资源直接复用上游，黑/白屏修复优先；资源层优先复用 `D:/MDT/mindustry-upstream-v157.4` 里可直接沿用的原项目资源（如 assets、布局、文案、图标、字体），避免重复造轮子。
+- 当前短期优先级：第一优先级将 UI 所有子菜单与 Java 原版对齐；第二优先级确保游戏能够正常游玩，并在代码层面继续和原版实现一致。资源直接复用上游，黑/白屏修复优先；资源层优先复用 `D:/MDT/mindustry-upstream-v157.4` 里可直接沿用的原项目资源（如 assets、布局、文案、图标、字体），避免重复造轮子。
 - 当前 fast synthetic background 只是过渡方案，最终必须接入 cached/batched 的原版 `MenuRenderer`。
 - 本任务是将 Java Mindustry/MDT 完整重写为整体化、可游玩的 Rust 版，而不是独立模块；helper/plan 必须继续接入 runtime/render/backend 主链路。
 - 乱码优先 UTF-8：遇到乱码时先按 UTF-8 读取/保存，确认不是 UTF-8 后再尝试其他编码。
@@ -18,6 +18,52 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 本文档用于约束后续 AI/开发者持续迁移，目标是防止漏迁移、跑偏目录、把工程做成孤立模块，或忘记最终要交付的是可整合、可联机、可游玩的 Rust 版 Mindustry/MDT。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 989. MapPlay teams 折叠字段首批内联
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续对齐 Java `CustomRulesDialog.category("teams")`，把 Java 每队 `collapser` 的首批字段推进到 MapPlay CustomRules 主内容区，而不是继续依赖 TeamRules 子弹窗。
+- 本轮总体进度更新：约 **95.52%**，仍未达到完整可玩；本轮完成 `Team.baseTeams` section 展开后的前三个 Java 字段内联：
+  - `@rules.blockhealthmultiplier`
+  - `@rules.blockdamagemultiplier`
+  - `@rules.rtsai`
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopInlineTeamRuleField`，按 Java teams 块开头顺序承载内联字段，当前首批为 `BlockHealthMultiplier`、`BlockDamageMultiplier`、`RtsAi`；
+    - `map_play_customize_inline_teams_visible()` 纳入 `@rules.allowedit` 与首批字段 label 匹配，避免搜索/过滤只命中 Java teams 子项时整块消失；
+    - `map_play_customize_inline_team_section_rects(...)` 改为动态布局：选中的队伍 section 下方预留展开字段高度，后续队伍 section 自动下移；
+    - 新增 `map_play_customize_inline_team_field_rects(...)` 与展开高度计算，渲染/命中/滚动高度使用同一几何来源；
+    - MapPlay CustomRules 主内容 hit-test 接入内联 team 字段：number 的 `-`/`+` 直接映射 `AdjustTeamRuleNumber`，toggle 直接映射 `ToggleTeamRule`；
+    - `ToggleTeamRuleSection` 从“强制打开 TeamRules child dialog”调整为 Java 风格主内容内联展开/收起；如果原本已经在 child dialog 中点击，则保持 child dialog 打开，兼容过渡路径；
+    - `ToggleTeamRule`、`AdjustTeamRuleNumber` 在 inline 来源下不再强制打开 TeamRules child dialog，保证 Java CustomRules 主内容流的编辑体验；
+    - teams section 图标按展开状态在 `down-open` / `up-open` 间切换，并在展开区域直接绘制 label、toggle、`-`、`+` 和当前数值。
+- 测试更新：
+  - `desktop_launcher_map_play_custom_rules_teams_inline_like_java`
+    - 保留 `allowedit` 与 `playerteam` inline 行为断言；
+    - 新增 team section 点击后“不打开 TeamRules child dialog、只在主内容区展开”的断言；
+    - 新增内联 `blockhealthmultiplier +` 修改 pending `map_play_rules.teams` 的断言；
+    - 新增内联 `rtsai` toggle 修改 pending `map_play_rules.teams` 且不弹 child dialog 的断言。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_teams_inline_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_back_key_closes_nested_child_dialogs_like_java_stack --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,726,912` 字节。
+- 后续继续：
+  - Java teams 块仍有 18 个字段未搬入当前 inline `JAVA_FIRST`，下一轮应按 Java 顺序继续扩展：
+    - `rtsminsquadsize`、`rtsmaxsquadsize`、`rtsminattackweight`
+    - `buildai`、`buildaitier`
+    - `protectcores`、`extracorebuildradius`
+    - `checkplacement`、`infiniteresources`、`fillitems`
+    - `buildspeedmultiplier`、`unitfactoryactivation`
+    - `unitdamagemultiplier`、`unitcrashdamagemultiplier`、`unitminespeedmultiplier`
+    - `unitbuildspeedmultiplier`、`unitcostmultiplier`、`unithealthmultiplier`
+  - 需要继续补齐 Java 显示条件：`rtsAi` 依赖 `team != rules.defaultTeam`，RTS squad 字段依赖 `teams.rtsAi`，`buildAi/buildAiTier` 依赖 `defaultTeam/env/pvp/buildAi`，`extraCoreBuildRadius` 依赖 `!polygonCoreProtection && protectCores`；
+  - Java 是每个 team 独立 `boolean[] shown` 折叠态；Rust 当前仍用单个 `map_play_team_rules_selected_team` 做单选展开，后续如需更严格复刻，应迁为每队独立展开状态；
+  - Pause CustomRules 仍需继续复用同一 inline teams 几何/字段映射，避免 MapPlay/Pause 双实现漂移。
 
 ## 988. MapPlay CustomRules teams 分类首批内联
 
