@@ -246,6 +246,19 @@ fn menu_push_label_render_command(
 ) {
     if rotation.abs() <= f32::EPSILON {
         if let Some(sprite) = menu_label_sprite_for_text(label) {
+            if style.outline && color[3] > f32::EPSILON {
+                commands.push(RenderCommand::draw_sprite(
+                    sprite.symbol,
+                    menu_label_sprite_rect(
+                        sprite,
+                        RenderPoint::new(point.x + 1.0, point.y - 2.0),
+                        style,
+                    ),
+                    [0.18, 0.18, 0.18, (color[3] * 0.78).clamp(0.0, 1.0)],
+                    0.0,
+                    layer - 0.0001,
+                ));
+            }
             commands.push(RenderCommand::draw_sprite(
                 sprite.symbol,
                 menu_label_sprite_rect(sprite, point, style),
@@ -322,7 +335,8 @@ pub const MENU_FLAT_TOGGLE_MENU_STYLE: MenuFlatToggleMenuStyle = MenuFlatToggleM
     text_style: RenderTextStyle::new(RenderTextAlign::Center)
         .with_vertical_align(RenderTextVerticalAlign::Center)
         .with_markup(true)
-        .with_integer_position(true),
+        .with_integer_position(true)
+        .with_outline(true),
     fill_layer: 101.0,
     drawable_layer: 101.05,
     text_layer: 101.1,
@@ -1203,7 +1217,8 @@ impl MenuUiPlan {
                     RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_markup(true)
-                        .with_integer_position(true),
+                        .with_integer_position(true)
+                        .with_outline(true),
                 )
             } else {
                 (button.rect.center(), style.text_style)
@@ -1314,7 +1329,8 @@ fn menu_push_icon_render_commands(
             RenderTextStyle::new(RenderTextAlign::Center)
                 .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
+                .with_integer_position(true)
+                .with_outline(true),
             layer,
         ));
         return;
@@ -1567,7 +1583,8 @@ fn menu_push_icon_render_commands(
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
+                    .with_integer_position(true)
+                    .with_outline(true),
                 layer,
             ));
         }
@@ -5097,6 +5114,7 @@ mod tests {
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_markup(true)
                 .with_integer_position(true)
+                .with_outline(true)
         );
     }
 
@@ -5235,7 +5253,7 @@ mod tests {
                             < f32::EPSILON
                         && style.horizontal_align == RenderTextAlign::Start
                         && style.markup
-                        && !style.outline
+                        && style.outline
             )
         }));
     }
@@ -5744,18 +5762,42 @@ mod tests {
                     rect,
                     layer,
                     ..
-                } if symbol == "menu-label-zh-play" => Some((rect, layer)),
+                } if symbol == "menu-label-zh-play"
+                    && (*layer
+                        - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
+                            + MENU_BUTTON_LABEL_LAYER_OFFSET))
+                        .abs()
+                        < f32::EPSILON =>
+                {
+                    Some((rect, layer))
+                }
                 _ => None,
             })
-            .expect("localized Chinese menu label should be emitted as a prerendered sprite");
+            .expect("localized Chinese menu label should emit a foreground prerendered sprite");
 
         assert_eq!(label.0.width, 88.0);
         assert_eq!(label.0.height, 35.0);
-        assert!(
-            (*label.1 - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer + MENU_BUTTON_LABEL_LAYER_OFFSET))
-                .abs()
-                < f32::EPSILON
-        );
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect,
+                    tint,
+                    layer,
+                    ..
+                } if symbol == "menu-label-zh-play"
+                    && rect.width == 88.0
+                    && rect.height == 35.0
+                    && tint[0] < 0.25
+                    && (*layer
+                        - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
+                            + MENU_BUTTON_LABEL_LAYER_OFFSET
+                            - 0.0001))
+                        .abs()
+                        < f32::EPSILON
+            )
+        }));
         assert!(!commands.iter().any(
             |command| matches!(command, RenderCommand::DrawText { text, .. } if text == label_text)
         ));
