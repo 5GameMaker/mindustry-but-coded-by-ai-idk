@@ -19,6 +19,37 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 994. Pause CustomRules resources/environment 入口内联
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续执行 UI 子菜单优先级，聚焦 `CustomRulesDialog.java` 中 resourcesbuilding/environment 分类的主内容入口。
+- 本轮总体进度更新：约 **95.57%**，仍未达到完整可玩；本轮把 Pause CustomRules 的 `@configure`、`@bannedblocks`、`@rules.ambientlight`、`@rules.weather` 从仅顶部 child buttons 过渡为主内容 ScrollPane 内联入口，同时保留旧 child buttons 和子对话框作为兼容路径。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `pause_custom_rules_inline_resource_buttons()` 与 `pause_custom_rules_inline_resource_button_rects(...)`，让 `@configure` 和 `@bannedblocks` 按 Java resourcesbuilding 分类参与主内容布局、滚动高度和 hit-test；
+    - 新增 `pause_custom_rules_inline_environment_buttons()` 与 `pause_custom_rules_inline_environment_button_rects(...)`，让 `@rules.ambientlight` 和 `@rules.weather` 按 Java environment 分类在 `@rules.solarmultiplier` 后进入主内容流；
+    - `pause_custom_rules_toggle_content_height(...)`、`pause_custom_rules_y_after_toggle_groups(...)`、`pause_overlay_custom_rules_toggle_rects(...)` 同步计入 inline 入口行，避免渲染与 hit-test 的 y 轴漂移；
+    - `push_pause_overlay_custom_rules_modal(...)` 渲染 resourcesbuilding/environment 内联按钮，顺序保持 `@configure -> @bannedblocks`、`@rules.ambientlight -> @rules.weather`；
+    - `pause_overlay_action_at_surface_point(...)` 在主内容区命中这些 inline 入口，并继续打开现有 `Loadout/BannedContent/Weather/AmbientLight` 过渡子窗；
+    - 新增 `desktop_launcher_paused_world_overlay_custom_rules_resource_environment_entries_inline_like_java`，直接覆盖四个 inline 入口的 rect 与 action。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_resource_environment_entries_inline_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_banned_content_child_dialog_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_weather_child_dialog_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_loadout_child_dialog_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_ambient_light_picker_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_search_filters_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_scrolls_rows_like_java_scrollpane --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_teams_inline_like_java --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,762,240` 字节。
+- 后续继续：
+  - Pause `@bannedunits` 仍应回收到 Java unit 分类主内容入口；
+  - Pause/MapPlay 的 top/side child rail 仍是过渡兼容，后续应继续按 Java `setupMain()` 主内容顺序收敛；
+  - 当前 inline 按钮仍是紧凑按钮形态，后续需要对齐 Java `button(...).size(210f, 64f)` 等具体视觉/热区。
+
 ## 993. Pause CustomRules teams 主内容内联
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续执行 UI 子菜单优先级，聚焦 `CustomRulesDialog.java` 的 `category("teams")` 在暂停自定义规则里的主内容区内联行为。
