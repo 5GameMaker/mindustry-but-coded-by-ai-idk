@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 999. MapPlay CustomRules unit whitelist 主内容内联
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，把 Java `CustomRulesDialog.category("unit")` 末尾的 `@bannedunits.whitelist` 从 Rust 旧通用 policy stack 收敛到 MapPlay unit 主内容流。
+- 本轮总体进度更新：约 **95.62%**，仍未达到完整可玩；本轮把 MapPlay unit 分类顺序推进为 `unitcapvariable -> unitpayloadsexplode -> unit numbers -> logicunit* -> @bannedunits -> @bannedunits.whitelist`，减少 CustomRules 主 ScrollPane 与 Java 原版的剩余顺序差异。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `MAP_PLAY_CUSTOM_RULE_UNIT_SUFFIX_TOGGLES`，目前承载 `DesktopCustomRulesToggle::UnitWhitelist`；
+    - 新增 `map_play_customize_visible_unit_suffix_toggles()`，并把 suffix 高度纳入 `map_play_customize_inline_unit_body_height(...)`；
+    - `map_play_customize_toggle_rects(...)` 对 MapPlay unit 分类改为按 Java 顺序返回 prefix toggles、logic toggles 与 suffix whitelist 的真实 rect，避免 `UnitWhitelist` 继续复用旧 banned policy row 坐标；
+    - `push_map_play_customize_dialog(...)` 在 unit inline 按钮后渲染 `@bannedunits.whitelist` checkbox；
+    - `map_play_custom_rules_visible_banned_policy_toggles()` 将 MapPlay 旧 policy stack 收窄为 `hideBannedBlocks / bannedBlocksWhitelist`，不再包含 unit whitelist；Pause 侧旧 policy stack 暂不在本轮改动；
+    - `active_menu_route_shell_action_at_surface_point(...)` 的 MapPlay policy hit-test 改用收窄后的可见 policy 列表，unit whitelist 改走 unit 主内容 toggle rect；
+    - 扩展 `desktop_launcher_map_play_dialog_opens_help_customize_and_highscore`，搜索 `whitelist` 时断言 `@bannedunits.whitelist` 命中 unit inline toggle，旧 policy row 的第二槽位不再残留可点击区域。
+- Java 对齐依据：
+  - `core/src/mindustry/ui/dialogs/CustomRulesDialog.java:193-209` 中 `@bannedunits.whitelist` 紧跟 `@bannedunits`，属于 `category("unit")` 内部；
+  - `@rules.hidebannedblocks` 与 `@bannedblocks.whitelist` 位于 resourcesbuilding 的 `@bannedblocks` 后方，不应与 unit whitelist 混在同一个 MapPlay policy stack 中；
+  - MapPlay 原版使用 `new CustomRulesDialog(true)`，应继续复用同一主 ScrollPane 规则流。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --test-threads=1 --nocapture`
+- 后续继续：
+  - 把 resourcesbuilding 中 `buildcost/buildspeed/deconstructrefund/blockhealth/blockdamage` 数值项从旧 number stack 收敛到 resourcesbuilding 分类主内容；
+  - 把 `@rules.hidebannedblocks` / `@bannedblocks.whitelist` 从 MapPlay 通用 policy stack 继续收敛到 resourcesbuilding 的 `@bannedblocks` 后方；
+  - 审查 Pause `CustomRulesDialog(false)` 与 MapPlay `CustomRulesDialog(true)` 的差异，尤其 Pause 是否还应显示 `@rules.allowedit`。
+
 ## 998. MapPlay CustomRules unit 数值项主内容内联
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，把 Java `CustomRulesDialog.category("unit")` 中的 6 个 unit number 项接入 MapPlay unit 主内容流。
