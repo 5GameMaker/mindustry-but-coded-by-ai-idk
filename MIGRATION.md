@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1000. MapPlay CustomRules resourcesbuilding 数值项主内容内联
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，对照 Java `CustomRulesDialog.category("resourcesbuilding")`，把 MapPlay 的 build/block 相关数值项推进到 Resources & Building 分类主内容流。
+- 本轮总体进度更新：约 **95.63%**，仍未达到完整可玩；本轮把 MapPlay resourcesbuilding 主体推进为 Java 顺序的 `resource toggles -> build/block numbers -> @configure -> @bannedblocks`，避免 build/block 数值继续停在旧独立 number stack。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `MAP_PLAY_CUSTOM_RULE_RESOURCE_TOGGLES` 扩展为 Java 同序的 10 个 resourcesbuilding 开关：`alloweditworldprocessors`、`infiniteresources`、`onlydepositcore`、`coreunloaders`、`derelictrepair`、`reactorexplosions`、`schematic`、`coreincinerates`、`cleanupdeadteams`、`disableworldprocessors`；
+    - 新增 `DesktopCustomRulesNumber::MAP_PLAY_RESOURCE`，顺序为 `BuildCostMultiplier`、`BuildSpeedMultiplier`、`DeconstructRefundMultiplier`、`BlockHealthMultiplier`、`BlockDamageMultiplier`；
+    - 新增 `map_play_customize_inline_resource_numbers()` 与 `map_play_customize_inline_resource_number_rects(...)`，让 build/block 数值行进入 resourcesbuilding 分类主内容；
+    - `map_play_customize_toggle_rects(...)`、`map_play_customize_inline_*_rects(...)`、`map_play_custom_rules_toggle_content_height(...)`、`map_play_customize_y_after_toggle_groups(...)` 同步计入 resource number 高度，避免 unit/environment/planet/teams y 轴漂移；
+    - `push_map_play_customize_dialog(...)` 在 resource toggles 后、`@configure/@bannedblocks` 前绘制 5 个数值行，继续复用 `AdjustCustomRuleNumber`；
+    - `active_menu_route_shell_action_at_surface_point(...)` 接入 resource number `- / +` hit-test；
+    - 扩展 `desktop_launcher_map_play_dialog_opens_help_customize_and_highscore`，覆盖 `buildspeedmultiplier` inline 命中写回，以及 `infiniteResources=true` 时 `buildcostmultiplier` 禁用。
+- Java 对齐依据：
+  - `core/src/mindustry/ui/dialogs/CustomRulesDialog.java:161-191` 的 resourcesbuilding 顺序固定为 10 个 check、5 个 number、`@configure`、`@bannedblocks`、`@rules.hidebannedblocks`、`@bannedblocks.whitelist`；
+  - `@rules.buildcostmultiplier` 与 `@rules.deconstructrefundmultiplier` 在 `rules.infiniteResources` 时禁用；
+  - `@rules.buildspeedmultiplier` 的 Java 边界是 `0.001f..50f`，Rust `DesktopCustomRulesNumber::adjust` 已保持同等 clamp。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --test-threads=1 --nocapture`
+- 后续继续：
+  - 把 `@rules.hidebannedblocks` / `@bannedblocks.whitelist` 从 MapPlay 通用 policy stack 收敛到 resourcesbuilding 的 `@bannedblocks` 后方；
+  - 审查 Pause `CustomRulesDialog(false)` 与 MapPlay `CustomRulesDialog(true)` 的差异，尤其 Pause 是否还应显示 `@rules.allowedit`；
+  - 继续缩减右侧 child rail 的过渡依赖，最终以 Java `setupMain()` 单 ScrollPane 主内容流为主。
+
 ## 999. MapPlay CustomRules unit whitelist 主内容内联
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，把 Java `CustomRulesDialog.category("unit")` 末尾的 `@bannedunits.whitelist` 从 Rust 旧通用 policy stack 收敛到 MapPlay unit 主内容流。
