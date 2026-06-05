@@ -482,6 +482,7 @@ fn desktop_native_opengl_shader_asset_root_resolution_from_candidates(
     candidates: Vec<(std::path::PathBuf, &'static str)>,
     fallback: std::path::PathBuf,
 ) -> DesktopNativeOpenGlShaderAssetRootResolution {
+    let mut first_shader_only_candidate = None;
     for (candidate, source) in candidates {
         let shaders_dir_exists = candidate.join("shaders").is_dir();
         let fonts_dir_exists = candidate.join("fonts").is_dir();
@@ -489,7 +490,7 @@ fn desktop_native_opengl_shader_asset_root_resolution_from_candidates(
             "shader_asset_root: candidate source={source} path={} shaders_dir_exists={shaders_dir_exists} fonts_dir_exists={fonts_dir_exists}",
             candidate.display()
         ));
-        if shaders_dir_exists {
+        if shaders_dir_exists && fonts_dir_exists {
             return DesktopNativeOpenGlShaderAssetRootResolution {
                 path: candidate,
                 source,
@@ -497,6 +498,24 @@ fn desktop_native_opengl_shader_asset_root_resolution_from_candidates(
                 fonts_dir_exists,
             };
         }
+        if shaders_dir_exists && first_shader_only_candidate.is_none() {
+            first_shader_only_candidate = Some(DesktopNativeOpenGlShaderAssetRootResolution {
+                path: candidate,
+                source,
+                shaders_dir_exists,
+                fonts_dir_exists,
+            });
+        }
+    }
+
+    if let Some(resolution) = first_shader_only_candidate {
+        desktop_native_trace(format!(
+            "shader_asset_root: selected shader-only fallback source={} path={} fonts_dir_exists={}",
+            resolution.source,
+            resolution.path.display(),
+            resolution.fonts_dir_exists
+        ));
+        return resolution;
     }
 
     let shaders_dir_exists = fallback.join("shaders").is_dir();
@@ -4199,6 +4218,27 @@ mod tests {
         );
 
         assert_eq!(resolution.path, root);
+        assert!(resolution.shaders_dir_exists);
+        assert!(resolution.fonts_dir_exists);
+    }
+
+    #[test]
+    fn native_opengl_shader_asset_root_prefers_complete_assets_over_shader_only() {
+        let shader_only = unique_temp_shader_asset_root("shader-only");
+        std::fs::remove_dir_all(shader_only.join("fonts"))
+            .expect("shader-only fixture should remove fonts directory");
+        let complete = unique_temp_shader_asset_root("complete-assets");
+
+        let resolution = desktop_native_opengl_shader_asset_root_resolution_from_candidates(
+            vec![
+                (shader_only.clone(), "shader-only"),
+                (complete.clone(), "complete"),
+            ],
+            std::env::temp_dir().join("mindustry-desktop-shader-root-complete-fallback"),
+        );
+
+        assert_eq!(resolution.path, complete);
+        assert_eq!(resolution.source, "complete");
         assert!(resolution.shaders_dir_exists);
         assert!(resolution.fonts_dir_exists);
     }
