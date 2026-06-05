@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1008. MapPlay CustomRules 右侧重复入口全部退场
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续第一优先级 UI 子菜单对齐，按 Java `CustomRulesDialog` 主 ScrollPane 结构收口 MapPlay CustomRules 右侧重复 rail。
+- 本轮总体进度更新：约 **95.71%**，仍未达到完整可玩；本轮让 MapPlay CustomRules right rail 只保留 `@edit` 和 `@settings.reset`，`@bannedblocks`、`@bannedunits`、`@rules.weather`、`@rules.title.teams`、`@rules.title.planet`、`@rules.ambientlight`、`@configure` 全部改由主 ScrollPane inline 入口承担。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `active_menu_route_shell_action_at_surface_point(...)` 移除 MapPlay rail index `2/3/4/6/7` 对应的 banned blocks、banned units、weather、planet、ambient hit-test；此前退场的 teams/configure 继续保持不可命中；
+    - `push_map_play_customize_dialog(...)` 渲染 right rail 时跳过 `index 2..=8`，避免 Java 不存在的重复入口继续显示；
+    - `desktop_launcher_map_play_custom_rules_planet_picker_like_java` 改为断言旧 planet rail 坐标不再返回 `OpenPlanet`，legacy planet dialog 仍通过直接 action 保留过渡覆盖；
+    - `desktop_launcher_map_play_custom_rules_environment_toggles_match_java` 增加旧 rail bannedblocks/bannedunits/weather/ambient 不可命中的回归锚点。
+- Java 对齐依据：
+  - `CustomRulesDialog.java` 中 `configure/bannedblocks/bannedunits/weather/ambientlight/planet/teams` 都属于主内容分组或 inline 子面板，顶层按钮语义不包含 Rust 旧 right rail；
+  - MapPlay 与 Pause 现在都已按 Java 主 ScrollPane 入口收口，减少双入口导致的 UI 差异和误点风险。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe build -p mindustry-desktop --bin mindustry-desktop --release`
+- 本轮 release 客户端：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+- 后续继续：
+  - CustomRules right rail 去重已完成，下一步转向其它 UI 子菜单差异：Workshop/desktop submenu scene-margin/safe-area、Campaign LaunchLoadoutDialog loadout schematic picker、以及主菜单/子菜单像素与行为还原。
+
 ## 1007. Pause CustomRules 右侧重复入口全部退场
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续第一优先级 UI 子菜单对齐，收口 Pause CustomRules 右侧 child rail 的剩余重复入口。
