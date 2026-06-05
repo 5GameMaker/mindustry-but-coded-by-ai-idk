@@ -1165,10 +1165,10 @@ fn menu_push_icon_render_commands(
             color,
             size,
             0.0,
-                RenderTextStyle::new(RenderTextAlign::Center)
-                    .with_font(RenderFontId::Icon)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
             layer,
         ));
         return;
