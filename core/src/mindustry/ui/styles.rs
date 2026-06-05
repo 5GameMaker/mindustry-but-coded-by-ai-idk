@@ -602,6 +602,12 @@ pub const UPSTREAM_UI_DRAWABLE_ALIASES: &[UiDrawableAlias] = &[
         UiDrawableTint::None,
     ),
     UiDrawableAlias::new(
+        "whitePane",
+        "white-pane.9",
+        "sprites/ui/white-pane.9.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
         "flatDown",
         "flat-down-base.9",
         "sprites/ui/flat-down-base.9.png",
@@ -1158,6 +1164,7 @@ mod tests {
         for symbol in [
             "window-empty.9",
             "pane.9",
+            "white-pane.9",
             "alpha-bg",
             "alpha-bg-line",
             "button.9",
@@ -1203,6 +1210,11 @@ mod tests {
         assert_eq!(window.atlas_symbol, "window-empty.9");
         assert_eq!(window.source_path, "sprites/ui/window-empty.9.png");
         assert_eq!(window.tint, UiDrawableTint::None);
+
+        let white_pane = upstream_ui_drawable_alias("whitePane").unwrap();
+        assert_eq!(white_pane.atlas_symbol, "white-pane.9");
+        assert_eq!(white_pane.source_path, "sprites/ui/white-pane.9.png");
+        assert_eq!(white_pane.tint, UiDrawableTint::None);
     }
 
     #[test]
