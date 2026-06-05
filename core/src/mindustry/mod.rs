@@ -27,7 +27,7 @@ pub const UPSTREAM_VERSION_MODIFIER: &str = "release";
 pub const UPSTREAM_VERSION_BUILD: i32 = 158;
 pub const UPSTREAM_VERSION_REVISION: i32 = 1;
 pub const UPSTREAM_VERSION_COMMIT_HASH: &str = "unknown";
-pub const UPSTREAM_MENU_VERSION_TEXT_OVERRIDE: Option<&str> = Some("custom build");
+pub const UPSTREAM_MENU_VERSION_TEXT_OVERRIDE: Option<&str> = None;
 
 pub fn upstream_version_info() -> core::version::VersionInfo {
     core::version::VersionInfo {
@@ -70,7 +70,7 @@ mod tests {
         assert_eq!(info.build, 158);
         assert_eq!(info.revision, 1);
         assert_eq!(info.build_string(), "158.1");
-        assert_eq!(upstream_menu_version_text(), "custom build");
-        assert_eq!(upstream_menu_version_color(), [0.988, 0.506, 0.251, 0.667]);
+        assert_eq!(upstream_menu_version_text(), "release build 158.1");
+        assert_eq!(upstream_menu_version_color(), [1.0, 1.0, 1.0, 0.729]);
     }
 }
