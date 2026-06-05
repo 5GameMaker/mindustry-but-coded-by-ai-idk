@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1011. 主菜单字体阴影回归修复
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮按前端第一优先级处理主菜单字体观感退化，目标是让主菜单文字继续贴近 Java `Styles.flatToggleMenut` + `Fonts.def` 的阴影层次，而不是裸白字或生硬贴图。
+- 本轮总体进度更新：约 **95.74%**，仍未达到完整可玩；本轮没有改生产逻辑，专门修正主菜单字体/标签渲染观感。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 恢复 `MENU_FLAT_TOGGLE_MENU_STYLE.text_style` 的 `outline`，继续用现有 Rust 文本后端近似 Java `Fonts.def` 的深色阴影；
+    - 桌面带图标按钮的 start-aligned label 与 icon glyph fallback 同步恢复 `outline`；
+    - 中文主菜单 label sprite 在前景 sprite 前追加一层深色偏移 shadow sprite，避免 `menu-label-zh-*` 变成无阴影纯白贴图；
+    - 更新中文 label sprite 回归测试，明确前景层与阴影层都存在。
+- Java 对齐依据：
+  - `MenuFragment.java` desktop 主按钮使用 `Styles.flatToggleMenut`；
+  - `Styles.flatToggleMenut` 使用 `Fonts.def` 与 `Color.white`；
+  - `Fonts.fontParameter()` 为 `Fonts.def` 设置 `shadowColor = Color.darkGray`、`shadowOffsetY = 2`，因此 Rust 主菜单不能退化为无阴影裸白字。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-core menu_flat_toggle_menu_style_keeps_upstream_state_names_and_java_clear_up_fallback --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-core menu_ui_plan_desktop_chinese_menu_labels_use_upstream_label_sprites --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-core menu_ui_plan_desktop_matches_upstream_main_and_submenu_geometry --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_graphics_opengl_backend_placeholder_text_honors_outline_style --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_without_world --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_menu_primary_action_switches_database_submenu --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe build -p mindustry-desktop --bin mindustry-desktop --release`
+- 本轮 release 客户端：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+- 后续继续：
+  - 如果用户仍认为中文主菜单字体不够原版，下一步应推进真实 `fonts/font.woff` / glyph atlas 字形 rasterization，而不是继续手写 placeholder 字形；
+  - 继续按第一优先级补齐所有前端子菜单与 Java 原版表现。
+
 ## 1010. Desktop submenu margin/scale 命中联合回归
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续第一优先级 UI 子菜单对齐，收口主菜单 desktop submenu 在 scene margin 与非默认 UI scale 下的 hitbox 风险。
