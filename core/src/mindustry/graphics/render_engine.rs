@@ -381,6 +381,8 @@ pub enum RenderFontId {
     Icon,
     IconLarge,
     Logic,
+    Tech,
+    Monospace,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1866,6 +1868,40 @@ mod tests {
                 assert_eq!(layer, 82.0);
             }
             other => panic!("unexpected icon large text command: {other:?}"),
+        }
+
+        let tech_text = RenderCommand::draw_text_styled(
+            "TECH",
+            RenderPoint::new(16.0, 17.0),
+            [1.0, 1.0, 1.0, 1.0],
+            18.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start).with_font(RenderFontId::Tech),
+            83.0,
+        );
+        match tech_text {
+            RenderCommand::DrawText { style, layer, .. } => {
+                assert_eq!(style.font, RenderFontId::Tech);
+                assert_eq!(layer, 83.0);
+            }
+            other => panic!("unexpected tech text command: {other:?}"),
+        }
+
+        let monospace_text = RenderCommand::draw_text_styled(
+            "mono",
+            RenderPoint::new(18.0, 19.0),
+            [1.0, 1.0, 1.0, 1.0],
+            16.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start).with_font(RenderFontId::Monospace),
+            84.0,
+        );
+        match monospace_text {
+            RenderCommand::DrawText { style, layer, .. } => {
+                assert_eq!(style.font, RenderFontId::Monospace);
+                assert_eq!(layer, 84.0);
+            }
+            other => panic!("unexpected monospace text command: {other:?}"),
         }
 
         match polygon {

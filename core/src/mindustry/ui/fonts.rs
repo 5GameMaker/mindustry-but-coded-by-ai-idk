@@ -56,7 +56,8 @@ impl UpstreamFontRole {
             Self::Icon => Some(RenderFontId::Icon),
             Self::IconLarge => Some(RenderFontId::IconLarge),
             Self::Logic => Some(RenderFontId::Logic),
-            Self::Tech | Self::Monospace => None,
+            Self::Tech => Some(RenderFontId::Tech),
+            Self::Monospace => Some(RenderFontId::Monospace),
         }
     }
 }
@@ -950,6 +951,11 @@ mod tests {
         let monospace = upstream_font_asset_by_name("monospace").unwrap();
         assert_eq!(monospace.source_path, "fonts/monospace.woff");
         assert_eq!(monospace.fallback_java_static_name, Some("Fonts.def"));
+        assert_eq!(monospace.render_font_id(), Some(RenderFontId::Monospace));
+
+        let tech = upstream_font_asset_by_name("tech").unwrap();
+        assert_eq!(tech.source_path, "fonts/tech.ttf");
+        assert_eq!(tech.render_font_id(), Some(RenderFontId::Tech));
 
         let paths = upstream_font_source_paths().collect::<Vec<_>>();
         assert!(paths.contains(&"fonts/font.woff"));
