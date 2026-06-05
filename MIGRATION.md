@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1003. MapPlay CustomRules teams 右侧重复入口退场
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，开始缩减 Rust MapPlay CustomRules 右侧 child rail 中已经由 Java 主 ScrollPane 承担的重复入口。
+- 本轮总体进度更新：约 **95.66%**，仍未达到完整可玩；本轮先退最小闭环：MapPlay `@rules.title.teams` 已有完整 inline teams 分类，因此右侧 `OpenTeamRules` rail 按钮不再渲染、也不再响应点击。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_map_play_customize_dialog(...)` 渲染右侧 rail 时跳过 index `5` 的 `@rules.title.teams`；
+    - `active_menu_route_shell_action_at_surface_point(...)` 移除 MapPlay CustomRules rail index `5 -> OpenTeamRules` 的 hit-test 分支；
+    - 更新 `desktop_launcher_map_play_dialog_opens_help_customize_and_highscore`，断言 index 5 旧 rail 坐标不再返回 `OpenTeamRules`，TeamRules child dialog 仍通过直接 action 保留过渡兼容覆盖。
+- Java 对齐依据：
+  - `CustomRulesDialog.java` 的 teams 属于 `setupMain()` 主 ScrollPane 内 `category("teams")`，不是右侧 rail 独立按钮；
+  - 顶层真实按钮仅 `@edit` 与 `addCloseButton()` 语义，`reset` 只属于 edit 子弹窗。
+- 已验证：
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe fmt`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_custom_rules_teams_inline_like_java --lib -- --test-threads=1 --nocapture`
+  - `C:/Users/yuyu/.cargo/bin/cargo.exe test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --test-threads=1 --nocapture`
+- 后续继续：
+  - 按同一原则优先处理 Pause CustomRules rail：除 `edit` 与 close/back 外，`bannedblocks/bannedunits/weather/teams/planet/ambient/configure` 均应由主 ScrollPane 承担；
+  - MapPlay rail 后续继续逐项退 `bannedblocks/bannedunits/weather/planet/ambient/configure`，但每项要确保主 ScrollPane 入口、搜索、hit-test 和子弹窗仍可用。
+
 ## 1002. Pause CustomRules 隐藏 allowedit inline 行
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 UI 子菜单第一优先级，修正 Pause 与 MapPlay 的 `CustomRulesDialog(false/true)` 差异：Pause 侧不应在 teams 主内容流显示 `@rules.allowedit`，MapPlay 侧继续保留。
