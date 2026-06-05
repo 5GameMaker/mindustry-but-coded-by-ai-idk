@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 988. MapPlay CustomRules teams 分类首批内联
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续对齐 Java `CustomRulesDialog.category("teams")`，优先让 MapPlay 主内容区出现 Java 顺序中的 teams 分类。
+- 本轮总体进度更新：约 **95.51%**，仍未达到完整可玩；本轮完成 MapPlay teams 分类第一阶段内联：`@rules.allowedit`、`@rules.playerteam`、`@rules.enemyteam` 和 base team section 入口进入 CustomRules 主内容流，继续复用现有 TeamRules 数据/动作/弹窗作为后续完整折叠字段的过渡承载。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_play_customize_inline_team_*` 几何和 rect helper，用于 teams 分类标题、allowedit 行、player/enemy team 选择色块和 base team section 入口；
+    - MapPlay CustomRules ScrollPane 高度同步计入 teams inline 区，避免 teams 接入后挤压或丢弃下方内容；
+    - 主内容 hit-test 接入 inline allowedit、playerteam、enemyteam 和 team section，selector 继续写入 pending `map_play_rules.default_team/wave_team`；
+    - 调整 `ToggleAllowEditRules`、`SelectDefaultTeam`、`SelectWaveTeam` 的 MapPlay dispatch：如果来自 inline 主内容则不强制打开 TeamRules 子弹窗；如果原本就在子弹窗内点击，则保持子弹窗打开；
+    - 渲染 teams 分类：标题、分割线、allowedit 状态按钮、两行队伍色块、base team section 按钮，并保留 `OpenTeamRules` 右侧 rail/child dialog 作为过渡兼容；
+    - 新增 `desktop_launcher_map_play_custom_rules_teams_inline_like_java`，覆盖 allowedit inline 命中、playerteam inline 选择不弹窗、base team section 仍可打开现有 TeamRules 编辑承载层。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules_teams_inline_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_custom_rules --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_back_key_closes_nested_child_dialogs_like_java_stack --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --bin mindustry-desktop --release`
+- 最新 release 产物：
+  - `D:/MDT/rust-mindustry/target/release/mindustry-desktop.exe`
+  - 当前大小约 `10,722,816` 字节。
+- 后续继续：
+  - 当前 team section 仍打开既有 child dialog，后续应把 `DesktopTeamRuleToggle` / `DesktopTeamRuleNumber` 字段逐项搬入 Java 式每队 collapser；
+  - Java 条件可用性仍需继续细化：`buildAi`、`buildAiTier`、`extraCoreBuildRadius`、RTS 相关字段需要和 `rules.defaultTeam/env/pvp/protectCores` 完全一致；
+  - Pause CustomRules 仍需复用同一 inline teams helper，减少 MapPlay/Pause 双实现漂移。
+
 ## 987. MapPlay CustomRules ambient/weather 入口内联与 ScrollPane 对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续优先对齐 Java `CustomRulesDialog.environment`，并补齐 MapPlay CustomRules 主内容区的 Java ScrollPane 等价行为。
