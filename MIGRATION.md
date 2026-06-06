@@ -19,6 +19,39 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1015. 字体/语言 bundle 与 Settings 子窗视觉收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，聚焦用户指出的“前端视觉表现和字体/语言部分仍有缺失”。
+- 本轮总体进度更新：约 **97.00%**，仍未达到完整可玩，不能宣告目标完成；后续继续逐个子菜单对齐 Java UI，并继续推进可玩性/runtime/net 互通。
+- 主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 新增 raw bundle text 扫描 helper，保留 `global.properties` 与 English fallback 链，不把 router raw text 提前 routerize。
+  - `desktop/src/lib.rs`
+    - 字体 atlas seed 扫描真实 `bundle*.properties`/`global.properties`，扩大多语言 glyph 覆盖；
+    - `font_jp.woff` override seed 自动继承所有非 ASCII bundle/UI 字符，降低日文/中日韩 UI 缺字；
+    - LanguageDialog 列表对齐 Java `TextButton(...).size(400f, 50f)` 与 `langs.marginLeft/Right(24f)`，语言按钮字号收口到 Settings 通用 label size；
+    - Settings Language/Data/PlanetData/Controls 子窗 `@back` 按钮统一为 Java `BaseDialog.addCloseButton()` 的 `210x64` 居中按钮；
+    - `Fonts.monospace` 接入 Java `fallback.add(() -> Fonts.def)` 等价链，缺字时回退 Default/font_jp，不再整段走 placeholder；
+    - 运行时本地化接入 asset `bundle_*.properties` 与外置 `data_dir/bundle`，顺序为 `global.properties` 覆盖层 → 外置 bundle → 内置 locale bundle/root fallback；router 仍保留原版彩蛋逻辑。
+- 已验证：
+  - `cargo test -p mindustry-core upstream_menu_bundle_raw_texts -- --nocapture`
+  - `cargo test -p mindustry-desktop font_atlas -- --nocapture`
+  - `cargo test -p mindustry-desktop language -- --nocapture`
+  - `cargo test -p mindustry-desktop settings_child -- --nocapture`
+  - `cargo test -p mindustry-desktop monospace_falls_back -- --nocapture`
+  - `cargo test -p mindustry-desktop bundle -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - `cargo fmt --check` 当前会被仓库既有未格式化片段和 rustfmt 对超大 `desktop/src/lib.rs` 的 OOM 干扰，本轮以定向测试和 `git diff --check` 作为有效门禁；
+  - `Fonts.outline` 仍是真实 glyph + 多方向描边近似，未完整复刻 Java FreeType border rasterization；
+  - Mod bundle 合并链、完整 Scene2D 独立 modal stack、其余前端子菜单像素级视觉仍需继续推进。
+- 已推送中文提交：
+  - `0f6b2a47 扩大字体语言包字形覆盖`
+  - `724e3a27 对齐语言界面字体和间距`
+  - `cae64991 统一设置子窗返回按钮`
+  - `7c4df0b8 接入等宽字体默认回退`
+  - `82968db8 接入资源语言包本地化`
+
 ## 1014. Default/Outline 真字体 atlas 接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，处理主菜单/前端文字仍落到 placeholder glyph 的高可见偏差。
