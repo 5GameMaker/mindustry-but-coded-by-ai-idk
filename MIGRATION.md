@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1018. 前端 packed atlas 低纹理尺寸 fallback 对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端/资源视觉链路，处理 Java `ClientLauncher` 在低 `GL_MAX_TEXTURE_SIZE` 时加载 fallback packed atlas 的差异。
+- 本轮总体进度更新：约 **97.57%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Settings/Language/Controls/Data、Join/Host、Load/Save/Editor、Database/About/Mods 等页面的 Java 视觉收口。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DESKTOP_JAVA_RECOMMENDED_MAX_TEXTURE_SIZE = 4096`；
+    - 新增 `desktop_max_texture_size_like_java()`，当前优先读取 `MINDUSTRY_MAX_TEXTURE_SIZE`，默认 4096；
+    - 新增 `desktop_packed_atlas_source_path_for_max_texture_size(...)`，对齐 Java `maxTextureSize >= 4096 ? "sprites/sprites.aatls" : "sprites/fallback/sprites.aatls"`；
+    - `desktop_merge_packed_atlas_regions(...)` 不再固定主 atlas，而是按 max texture size 选择主/fallback atlas；
+    - 新增测试 `desktop_packed_atlas_source_path_matches_java_max_texture_gate`、`desktop_merge_packed_atlas_regions_uses_java_fallback_atlas_for_low_texture_size`。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_packed_atlas_source_path_matches_java_max_texture_gate -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_merge_packed_atlas_regions_uses_java_fallback_atlas_for_low_texture_size -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_packed_atlas -- --nocapture`
+- 注意：
+  - 当前 native OpenGL 真实 `GL_MAX_TEXTURE_SIZE` 仍建议后续从 runtime 查询后注入，而不是只靠环境变量；但默认 4096 保持现有主 atlas 行为不变，低纹理尺寸测试/运行可通过 `MINDUSTRY_MAX_TEXTURE_SIZE` 触发 fallback。
+
 ## 1017. 前端字体动态字形与核心资源缺项补齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续处理用户指出的“前端视觉表现和字体/语言部分还有很多缺失”，优先补齐会影响所有子菜单文本显示的字体增量字形链。
