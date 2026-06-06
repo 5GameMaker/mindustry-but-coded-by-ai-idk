@@ -32386,3 +32386,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 日文字体 override 是否应按 Java 启动期 locale gating 继续审查；
   - Settings、Join、Mods、Database、MapList/MapPlay 等子菜单仍需继续像素级/布局级对齐；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1021. Settings PlanetData BaseDialog 返回命中验收
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.12%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `SettingsMenuDialog` 的 `dataDialog` 与 PlanetData 子弹窗都按 `BaseDialog("@settings.data")` 层级显示；
+  - `BaseDialog.addCloseButton()` 使用底部 `@back` footer 关闭顶层 dialog；
+  - 顶层 PlanetData 打开时，底层 `dataDialog` 只作为背景层，不应让旧 chrome 点击穿透。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 修正 `desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell` 中 PlanetData 关闭点击点，改为 `settings_child_dialog_back_button_rect(..., PlanetData)`；
+    - 增加 `active_menu_route_shell_action_at_surface_point(...)` 断言，锁住 PlanetData 顶层 `@back` footer 触发 `CloseChildDialog`；
+    - 保留关闭后回到 `DesktopSettingsChildDialog::Data` 且 Settings 主页面状态不跳页的断言。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_dialog_overlay_and_back_stack_match_java -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Settings Data/PlanetData 的视觉细节仍需继续与 Java `Styles.black`/ScrollPane/按钮 padding 对齐；
+  - LanguageDialog 默认 locale 来源、字体 override 和长语言文本裁剪仍需继续推进；
+  - Join、Mods、Database、MapList/MapPlay 等子菜单仍需继续像素级/布局级对齐；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
