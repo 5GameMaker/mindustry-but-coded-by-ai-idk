@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1024. HostDialog Steam 复选框与 hover tooltip 视觉收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，收口 `HostDialog.java` 中 Steam friends-only 行的视觉/交互差异。
+- 本轮总体进度更新：约 **97.66%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Join/Host、Load/Save、Database/About/Mods、Editor/MapList 等页面的 Java 视觉收口。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - `@steam.friendsonly` 从整条 `TextButton + ok/cancel icon` 改为 Java `cont.check(...)` 对应的 CheckBox 行；
+    - 新增 Host friends-only checkbox rect/label point helper，复用 upstream `defaultCheck` 贴图语义；
+    - `@steam.friendsonly.tooltip` 改为 hover-only tooltip：默认不常驻显示，鼠标悬停 friends-only 行时显示；
+    - `@host` 按钮去掉 Rust-only `host` 图标，恢复更贴近 Java 的纯文本按钮表现；
+    - 补强 Steam HostDialog 测试，断言 CheckBox sprite、hover tooltip、Host 按钮无 Icon 字体。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_host_steam_friends_only_tooltip_is_not_persistent_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_opens_host_dialog_route -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - HostDialog 名字/颜色、端口、Host/Info 行几何已有测试覆盖并保持不变；下一步可继续收 Join/Host 其他弹窗 chrome 或转向 Load/Save 卡片与 Database/About 子菜单。
+
 ## 1023. 前端字体/语言视觉细节与 headless 图标接线
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续处理“前端视觉表现和字体/语言部分还有很多缺失”，以本地 Java 参考为准，不上网检索。
