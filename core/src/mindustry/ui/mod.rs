@@ -9,12 +9,17 @@ pub mod styles;
 pub mod warning_bar;
 
 pub const UPSTREAM_BUNDLE_PROPERTIES_SOURCE_PATH: &str = "core/assets/bundles/bundle.properties";
+pub const UPSTREAM_GLOBAL_BUNDLE_PROPERTIES_SOURCE_PATH: &str =
+    "core/assets/bundles/global.properties";
+pub const UPSTREAM_ROUTER_LANGUAGE_GLYPH: char = '\u{f88e}';
 const UPSTREAM_BUNDLE_PROPERTIES_SOURCE: &str =
     include_str!("../../../assets/bundles/bundle.properties");
 const UPSTREAM_BUNDLE_ZH_CN_PROPERTIES_SOURCE: &str =
     include_str!("../../../assets/bundles/bundle_zh_CN.properties");
 const UPSTREAM_BUNDLE_ZH_TW_PROPERTIES_SOURCE: &str =
     include_str!("../../../assets/bundles/bundle_zh_TW.properties");
+const UPSTREAM_GLOBAL_BUNDLE_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/global.properties");
 
 pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("play", "Play"),
@@ -1451,12 +1456,19 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
 ];
 
 pub fn upstream_bundle_en_value(key: &str) -> Option<&'static str> {
-    UPSTREAM_MENU_BUNDLE_ENTRIES
-        .iter()
-        .find_map(|(candidate, value)| (*candidate == key).then_some(*value))
+    upstream_global_bundle_value(key)
+        .or_else(|| {
+            UPSTREAM_MENU_BUNDLE_ENTRIES
+                .iter()
+                .find_map(|(candidate, value)| (*candidate == key).then_some(*value))
+        })
         .or_else(|| {
             upstream_bundle_value_from_properties_source(UPSTREAM_BUNDLE_PROPERTIES_SOURCE, key)
         })
+}
+
+pub fn upstream_global_bundle_value(key: &str) -> Option<&'static str> {
+    upstream_bundle_value_from_properties_source(UPSTREAM_GLOBAL_BUNDLE_PROPERTIES_SOURCE, key)
 }
 
 fn upstream_bundle_value_from_entries(
@@ -1513,7 +1525,8 @@ pub fn upstream_menu_bundle_entries_for_locale(
 }
 
 pub fn upstream_menu_bundle_value_for_locale(locale: &str, key: &str) -> Option<&'static str> {
-    upstream_bundle_value_from_entries(upstream_menu_bundle_entries_for_locale(locale), key)
+    upstream_global_bundle_value(key)
+        .or_else(|| upstream_bundle_value_from_entries(upstream_menu_bundle_entries_for_locale(locale), key))
         .or_else(|| {
             upstream_bundle_value_from_properties_source(
                 upstream_menu_bundle_properties_source_for_locale(locale),
@@ -1523,12 +1536,56 @@ pub fn upstream_menu_bundle_value_for_locale(locale: &str, key: &str) -> Option<
         .or_else(|| upstream_bundle_en_value(key))
 }
 
+fn upstream_is_router_locale(locale: &str) -> bool {
+    locale.trim().replace('-', "_").eq_ignore_ascii_case("router")
+}
+
+fn upstream_strip_color_markup(value: &str) -> String {
+    let mut stripped = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '[' {
+            while let Some(next) = chars.next() {
+                if next == ']' {
+                    break;
+                }
+            }
+        } else {
+            stripped.push(ch);
+        }
+    }
+    stripped
+}
+
+fn upstream_routerized_bundle_value(value: &str) -> String {
+    upstream_strip_color_markup(value)
+        .chars()
+        .map(|ch| {
+            if ch.is_whitespace() {
+                ch
+            } else {
+                UPSTREAM_ROUTER_LANGUAGE_GLYPH
+            }
+        })
+        .collect()
+}
+
+pub fn upstream_menu_bundle_value_for_locale_owned(locale: &str, key: &str) -> Option<String> {
+    if let Some(global) = upstream_global_bundle_value(key) {
+        return Some(global.to_string());
+    }
+    if upstream_is_router_locale(locale) {
+        return upstream_bundle_en_value(key).map(upstream_routerized_bundle_value);
+    }
+    upstream_menu_bundle_value_for_locale(locale, key).map(ToOwned::to_owned)
+}
+
 pub fn upstream_menu_bundle_format_for_locale(
     locale: &str,
     key: &str,
     args: &[&str],
 ) -> Option<String> {
-    let mut value = upstream_menu_bundle_value_for_locale(locale, key)?.to_string();
+    let mut value = upstream_menu_bundle_value_for_locale_owned(locale, key)?;
     for (index, arg) in args.iter().enumerate() {
         value = value.replace(&format!("{{{index}}}"), arg);
     }
@@ -1579,6 +1636,10 @@ mod tests {
         assert_eq!(
             UPSTREAM_BUNDLE_PROPERTIES_SOURCE_PATH,
             "core/assets/bundles/bundle.properties"
+        );
+        assert_eq!(
+            UPSTREAM_GLOBAL_BUNDLE_PROPERTIES_SOURCE_PATH,
+            "core/assets/bundles/global.properties"
         );
         for (key, expected) in [
             ("play", "Play"),
@@ -1691,6 +1752,34 @@ mod tests {
             Some("[scarlet]Failed to import save: [accent]broken.msav")
         );
         assert_eq!(upstream_bundle_en_value("missing.menu.key"), None);
+    }
+
+    #[test]
+    fn upstream_menu_bundle_merges_global_properties_like_vars_load_settings() {
+        assert_eq!(
+            upstream_global_bundle_value("sector.origin.credit"),
+            Some("Mechanical Fishe")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "sector.origin.credit"),
+            Some("Mechanical Fishe"),
+            "Java Vars.loadSettings merges bundles/global.properties into Core.bundle after locale loading"
+        );
+    }
+
+    #[test]
+    fn upstream_menu_bundle_router_locale_replaces_non_whitespace_like_java() {
+        let play = upstream_menu_bundle_value_for_locale_owned("router", "play")
+            .expect("router locale should resolve normal bundle keys");
+
+        assert_eq!(play.chars().count(), 4);
+        assert!(play.chars().all(|ch| ch == UPSTREAM_ROUTER_LANGUAGE_GLYPH));
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale_owned("router", "sector.origin.credit")
+                .as_deref(),
+            Some("Mechanical Fishe"),
+            "Java merges global.properties after the router text replacement, so global strings are not routerized"
+        );
     }
 
     #[test]
