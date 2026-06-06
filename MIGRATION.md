@@ -19,6 +19,21 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1021. SettingsMenuDialog 主按钮 flatt 视觉收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉优先级，把 Settings 主页面入口按钮从 Rust 自定义蓝灰/蓝边改回 Java `Styles.flatt`。
+- 本轮总体进度更新：约 **97.60%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Settings/Data/Controls、Join/Host、Database/About/Mods 等子菜单 visual chrome。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_main_menu_buttons(...)` 复用 `settings_text_button_symbol_and_tint("flatt", ...)`，普通态使用 `black` tint，hover 使用 `flatOver/#454545`；
+    - 移除 Settings 主页面单个按钮上的 Rust-only cyan/blue `StrokeRect`，对齐 Java `Styles.flatt` 本身没有额外描边；
+    - Settings 主菜单按钮 icon/label 文字颜色恢复 Java `Color.white`，不再使用蓝白渐变色。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_main_page_renders_upstream_menu_buttons -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_menu_buttons_use_fonts_def_shadow_not_outline_like_java -- --nocapture`
+- 注意：
+  - 外层临时容器背景仍保留，避免一次改动过大；后续应继续检查 `SettingsMenuDialog.rebuildMenu()` 与 BaseDialog/cont table 的真实背景层级。
+
 ## 1020. LanguageDialog flatTogglet 视觉 tint 对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，处理语言列表虽然尺寸对齐但按钮色彩仍偏 Rust 自定义蓝灰的问题。
