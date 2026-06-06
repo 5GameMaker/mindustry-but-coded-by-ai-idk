@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::mindustry::ui::upstream_menu_bundle_value_for_locale_owned;
+
 /// Class for storing map-specific locale bundles.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MapLocales {
@@ -73,6 +75,18 @@ impl MapLocales {
         Self::current_locale_from_lang(std::env::var("LANG").ok().as_deref())
     }
 
+    pub fn current_locale_from_game_setting(locale: &str) -> String {
+        Self::current_locale_from_setting(locale, std::env::var("LANG").ok().as_deref())
+    }
+
+    pub fn current_locale_from_setting(locale: &str, system_lang: Option<&str>) -> String {
+        let locale = locale.trim();
+        if locale.is_empty() || locale == "default" {
+            return Self::current_locale_from_lang(system_lang);
+        }
+        locale.replace('-', "_")
+    }
+
     pub fn current_locale_from_lang(lang: Option<&str>) -> String {
         lang.and_then(|value| value.split('.').next().map(|s| s.to_string()))
             .and_then(|value| value.split('_').next().map(|s| s.to_string()))
@@ -85,15 +99,35 @@ impl MapLocales {
         self.contains_property_for(&locale, key) || self.contains_property_for("en", key)
     }
 
+    pub fn contains_property_for_setting(&self, locale: &str, key: &str) -> bool {
+        let locale = Self::current_locale_from_game_setting(locale);
+        self.contains_property_for(&locale, key) || self.contains_property_for("en", key)
+    }
+
     pub fn get_property(&self, key: &str) -> String {
         let locale = Self::current_locale();
-        self.get_property_for(&locale, key)
+        self.get_property_for_locale_or_global(&locale, key)
+    }
+
+    pub fn get_property_for_setting(&self, locale: &str, key: &str) -> String {
+        let locale = Self::current_locale_from_game_setting(locale);
+        self.get_property_for_locale_or_global(&locale, key)
+    }
+
+    pub fn get_property_for_locale_or_global(&self, locale: &str, key: &str) -> String {
+        self.get_property_for(locale, key)
             .or_else(|| self.get_property_for("en", key))
+            .or_else(|| upstream_menu_bundle_value_for_locale_owned(locale, key))
             .unwrap_or_else(|| format!("???{key}???"))
     }
 
     pub fn get_formatted(&self, key: &str, args: &[String]) -> String {
         let locale = Self::current_locale();
+        self.get_formatted_for(&locale, key, args)
+    }
+
+    pub fn get_formatted_for_setting(&self, locale: &str, key: &str, args: &[String]) -> String {
+        let locale = Self::current_locale_from_game_setting(locale);
         self.get_formatted_for(&locale, key, args)
     }
 
@@ -333,7 +367,10 @@ mod tests {
         assert_eq!(locales.get_property_for("zh", "desc"), None);
         assert_eq!(locales.get_property_for("en", "desc").unwrap(), "Line\nTwo");
         assert_eq!(locales.get_property_for("en", "missing"), None);
-        assert_eq!(locales.get_property("missing"), "???missing???");
+        assert_eq!(
+            locales.get_property("definitely.missing.map.locale.key"),
+            "???definitely.missing.map.locale.key???"
+        );
     }
 
     #[test]
@@ -407,6 +444,50 @@ mod tests {
         assert_eq!(parsed, "zh");
         assert_eq!(MapLocales::current_locale_from_lang(Some("")), "en");
         assert_eq!(MapLocales::current_locale_from_lang(None), "en");
+    }
+
+    #[test]
+    fn map_locales_current_locale_prefers_game_settings_locale_over_env_like_java() {
+        assert_eq!(
+            MapLocales::current_locale_from_setting("zh_CN", Some("ja_JP.UTF-8")),
+            "zh_CN",
+            "Java MapLocales.currentLocale() reads settings.locale first"
+        );
+        assert_eq!(
+            MapLocales::current_locale_from_setting("zh-CN", Some("ja_JP.UTF-8")),
+            "zh_CN",
+            "LanguageDialog stores Locale.toString()-style underscores; Rust normalizes hyphenated inputs to the same key"
+        );
+        assert_eq!(
+            MapLocales::current_locale_from_setting("default", Some("ja_JP.UTF-8")),
+            "ja",
+            "Java only falls back to Locale.getDefault().getLanguage() when settings.locale == default"
+        );
+    }
+
+    #[test]
+    fn map_locales_get_property_for_setting_falls_back_to_global_bundle_like_java() {
+        let locales = sample_locales();
+
+        assert_eq!(
+            locales.get_property_for_setting("zh", "name"),
+            "区域@",
+            "selected game locale should beat OS locale"
+        );
+        assert_eq!(
+            locales.get_property_for_locale_or_global("fr", "desc"),
+            "Line\nTwo",
+            "Java MapLocales falls back to map English before Core.bundle"
+        );
+        assert_eq!(
+            locales.get_property_for_locale_or_global("fr", "editor"),
+            "Editor",
+            "Java MapLocales.getProperty falls back to Core.bundle when map locale and English map bundle miss"
+        );
+        assert_eq!(
+            locales.get_property_for_locale_or_global("fr", "definitely.missing.map.locale.key"),
+            "???definitely.missing.map.locale.key???"
+        );
     }
 
     #[test]
