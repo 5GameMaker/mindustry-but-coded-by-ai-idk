@@ -19,6 +19,21 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1025. LoadDialog 空列表提示流式布局对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端子菜单视觉收口，处理 `LoadDialog.java` 空存档提示在 Java 表格流中显示、Rust 旧实现居中显示的问题。
+- 本轮总体进度更新：约 **97.67%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Load/Save 卡片 chrome、DiscordDialog 按钮尺寸、Database/About/Mods/Editor 等页面视觉收口。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `load_game_empty_message_point_for_list(...)`，统一 LoadGame 完全空列表与过滤后空列表的 `@save.none` 绘制位置；
+    - `@save.none` 从 `list.center()` 居中绘制改为列表 pane 上方偏左的 Start 对齐，更贴近 Java `slots.add("@save.none")` 的表格流式布局；
+    - 补强 `desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog`，断言空状态位置不是列表中心、文本左对齐且仍使用 `@save.none`，不回退到 `@none.found`。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - LoadDialog 的 preview 160、动作按钮 40、搜索框与模式过滤按钮尺寸当前已有对齐基础；后续更适合继续检查过滤按钮条件可见性、SaveDialog 同类空态与 DiscordDialog `170x50` 按钮。
+
 ## 1024. HostDialog Steam 复选框与 hover tooltip 视觉收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，收口 `HostDialog.java` 中 Steam friends-only 行的视觉/交互差异。
