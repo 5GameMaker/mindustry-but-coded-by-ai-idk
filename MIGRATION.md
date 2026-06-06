@@ -19,6 +19,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1020. LanguageDialog flatTogglet 视觉 tint 对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，处理语言列表虽然尺寸对齐但按钮色彩仍偏 Rust 自定义蓝灰的问题。
+- 本轮总体进度更新：约 **97.59%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Settings/Data、Join/Host、Database/About/Mods 等子菜单 visual chrome。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_text_button_symbol_and_tint_checked(...)`，在 checked/hover/pressed/enabled 状态下同时按 upstream `Styles.*` 解析 drawable 与 Java tint；
+    - `push_settings_language_dialog_content(...)` 的 `Styles.flatTogglet` 背景不再使用硬编码蓝灰/青色 tint，改为：
+      - 普通：`up = black` → `whiteui` + 黑色 tint；
+      - hover：`over = flatOver` → `#454545`；
+      - selected：`checked = flatDown` → `flat-down-base.9` 原 tint；
+    - 语言按钮文字颜色恢复 Java `fontColor = Color.white`，避免 selected/unselected 两套 Rust 自定义蓝灰色。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_text_button_checked_state_uses_java_checked_drawable -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_uses_fonts_def_shadow_not_outline_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_renders_every_display_name_with_default_font -- --nocapture`
+- 注意：
+  - 这是 LanguageDialog 局部视觉收口；同类 `flatTogglet` 硬编码 tint 仍分布在地图过滤、星球选择、战役星球切换等路径，后续应逐步改成同一 helper，避免 UI 各页面风格不一致。
+
 ## 1019. 前端日文字体 outline override 与 headless 图标语义收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续处理“前端视觉表现和字体/语言部分还有很多缺失”，优先补齐 Java `Fonts.loadExtraFonts()` 与 `Fonts.loadContentIconsHeadless()` 的字体/语言底层语义。
