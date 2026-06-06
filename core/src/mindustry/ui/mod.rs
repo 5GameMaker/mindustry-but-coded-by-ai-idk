@@ -1580,34 +1580,213 @@ fn upstream_bundle_value_from_entries(
         .find_map(|(candidate, value)| (*candidate == key).then_some(*value))
 }
 
+fn upstream_properties_is_whitespace(character: char) -> bool {
+    matches!(character, ' ' | '\t' | '\n' | '\r' | '\u{000c}')
+}
+
+fn upstream_properties_line_continues(line: &str) -> bool {
+    line.chars().rev().take_while(|character| *character == '\\').count() % 2 == 1
+}
+
+fn upstream_properties_logical_lines(source: &str) -> Vec<String> {
+    let mut logical_lines = Vec::new();
+    let mut current = String::new();
+    let mut continuing = false;
+
+    for raw_line in source.lines() {
+        let mut line = raw_line.trim_end_matches('\r');
+        if continuing {
+            line = line.trim_start_matches(upstream_properties_is_whitespace);
+        }
+
+        if upstream_properties_line_continues(line) {
+            current.push_str(line.strip_suffix('\\').unwrap_or(line));
+            continuing = true;
+        } else {
+            current.push_str(line);
+            logical_lines.push(std::mem::take(&mut current));
+            continuing = false;
+        }
+    }
+
+    if continuing || !current.is_empty() {
+        logical_lines.push(current);
+    }
+
+    logical_lines
+}
+
+fn upstream_decode_properties_escapes(value: &str) -> String {
+    let mut decoded = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character != '\\' {
+            decoded.push(character);
+            continue;
+        }
+
+        let Some(escaped) = chars.next() else {
+            decoded.push('\\');
+            break;
+        };
+        match escaped {
+            'n' => decoded.push('\n'),
+            'r' => decoded.push('\r'),
+            't' => decoded.push('\t'),
+            'f' => decoded.push('\u{000c}'),
+            'u' => {
+                let mut codepoint = String::with_capacity(4);
+                for _ in 0..4 {
+                    let Some(hex) = chars.next() else {
+                        codepoint.clear();
+                        break;
+                    };
+                    codepoint.push(hex);
+                }
+                if codepoint.len() == 4 {
+                    if let Ok(value) = u32::from_str_radix(&codepoint, 16) {
+                        if let Some(decoded_char) = char::from_u32(value) {
+                            decoded.push(decoded_char);
+                            continue;
+                        }
+                    }
+                }
+                decoded.push('\\');
+                decoded.push('u');
+                decoded.push_str(&codepoint);
+            }
+            other => decoded.push(other),
+        }
+    }
+    decoded
+}
+
+fn upstream_properties_skip_whitespace(line: &str, mut index: usize) -> usize {
+    while index < line.len() {
+        let Some(character) = line[index..].chars().next() else {
+            break;
+        };
+        if !upstream_properties_is_whitespace(character) {
+            break;
+        }
+        index += character.len_utf8();
+    }
+    index
+}
+
+fn upstream_properties_split_key_value(line: &str) -> Option<(String, String)> {
+    let line = line.trim_start_matches(upstream_properties_is_whitespace);
+    if line.is_empty() || line.starts_with('#') || line.starts_with('!') {
+        return None;
+    }
+
+    let mut escaped = false;
+    let mut key_end = line.len();
+    let mut value_start = line.len();
+    let mut whitespace_separator = false;
+
+    for (index, character) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if character == '=' || character == ':' {
+            key_end = index;
+            value_start = index + character.len_utf8();
+            break;
+        }
+        if upstream_properties_is_whitespace(character) {
+            key_end = index;
+            value_start = index + character.len_utf8();
+            whitespace_separator = true;
+            break;
+        }
+    }
+
+    value_start = upstream_properties_skip_whitespace(line, value_start);
+    if whitespace_separator && value_start < line.len() {
+        if let Some(character) = line[value_start..].chars().next() {
+            if character == '=' || character == ':' {
+                value_start = upstream_properties_skip_whitespace(
+                    line,
+                    value_start + character.len_utf8(),
+                );
+            }
+        }
+    }
+
+    let key = upstream_decode_properties_escapes(&line[..key_end]);
+    if key.is_empty() {
+        return None;
+    }
+    let value = upstream_decode_properties_escapes(&line[value_start..]);
+    Some((key, value))
+}
+
+fn upstream_parse_properties_source(
+    source: &'static str,
+) -> std::collections::BTreeMap<String, &'static str> {
+    let mut values = std::collections::BTreeMap::new();
+    for line in upstream_properties_logical_lines(source) {
+        if let Some((key, value)) = upstream_properties_split_key_value(&line) {
+            values.insert(key, Box::leak(value.into_boxed_str()) as &'static str);
+        }
+    }
+    values
+}
+
+fn upstream_properties_source_cache(
+) -> &'static std::sync::Mutex<
+    std::collections::BTreeMap<
+        (usize, usize),
+        &'static std::collections::BTreeMap<String, &'static str>,
+    >,
+> {
+    static CACHE: std::sync::OnceLock<
+        std::sync::Mutex<
+            std::collections::BTreeMap<
+                (usize, usize),
+                &'static std::collections::BTreeMap<String, &'static str>,
+            >,
+        >,
+    > = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+}
+
+fn upstream_properties_for_source(
+    source: &'static str,
+) -> &'static std::collections::BTreeMap<String, &'static str> {
+    let key = (source.as_ptr() as usize, source.len());
+    if let Ok(cache) = upstream_properties_source_cache().lock() {
+        if let Some(properties) = cache.get(&key) {
+            return properties;
+        }
+    }
+
+    let parsed = Box::leak(Box::new(upstream_parse_properties_source(source)));
+    if let Ok(mut cache) = upstream_properties_source_cache().lock() {
+        *cache.entry(key).or_insert(parsed)
+    } else {
+        parsed
+    }
+}
+
 fn upstream_bundle_value_from_properties_source(
     source: &'static str,
     key: &str,
 ) -> Option<&'static str> {
-    source.lines().find_map(|line| {
-        let line = line.trim_end_matches('\r');
-        if line.trim_start().starts_with('#') || line.trim().is_empty() {
-            return None;
-        }
-        let (candidate, value) = line.split_once('=')?;
-        (candidate.trim() == key).then(|| value.trim_start())
-    })
+    upstream_properties_for_source(source).get(key).copied()
 }
 
 fn upstream_collect_bundle_values_from_properties_source(
     source: &'static str,
     values: &mut std::collections::BTreeSet<&'static str>,
 ) {
-    for line in source.lines() {
-        let line = line.trim_end_matches('\r');
-        if line.trim_start().starts_with('#') || line.trim().is_empty() {
-            continue;
-        }
-        let Some((_, value)) = line.split_once('=') else {
-            continue;
-        };
-        values.insert(value.trim_start());
-    }
+    values.extend(upstream_properties_for_source(source).values().copied());
 }
 
 fn upstream_menu_bundle_properties_source_for_locale(locale: &str) -> &'static str {
@@ -1963,6 +2142,53 @@ mod tests {
                 .any(|value| value.contains(UPSTREAM_ROUTER_LANGUAGE_GLYPH)),
             "router replacement is a runtime bundle transform, not the raw-text font seed"
         );
+    }
+
+    #[test]
+    fn upstream_bundle_properties_parser_handles_java_escape_semantics() {
+        const FIXTURE: &str = "\
+            # ignored\n\
+            ! ignored too\n\
+            unicode = \\u4E2D\\u6587\\nnext\n\
+            continued = first\\\n\
+                second\n\
+            colon\\:key: colon value\n\
+            equals\\=key equals value\n\
+            spaced.key value after whitespace\n\
+            trim.after.separator :   kept\n\
+        ";
+
+        assert_eq!(
+            upstream_bundle_value_from_properties_source(FIXTURE, "unicode"),
+            Some("中文\nnext")
+        );
+        assert_eq!(
+            upstream_bundle_value_from_properties_source(FIXTURE, "continued"),
+            Some("firstsecond")
+        );
+        assert_eq!(
+            upstream_bundle_value_from_properties_source(FIXTURE, "colon:key"),
+            Some("colon value")
+        );
+        assert_eq!(
+            upstream_bundle_value_from_properties_source(FIXTURE, "equals=key"),
+            Some("equals value")
+        );
+        assert_eq!(
+            upstream_bundle_value_from_properties_source(FIXTURE, "spaced.key"),
+            Some("value after whitespace")
+        );
+        assert_eq!(
+            upstream_bundle_value_from_properties_source(FIXTURE, "trim.after.separator"),
+            Some("kept")
+        );
+
+        let mut values = std::collections::BTreeSet::new();
+        upstream_collect_bundle_values_from_properties_source(FIXTURE, &mut values);
+        assert!(values.contains("中文\nnext"));
+        assert!(values.contains("firstsecond"));
+        assert!(values.contains("colon value"));
+        assert!(!values.contains("ignored"));
     }
 
     #[test]

@@ -32652,31 +32652,6 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 前端主菜单 submenu 锚点/安全区、Mods/About/Discord/Campaign/Join 等视觉差异仍需继续逐项对齐 Java；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
 
-## 1033. desktop `font_jp` 日文 locale override 语义
-
-- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
-- 本轮总体进度更新：约 **97.24%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
-- Java 对照证据：
-  - `core/src/mindustry/ui/Fonts.java` 的 `loadExtraFonts()` 仅在 `Locale.getDefault().getLanguage().equals("ja")` 时加载 `fonts/font_jp.woff`；
-  - Java 对 `Fonts.def.data` / `Fonts.outline.data` 调用的是 `setOverride(...)`，语义是 override，不是普通 fallback。
-- 本轮主改动：
-  - `desktop/src/lib.rs`
-    - `DesktopRealFontAtlasSource` 增加 `override_existing`，atlas 构建在 override source 中允许同 glyph 覆盖既有 glyph；
-    - 新增 `desktop_default_real_font_atlas_sources_for_locale(...)` 与 `desktop_default_real_font_atlas_for_locale(...)`，英文/非日文 locale 不再默认加入 `font_jp`；
-    - `DesktopFontGlyphUploadPlan` 与 cache key 增加 locale，`DesktopLauncher::font_glyph_upload_plan()` 使用当前 `settings_locale`；
-    - OpenGL backend frame step 传播 `font_locale`，真实 executor 的文本 quad 生成与 font atlas binding 使用同一 locale；
-    - 将旧 fallback 测试改为 `desktop_graphics_font_atlas_loads_font_jp_only_for_japanese_locale_and_overrides`，并补充 locale 切换会 dirty font upload cache 的回归断言。
-- 已验证：
-  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas -- --nocapture`
-  - `cargo test -p mindustry-desktop font_glyph_upload -- --nocapture`
-  - `cargo test -p mindustry-desktop desktop_launcher_language -- --nocapture`
-  - `git diff --check`
-- 仍未完成：
-  - core 侧 `.properties` parser 仍需进一步补齐 Java `PropertiesUtils` 语义，避免 bundle 文案与字体 seed 漏字；
-  - Settings/Language/Controls/Data 的底部 footer 返回按钮、Controls 真 TextField 行为、语言 default 写回 settings 仍需继续对齐；
-  - Join/Mods/About/Database 等子菜单仍有卡片、搜索栏、分区标题与 Rust-only 诊断文案可见层差异；
-  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
-
 ## 1032. desktop 外部 bundle family 与整包选择语义
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
@@ -32703,4 +32678,53 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `font_jp` 仍需按 Java 只在日文 locale 启用，并在 `ja` 下体现 override 而非 fallback；
   - `MapInfoDialog -> MapLocalesDialog` 的 desktop 编辑入口、dirty/apply/back 保存链仍需实现；
   - 前端主菜单 submenu 锚点/安全区、Mods/About/Discord/Campaign/Join 等视觉差异仍需继续逐项对齐 Java；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1033. desktop `font_jp` 日文 locale override 语义
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.24%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/ui/Fonts.java` 的 `loadExtraFonts()` 仅在 `Locale.getDefault().getLanguage().equals("ja")` 时加载 `fonts/font_jp.woff`；
+  - Java 对 `Fonts.def.data` / `Fonts.outline.data` 调用的是 `setOverride(...)`，语义是 override，不是普通 fallback。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopRealFontAtlasSource` 增加 `override_existing`，atlas 构建在 override source 中允许同 glyph 覆盖既有 glyph；
+    - 新增 `desktop_default_real_font_atlas_sources_for_locale(...)` 与 `desktop_default_real_font_atlas_for_locale(...)`，英文/非日文 locale 不再默认加入 `font_jp`；
+    - `DesktopFontGlyphUploadPlan` 与 cache key 增加 locale，`DesktopLauncher::font_glyph_upload_plan()` 使用当前 `settings_locale`；
+    - OpenGL backend frame step 传播 `font_locale`，真实 executor 的文本 quad 生成与 font atlas binding 使用同一 locale；
+    - 将旧 fallback 测试改为 `desktop_graphics_font_atlas_loads_font_jp_only_for_japanese_locale_and_overrides`，并补充 locale 切换会 dirty font upload cache 的回归断言。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas -- --nocapture`
+  - `cargo test -p mindustry-desktop font_glyph_upload -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - core 侧 `.properties` parser 仍需进一步补齐 Java `PropertiesUtils` 语义，避免 bundle 文案与字体 seed 漏字；
+  - Settings/Language/Controls/Data 的底部 footer 返回按钮、Controls 真 TextField 行为、语言 default 写回 settings 仍需继续对齐；
+  - Join/Mods/About/Database 等子菜单仍有卡片、搜索栏、分区标题与 Rust-only 诊断文案可见层差异；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1034. core Java properties parser 语义补齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.25%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - Java bundle 加载经 `I18NBundle` / `PropertiesUtils.load(...)`，properties 支持逻辑行续接、`=`/`:`/空白分隔、`#`/`!` 注释、转义 key/value 与 `\uXXXX`；
+  - core 的 raw bundle text scanner 会影响字体 seed，parser 不完整会导致文案 lookup 与 glyph 预烘漏字。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 新增 Java-like properties parser：逻辑行续接、续行 leading whitespace 处理、冒号/等号/空白分隔、转义 key/value、`\n/\r/\t/\f/\uXXXX` 解码；
+    - 新增 `OnceLock + Mutex` source cache，按 `include_str` source 指针和长度缓存解析后的静态 map，避免每次 lookup 重复分配；
+    - `upstream_bundle_value_from_properties_source(...)` 与 `upstream_collect_bundle_values_from_properties_source(...)` 共用解析结果；
+    - 新增 `upstream_bundle_properties_parser_handles_java_escape_semantics`，覆盖 unicode、续行、转义 key、冒号/空白分隔和注释过滤。
+- 已验证：
+  - `cargo test -p mindustry-core upstream_bundle_properties_parser -- --nocapture`
+  - `cargo test -p mindustry-core upstream_menu_bundle -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_seed_scans_upstream_bundle_texts_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Settings/Language/Controls/Data 的底部 footer 返回按钮、Controls 真 TextField 行为、语言 default 写回 settings 仍需继续对齐；
+  - Join/Mods/About/Database 等子菜单仍有卡片、搜索栏、分区标题与 Rust-only 诊断文案可见层差异；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
