@@ -32250,7 +32250,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - MapList/Filter 长语言文本裁剪仍需继续处理；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
 
-## 610. Load/Save TextField 光标与聚焦态
+## 1016. Load/Save TextField 光标与聚焦态
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
 - 本轮总体进度更新：约 **97.07%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
