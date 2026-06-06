@@ -32866,3 +32866,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 仍需继续审查各 UI 页面 raw locale 入口，确保所有本地化渲染最终都走 canonical `settings_locale`；
   - Join/LoadSave/About/Database/Editor 等子菜单仍需继续逐项做像素与交互回归；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1041. Settings TextButton checked 状态与 Slider outlineLabel
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.32%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - Scene2D Button 背景选择应区分 `pressed` 与 `checked`，`checked` 按钮不能被当成一次性 pressed 状态处理；
+  - `LanguageDialog.java` 的语言行是 `TextButton(..., Styles.flatTogglet).group(group).update(t -> t.setChecked(...))`；
+  - `SettingsMenuDialog.java:882-884` 中 `SliderSetting` 的 value 与 title 都使用 `Styles.outlineLabel`，而 `CheckSetting` 使用 `CheckBox(title)` / `Styles.defaultCheck`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_text_button_drawable_with_checked(...)` 与 `settings_text_button_symbol_checked(...)`，按 Java 顺序处理 disabled / pressed / checked / hovered / up；
+    - LanguageDialog 语言按钮和 PlanetSelectDialog 星球按钮改为显式 checked 状态，不再把 selected 当 pressed 传入；
+    - Settings slider title/value 切到 `RenderFontId::Outline`，对齐 `Styles.outlineLabel`；
+    - Settings check label 继续保持 `RenderFontId::Default` 且不额外 outline。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_text_button_checked_state_uses_java_checked_drawable -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_slider_layout_uses_upstream_stack_margins -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_uses_fonts_def_shadow_not_outline_like_java -- --nocapture`
+- 仍未完成：
+  - 仍需继续把其它 UI 页面中 selected/checked/hovered/pressed 混用的按钮逐项改成显式状态机；
+  - Text/AreaText tooltip、Reset/Back/Data 等按钮已保持 Default 非 outline，但仍需逐页补全断言；
+  - Join/LoadSave/About/Database/Editor 等子菜单仍需继续逐项做像素与交互回归；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
