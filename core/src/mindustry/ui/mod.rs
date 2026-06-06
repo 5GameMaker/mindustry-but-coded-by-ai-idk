@@ -1720,9 +1720,6 @@ fn upstream_properties_split_key_value(line: &str) -> Option<(String, String)> {
     }
 
     let key = upstream_decode_properties_escapes(&line[..key_end]);
-    if key.is_empty() {
-        return None;
-    }
     let value = upstream_decode_properties_escapes(&line[value_start..]);
     Some((key, value))
 }
@@ -2148,7 +2145,7 @@ mod tests {
     fn upstream_bundle_properties_parser_handles_java_escape_semantics() {
         const FIXTURE: &str = "\
             # ignored\n\
-            ! ignored too\n\
+              ! ignored too\n\
             unicode = \\u4E2D\\u6587\\nnext\n\
             continued = first\\\n\
                 second\n\
@@ -2156,6 +2153,8 @@ mod tests {
             equals\\=key equals value\n\
             spaced.key value after whitespace\n\
             trim.after.separator :   kept\n\
+            escaped\\ key = tab\\tform\\fslash\\\\space\\ \\=\\:\n\
+            =empty key value\n\
         ";
 
         assert_eq!(
@@ -2182,12 +2181,22 @@ mod tests {
             upstream_bundle_value_from_properties_source(FIXTURE, "trim.after.separator"),
             Some("kept")
         );
+        assert_eq!(
+            upstream_bundle_value_from_properties_source(FIXTURE, "escaped key"),
+            Some("tab\tform\u{000c}slash\\space =:")
+        );
+        assert_eq!(
+            upstream_bundle_value_from_properties_source(FIXTURE, ""),
+            Some("empty key value")
+        );
 
         let mut values = std::collections::BTreeSet::new();
         upstream_collect_bundle_values_from_properties_source(FIXTURE, &mut values);
         assert!(values.contains("中文\nnext"));
         assert!(values.contains("firstsecond"));
         assert!(values.contains("colon value"));
+        assert!(values.contains("tab\tform\u{000c}slash\\space =:"));
+        assert!(values.contains("empty key value"));
         assert!(!values.contains("ignored"));
     }
 
