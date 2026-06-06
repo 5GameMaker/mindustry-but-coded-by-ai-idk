@@ -32434,3 +32434,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 默认 locale 来源仍需继续向 Java `Locale.getDefault()` 收敛；
   - 日文字体 override、LanguageDialog 长文本裁剪和子菜单 UI 仍需继续对齐；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1023. 外部翻译 bundle 文本并入字体 seed
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.14%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `Vars.loadSettings()` 会将 `Core.files.local("bundle")` 作为当前 `Core.bundle`；
+  - Java 字体运行时通过 `Fonts` 和 fallback/override 参与绘制，不应因为 Rust 静态预热 seed 漏掉外部翻译文本而出现 placeholder；
+  - Rust 真实字体 atlas 需要在生成前看到 external bundle 的 value 字符。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 external font seed 注册表：`desktop_external_font_seed_characters_cache()`、`desktop_external_font_seed_characters()`、`desktop_external_font_seed_key()`；
+    - 新增 `desktop_font_seed_digest(...)`，用于让字体上传计划 cache key 感知 seed 变化；
+    - `sync_external_bundle_loaded_notice_like_java(...)` 在发现 external bundle 后读取其 properties 内容，并通过 `desktop_register_external_font_seed_characters_from_bundle_source(...)` 注册 value 字符；
+    - `desktop_real_font_atlas_seed_characters()` 合并 external seed，使后续 `desktop_default_real_font_atlas()` 的 source key 和生成 atlas 能覆盖外部翻译文本；
+    - `DesktopFontGlyphUploadPlanCacheKey` 纳入 `external_font_seed_key`，保证 external seed 变化会触发字体上传计划重建；
+    - 扩展 external bundle 测试，使用 `外部彧語` 验证 external seed 和 full atlas seed 均包含外部 bundle 文本字符。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_loads_external_bundle_before_internal_locale_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_seed_scans_upstream_bundle_texts_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - 默认 locale 来源仍需继续向 Java `Locale.getDefault()` 收敛；
+  - 日文字体 override 是否按启动期 locale gating 仍需审查；
+  - LanguageDialog 长文本裁剪、Settings/Join/Mods/Database/MapList/MapPlay 等子菜单视觉仍需继续对齐；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
