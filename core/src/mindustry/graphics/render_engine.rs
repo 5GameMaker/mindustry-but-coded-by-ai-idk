@@ -403,8 +403,8 @@ impl RenderTextStyle {
             horizontal_align,
             vertical_align: RenderTextVerticalAlign::Baseline,
             wrap_width: None,
-            markup: false,
-            integer_position: false,
+            markup: true,
+            integer_position: true,
             outline: false,
         }
     }
@@ -1791,6 +1791,8 @@ mod tests {
                 assert_eq!(style.horizontal_align, RenderTextAlign::Center);
                 assert_eq!(style.font, RenderFontId::Default);
                 assert_eq!(style.vertical_align, RenderTextVerticalAlign::Baseline);
+                assert!(style.markup);
+                assert!(style.integer_position);
                 assert_eq!(layer, 60.0);
             }
             other => panic!("unexpected command: {other:?}"),
@@ -1845,6 +1847,8 @@ mod tests {
             RenderCommand::DrawText { style, layer, .. } => {
                 assert_eq!(style.font, RenderFontId::Icon);
                 assert_eq!(style.vertical_align, RenderTextVerticalAlign::Center);
+                assert!(style.markup);
+                assert!(style.integer_position);
                 assert_eq!(layer, 81.0);
             }
             other => panic!("unexpected icon text command: {other:?}"),
@@ -1865,6 +1869,8 @@ mod tests {
             RenderCommand::DrawText { style, layer, .. } => {
                 assert_eq!(style.font, RenderFontId::IconLarge);
                 assert_eq!(style.vertical_align, RenderTextVerticalAlign::Center);
+                assert!(style.markup);
+                assert!(style.integer_position);
                 assert_eq!(layer, 82.0);
             }
             other => panic!("unexpected icon large text command: {other:?}"),
@@ -1882,6 +1888,8 @@ mod tests {
         match tech_text {
             RenderCommand::DrawText { style, layer, .. } => {
                 assert_eq!(style.font, RenderFontId::Tech);
+                assert!(style.markup);
+                assert!(style.integer_position);
                 assert_eq!(layer, 83.0);
             }
             other => panic!("unexpected tech text command: {other:?}"),
@@ -1899,9 +1907,31 @@ mod tests {
         match monospace_text {
             RenderCommand::DrawText { style, layer, .. } => {
                 assert_eq!(style.font, RenderFontId::Monospace);
+                assert!(style.markup);
+                assert!(style.integer_position);
                 assert_eq!(layer, 84.0);
             }
             other => panic!("unexpected monospace text command: {other:?}"),
+        }
+
+        let explicit_plain_text = RenderCommand::draw_text_styled(
+            "[gray]literal brackets",
+            RenderPoint::new(20.0, 21.0),
+            [1.0, 1.0, 1.0, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_markup(false)
+                .with_integer_position(false),
+            85.0,
+        );
+        match explicit_plain_text {
+            RenderCommand::DrawText { style, layer, .. } => {
+                assert!(!style.markup);
+                assert!(!style.integer_position);
+                assert_eq!(layer, 85.0);
+            }
+            other => panic!("unexpected explicit plain text command: {other:?}"),
         }
 
         match polygon {

@@ -32775,3 +32775,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 文本默认 `markup` / `integer_position` 仍主要靠局部 style，后续应向 Java `Fonts.def` / UI 初始化默认语义收敛；
   - Controls 搜索框、Join/LoadSave/About/Database/Editor 等子菜单仍需继续逐项做可见视觉回归；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1037. core 文本渲染默认 markup 与整数像素对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.28%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/core/UI.java` 初始化阶段会设置 UI 字体相关默认行为；
+  - `core/src/mindustry/ui/Fonts.java` 中 `Fonts.def` 等默认 UI 字体启用 markup 与 integer position，Java 新增 Label/TextButton 路径不需要每处手写开关。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderTextStyle::new(...)` 默认 `markup = true`、`integer_position = true`，让普通 `draw_text(...)` 与新 UI 文本路径默认继承 Java 字体行为；
+    - 保留 `with_markup(false)` / `with_integer_position(false)` 作为显式关闭通道，避免需要展示字面 `[gray]` 等文本时失控；
+    - 扩展 `command_payloads_round_trip_for_overlay_and_custom_data`，断言普通文本、Icon/IconLarge/Tech/Monospace styled 文本都默认启用 markup 与整数像素位置，并覆盖显式关闭路径。
+- 已验证：
+  - `cargo test -p mindustry-core command_payloads_round_trip_for_overlay_and_custom_data -- --nocapture`
+  - `cargo test -p mindustry-core menu_ui_plan_desktop_text_labels_keep_markup_enabled_for_literal_color_tags -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_uses_settings_locale_bundle_for_menu_buttons -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - 仍需继续审查各个页面中显式传入 `with_markup(false)` 或未设置 wrap/outline 的文本，逐项确认是否符合 Java widget 默认；
+  - Join/Settings/Controls/LoadSave/About/Database/Editor 等子菜单仍需继续逐项做像素与交互回归；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
