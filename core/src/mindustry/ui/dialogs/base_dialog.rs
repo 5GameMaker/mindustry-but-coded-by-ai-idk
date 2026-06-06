@@ -307,9 +307,9 @@ impl DialogShellLayout {
             ),
             title_font_size: 24.0,
             accent_line_rect: RenderRect::new(
-                panel_rect.x + 24.0,
+                panel_rect.x + 4.0,
                 panel_rect.y + panel_rect.height - 62.0,
-                (panel_rect.width - 48.0).max(0.0),
+                (panel_rect.width - 8.0).max(0.0),
                 3.0,
             ),
             stage_layer: Layer::END_PIXELED - 0.03,
@@ -653,6 +653,26 @@ mod tests {
             }
             other => panic!("expected accent whiteui separator sprite, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn base_dialog_title_separator_uses_java_title_table_pad() {
+        let panel = RenderRect::new(140.0, 160.0, 520.0, 220.0);
+        let layout = DialogShellLayout::from_stage_and_panel(
+            RenderRect::new(0.0, 0.0, 800.0, 600.0),
+            panel,
+        );
+
+        assert_eq!(
+            layout.accent_line_rect,
+            RenderRect::new(
+                panel.x + 4.0,
+                panel.y + panel.height - 62.0,
+                panel.width - 8.0,
+                3.0
+            ),
+            "Java BaseDialog appends titleTable.image(Tex.whiteui, Pal.accent).growX().height(3f).pad(4f), so the separator should nearly span the whole dialog width"
+        );
     }
 
     #[test]
