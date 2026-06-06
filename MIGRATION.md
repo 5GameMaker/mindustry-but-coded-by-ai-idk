@@ -32845,3 +32845,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Controls 搜索框还需继续向 Java `TextField` 的选区、IME、复制粘贴与完整焦点行为收敛；
   - Join/LoadSave/About/Database/Editor 等子菜单仍需继续逐项做像素与交互回归；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1040. desktop bundle locale script 变体规范化
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.31%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `Vars.loadSettings()` 会基于 `Locale` 创建 bundle，系统/平台传入的 BCP47 或 legacy locale 必须先规整到可用 bundle；
+  - Rust `settings_closest_locale_code(...)` 已对 `zh-Hans/zh-Hant/in_ID` 做 canonicalization，但 desktop bundle 查找层此前仍可能拿 raw locale 先撞空，再过早落到英文 fallback。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `desktop_normalize_bundle_locale_code(...)` 增加与 Settings locale 一致的规范化：`zh-Hans-* -> zh_CN`、`zh-Hant-* -> zh_TW`、`in-* -> id_ID`、区域大小写规整、剥离 `.UTF-8` / `@modifier`；
+    - `desktop_bundle_locale_code_from_source_path(...)` 复用同一规范化，避免后续外部/内置 bundle 文件名变体进入缓存时形成重复 locale key；
+    - 新增 `desktop_bundle_locale_normalization_maps_script_variants_before_english_fallback`，直接锁定 raw Simplified/Traditional Chinese tag 会先命中 `bundle_zh_CN`/`bundle_zh_TW`，不会误走 English。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_bundle_locale_normalization_maps_script_variants_before_english_fallback -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_loads_asset_locale_bundles_like_java_vars_load_settings -- --nocapture`
+- 仍未完成：
+  - 外部 bundle 当前继续按 Java `I18NBundle.createBundle(handle, Locale.ENGLISH)` 语义处理英文家族，后续如要支持更宽外部 locale family，必须先确认与 Java 行为的取舍；
+  - 仍需继续审查各 UI 页面 raw locale 入口，确保所有本地化渲染最终都走 canonical `settings_locale`；
+  - Join/LoadSave/About/Database/Editor 等子菜单仍需继续逐项做像素与交互回归；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
