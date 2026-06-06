@@ -32624,3 +32624,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 外部 bundle root 与 `bundle_<locale>.properties` suffix 语义仍需按 Java `I18NBundle.createBundle` 补齐；
   - `font_jp` 的 Java 日文 locale override 语义、MapLocales fallback 和 MapLocalesDialog UI 仍需继续接入；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1031. core 全 locale bundle 镜像接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.22%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - Java `Vars.loadSettings()` 通过 `I18NBundle.createBundle(Core.files.internal("bundles/bundle"), locale)` 加载当前 locale 的完整 bundle family；
+  - 非英文 locale 应先查对应 `bundle_<locale>.properties`，缺 key 才回退 root/英文；
+  - 旧 Rust core 只内嵌 `bundle.properties`、`bundle_zh_CN.properties`、`bundle_zh_TW.properties`，且非 zh locale 会先被英文手写 entries 命中，导致 `fr/ja/ru/pt_BR` 等语言无法返回真实本地化值。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 内嵌 `core/assets/bundles/bundle_*.properties` 的全部非英文 locale source；
+    - 新增 `UPSTREAM_BUNDLE_LOCALE_PROPERTY_SOURCES`，覆盖 `core/assets/locales` 中除 `en` 外的全部语言；
+    - `upstream_menu_bundle_properties_source_for_locale(...)` 支持 exact locale、language fallback、`in_ID/id` alias、`zh_Hans/zh_Hant/zh_HK` 等别名；
+    - `upstream_menu_bundle_entries_for_locale(...)` 改为只有 `en/zh_CN/zh_TW` 使用手写 entries，其他语言直接走对应 properties，避免英文 entries 抢先覆盖真实翻译；
+    - 新增 `upstream_menu_bundle_sources_cover_all_asset_locales_like_java` 与 `upstream_menu_bundle_value_uses_full_locale_properties_before_english_entries_like_java`，锁住全 locale source 覆盖与 `fr/ja/ru/pt_BR/id_ID/in_ID` lookup。
+- 已验证：
+  - `cargo test -p mindustry-core upstream_menu_bundle -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_seed_scans_upstream_bundle_texts_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - desktop 外部 bundle 仍需从 `data_dir/bundle` 单文件 overlay 改为 Java `bundle.properties` family 的整包选择语义；
+  - `font_jp` 仍需按 Java 只在日文 locale 启用，并在 `ja` 下体现 override 而非 fallback；
+  - `MapInfoDialog -> MapLocalesDialog` 的 desktop 编辑入口、dirty/apply/back 保存链仍需实现；
+  - 前端主菜单 submenu 锚点/安全区、Mods/About/Discord/Campaign/Join 等视觉差异仍需继续逐项对齐 Java；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。

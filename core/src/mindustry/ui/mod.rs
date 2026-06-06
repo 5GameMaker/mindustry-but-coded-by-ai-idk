@@ -14,12 +14,112 @@ pub const UPSTREAM_GLOBAL_BUNDLE_PROPERTIES_SOURCE_PATH: &str =
 pub const UPSTREAM_ROUTER_LANGUAGE_GLYPH: char = '\u{f88e}';
 const UPSTREAM_BUNDLE_PROPERTIES_SOURCE: &str =
     include_str!("../../../assets/bundles/bundle.properties");
+const UPSTREAM_BUNDLE_BE_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_be.properties");
+const UPSTREAM_BUNDLE_BG_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_bg.properties");
+const UPSTREAM_BUNDLE_CA_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_ca.properties");
+const UPSTREAM_BUNDLE_CS_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_cs.properties");
+const UPSTREAM_BUNDLE_DA_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_da.properties");
+const UPSTREAM_BUNDLE_DE_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_de.properties");
+const UPSTREAM_BUNDLE_ES_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_es.properties");
+const UPSTREAM_BUNDLE_ET_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_et.properties");
+const UPSTREAM_BUNDLE_EU_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_eu.properties");
+const UPSTREAM_BUNDLE_FI_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_fi.properties");
+const UPSTREAM_BUNDLE_FIL_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_fil.properties");
+const UPSTREAM_BUNDLE_FR_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_fr.properties");
+const UPSTREAM_BUNDLE_HU_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_hu.properties");
+const UPSTREAM_BUNDLE_ID_ID_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_id_ID.properties");
+const UPSTREAM_BUNDLE_IT_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_it.properties");
+const UPSTREAM_BUNDLE_JA_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_ja.properties");
+const UPSTREAM_BUNDLE_KO_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_ko.properties");
+const UPSTREAM_BUNDLE_LT_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_lt.properties");
+const UPSTREAM_BUNDLE_NL_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_nl.properties");
+const UPSTREAM_BUNDLE_NL_BE_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_nl_BE.properties");
+const UPSTREAM_BUNDLE_PL_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_pl.properties");
+const UPSTREAM_BUNDLE_PT_BR_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_pt_BR.properties");
+const UPSTREAM_BUNDLE_PT_PT_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_pt_PT.properties");
+const UPSTREAM_BUNDLE_RO_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_ro.properties");
+const UPSTREAM_BUNDLE_RU_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_ru.properties");
+const UPSTREAM_BUNDLE_SR_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_sr.properties");
+const UPSTREAM_BUNDLE_SV_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_sv.properties");
+const UPSTREAM_BUNDLE_TH_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_th.properties");
+const UPSTREAM_BUNDLE_TK_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_tk.properties");
+const UPSTREAM_BUNDLE_TR_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_tr.properties");
+const UPSTREAM_BUNDLE_UK_UA_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_uk_UA.properties");
+const UPSTREAM_BUNDLE_VI_PROPERTIES_SOURCE: &str =
+    include_str!("../../../assets/bundles/bundle_vi.properties");
 const UPSTREAM_BUNDLE_ZH_CN_PROPERTIES_SOURCE: &str =
     include_str!("../../../assets/bundles/bundle_zh_CN.properties");
 const UPSTREAM_BUNDLE_ZH_TW_PROPERTIES_SOURCE: &str =
     include_str!("../../../assets/bundles/bundle_zh_TW.properties");
 const UPSTREAM_GLOBAL_BUNDLE_PROPERTIES_SOURCE: &str =
     include_str!("../../../assets/bundles/global.properties");
+const UPSTREAM_BUNDLE_LOCALE_PROPERTY_SOURCES: &[(&str, &str)] = &[
+    ("be", UPSTREAM_BUNDLE_BE_PROPERTIES_SOURCE),
+    ("bg", UPSTREAM_BUNDLE_BG_PROPERTIES_SOURCE),
+    ("ca", UPSTREAM_BUNDLE_CA_PROPERTIES_SOURCE),
+    ("cs", UPSTREAM_BUNDLE_CS_PROPERTIES_SOURCE),
+    ("da", UPSTREAM_BUNDLE_DA_PROPERTIES_SOURCE),
+    ("de", UPSTREAM_BUNDLE_DE_PROPERTIES_SOURCE),
+    ("es", UPSTREAM_BUNDLE_ES_PROPERTIES_SOURCE),
+    ("et", UPSTREAM_BUNDLE_ET_PROPERTIES_SOURCE),
+    ("eu", UPSTREAM_BUNDLE_EU_PROPERTIES_SOURCE),
+    ("fi", UPSTREAM_BUNDLE_FI_PROPERTIES_SOURCE),
+    ("fil", UPSTREAM_BUNDLE_FIL_PROPERTIES_SOURCE),
+    ("fr", UPSTREAM_BUNDLE_FR_PROPERTIES_SOURCE),
+    ("hu", UPSTREAM_BUNDLE_HU_PROPERTIES_SOURCE),
+    ("id_ID", UPSTREAM_BUNDLE_ID_ID_PROPERTIES_SOURCE),
+    ("it", UPSTREAM_BUNDLE_IT_PROPERTIES_SOURCE),
+    ("ja", UPSTREAM_BUNDLE_JA_PROPERTIES_SOURCE),
+    ("ko", UPSTREAM_BUNDLE_KO_PROPERTIES_SOURCE),
+    ("lt", UPSTREAM_BUNDLE_LT_PROPERTIES_SOURCE),
+    ("nl", UPSTREAM_BUNDLE_NL_PROPERTIES_SOURCE),
+    ("nl_BE", UPSTREAM_BUNDLE_NL_BE_PROPERTIES_SOURCE),
+    ("pl", UPSTREAM_BUNDLE_PL_PROPERTIES_SOURCE),
+    ("pt_BR", UPSTREAM_BUNDLE_PT_BR_PROPERTIES_SOURCE),
+    ("pt_PT", UPSTREAM_BUNDLE_PT_PT_PROPERTIES_SOURCE),
+    ("ro", UPSTREAM_BUNDLE_RO_PROPERTIES_SOURCE),
+    ("ru", UPSTREAM_BUNDLE_RU_PROPERTIES_SOURCE),
+    ("sr", UPSTREAM_BUNDLE_SR_PROPERTIES_SOURCE),
+    ("sv", UPSTREAM_BUNDLE_SV_PROPERTIES_SOURCE),
+    ("th", UPSTREAM_BUNDLE_TH_PROPERTIES_SOURCE),
+    ("tk", UPSTREAM_BUNDLE_TK_PROPERTIES_SOURCE),
+    ("tr", UPSTREAM_BUNDLE_TR_PROPERTIES_SOURCE),
+    ("uk_UA", UPSTREAM_BUNDLE_UK_UA_PROPERTIES_SOURCE),
+    ("vi", UPSTREAM_BUNDLE_VI_PROPERTIES_SOURCE),
+    ("zh_CN", UPSTREAM_BUNDLE_ZH_CN_PROPERTIES_SOURCE),
+    ("zh_TW", UPSTREAM_BUNDLE_ZH_TW_PROPERTIES_SOURCE),
+];
 
 pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("play", "Play"),
@@ -1512,16 +1612,39 @@ fn upstream_collect_bundle_values_from_properties_source(
 
 fn upstream_menu_bundle_properties_source_for_locale(locale: &str) -> &'static str {
     let locale = locale.trim().replace('-', "_");
-    if locale.eq_ignore_ascii_case("zh_TW") || locale.eq_ignore_ascii_case("zh_HK") {
-        UPSTREAM_BUNDLE_ZH_TW_PROPERTIES_SOURCE
-    } else if locale.eq_ignore_ascii_case("zh_CN")
+    if locale.is_empty() || locale.eq_ignore_ascii_case("en") {
+        return UPSTREAM_BUNDLE_PROPERTIES_SOURCE;
+    }
+    if locale.eq_ignore_ascii_case("in_ID") || locale.eq_ignore_ascii_case("id") {
+        return UPSTREAM_BUNDLE_ID_ID_PROPERTIES_SOURCE;
+    }
+    if locale.eq_ignore_ascii_case("zh_TW")
+        || locale.eq_ignore_ascii_case("zh_HK")
+        || locale.eq_ignore_ascii_case("zh_Hant")
+    {
+        return UPSTREAM_BUNDLE_ZH_TW_PROPERTIES_SOURCE;
+    }
+    if locale.eq_ignore_ascii_case("zh_CN")
         || locale.eq_ignore_ascii_case("zh")
         || locale.eq_ignore_ascii_case("zh_Hans")
     {
-        UPSTREAM_BUNDLE_ZH_CN_PROPERTIES_SOURCE
-    } else {
-        UPSTREAM_BUNDLE_PROPERTIES_SOURCE
+        return UPSTREAM_BUNDLE_ZH_CN_PROPERTIES_SOURCE;
     }
+    if let Some((_, source)) = UPSTREAM_BUNDLE_LOCALE_PROPERTY_SOURCES
+        .iter()
+        .find(|(code, _)| code.eq_ignore_ascii_case(&locale))
+    {
+        return source;
+    }
+    if let Some(language) = locale.split('_').next() {
+        if let Some((_, source)) = UPSTREAM_BUNDLE_LOCALE_PROPERTY_SOURCES
+            .iter()
+            .find(|(code, _)| code.eq_ignore_ascii_case(language))
+        {
+            return source;
+        }
+    }
+    UPSTREAM_BUNDLE_PROPERTIES_SOURCE
 }
 
 pub fn upstream_menu_bundle_raw_texts_for_locale(locale: &str) -> Vec<&'static str> {
@@ -1553,15 +1676,20 @@ pub fn upstream_menu_bundle_entries_for_locale(
     locale: &str,
 ) -> &'static [(&'static str, &'static str)] {
     let locale = locale.trim().replace('-', "_");
-    if locale.eq_ignore_ascii_case("zh_TW") || locale.eq_ignore_ascii_case("zh_HK") {
+    if locale.eq_ignore_ascii_case("zh_TW")
+        || locale.eq_ignore_ascii_case("zh_HK")
+        || locale.eq_ignore_ascii_case("zh_Hant")
+    {
         UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES
     } else if locale.eq_ignore_ascii_case("zh_CN")
         || locale.eq_ignore_ascii_case("zh")
         || locale.eq_ignore_ascii_case("zh_Hans")
     {
         UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES
-    } else {
+    } else if locale.is_empty() || locale.eq_ignore_ascii_case("en") {
         UPSTREAM_MENU_BUNDLE_ENTRIES
+    } else {
+        &[]
     }
 }
 
@@ -1834,6 +1962,57 @@ mod tests {
                 .iter()
                 .any(|value| value.contains(UPSTREAM_ROUTER_LANGUAGE_GLYPH)),
             "router replacement is a runtime bundle transform, not the raw-text font seed"
+        );
+    }
+
+    #[test]
+    fn upstream_menu_bundle_sources_cover_all_asset_locales_like_java() {
+        let asset_locale_codes = include_str!("../../../assets/locales")
+            .lines()
+            .map(str::trim)
+            .filter(|code| !code.is_empty())
+            .filter(|code| !code.eq_ignore_ascii_case("en"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            UPSTREAM_BUNDLE_LOCALE_PROPERTY_SOURCES.len(),
+            asset_locale_codes.len(),
+            "core bundle mirror should include every non-English core/assets/locales bundle source"
+        );
+        for code in asset_locale_codes {
+            assert!(
+                UPSTREAM_BUNDLE_LOCALE_PROPERTY_SOURCES
+                    .iter()
+                    .any(|(source_code, _)| source_code == &code),
+                "core bundle mirror should include bundle_{code}.properties"
+            );
+        }
+    }
+
+    #[test]
+    fn upstream_menu_bundle_value_uses_full_locale_properties_before_english_entries_like_java() {
+        for (locale, key, expected) in [
+            ("fr", "play", "Jouer"),
+            ("ja", "database", "コアデータベース"),
+            ("ru", "settings.language", "Язык"),
+            ("pt-BR", "play", "Jogar"),
+            ("id_ID", "database", "Basis Data Inti"),
+            ("in_ID", "settings.language", "Bahasa"),
+        ] {
+            assert_eq!(
+                upstream_menu_bundle_value_for_locale(locale, key),
+                Some(expected),
+                "Java I18NBundle should resolve {locale}:{key} from its locale properties before English fallback entries"
+            );
+        }
+
+        let fr_raw_texts = upstream_menu_bundle_raw_texts_for_locale("fr");
+        assert!(fr_raw_texts.contains(&"Jouer"));
+        assert!(fr_raw_texts.contains(&"Restart required to apply changes."));
+        assert_eq!(
+            upstream_menu_bundle_format_for_locale("ru", "save.import.fail", &["broken.msav"])
+                .as_deref(),
+            Some("[scarlet]Не удалось импортировать сохранение: [accent]broken.msav")
         );
     }
 
