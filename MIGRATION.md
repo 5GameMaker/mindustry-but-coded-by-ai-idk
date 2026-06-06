@@ -32750,3 +32750,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Controls 搜索框仍需从手绘输入框继续对齐 Java `TextField` 的焦点、光标与输入行为；
   - Join/Mods/About/Database/LoadSave/Editor 等子菜单仍有卡片、搜索栏、分区标题、弹窗按钮与 Rust-only 诊断文案可见层差异；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1036. desktop default locale 优先系统 Locale.getDefault 语义
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.27%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `Vars.loadSettings()` 与 `LanguageDialog.findClosestLocale()` 的 default locale 来源都是 `Locale.getDefault()`；
+  - `LanguageDialog.findClosestLocale()` 再按 exact locale、language fallback、English fallback 选择并写回 settings。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_system_default_locale_code_like_java()`，在 Windows 上通过 `GetUserDefaultLocaleName` 获取系统默认 locale，优先模拟 Java `Locale.getDefault()`；
+    - 新增 `settings_default_locale_code_from_sources(...)` 与 `settings_default_locale_code_like_java()`，把系统 locale 放在 `LANGUAGE/LC_ALL/LC_MESSAGES/LANG` 环境变量之前，环境变量只作为系统 locale 不可用时的 fallback；
+    - 空系统 locale probe 会被跳过，不再错误遮蔽环境 fallback；
+    - `settings_closest_locale_code("default")` / 空 locale 改用新的 default source 链；
+    - 新增 `desktop_launcher_default_locale_prefers_system_locale_like_java`，覆盖系统 locale 优先、环境 fallback、空系统 probe 与最终 English fallback。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_default_locale_prefers_system_locale_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_language_default_locale -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Java 语言选择本身只写 settings 并提示重启，Rust 目前仍会同步运行时 `settings_locale/player_locale`；需后续决定是否完全 Java 化或明确标注为热切换差异；
+  - 文本默认 `markup` / `integer_position` 仍主要靠局部 style，后续应向 Java `Fonts.def` / UI 初始化默认语义收敛；
+  - Controls 搜索框、Join/LoadSave/About/Database/Editor 等子菜单仍需继续逐项做可见视觉回归；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
