@@ -90,6 +90,17 @@ fn desktop_native_window_title_with_diagnostic(
 }
 
 #[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_cursor_icon_for_hint(
+    hint: mindustry_desktop::DesktopCursorHint,
+) -> winit::window::CursorIcon {
+    match hint {
+        mindustry_desktop::DesktopCursorHint::Arrow => winit::window::CursorIcon::Default,
+        mindustry_desktop::DesktopCursorHint::Hand => winit::window::CursorIcon::Pointer,
+        mindustry_desktop::DesktopCursorHint::Ibeam => winit::window::CursorIcon::Text,
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
 fn desktop_native_opengl_error_categories(errors: &[String]) -> Vec<&'static str> {
     let mut categories = Vec::new();
     let mut push_category = |category: &'static str| {
@@ -1431,6 +1442,10 @@ impl DesktopNativeOpenGlRuntime {
     fn window_surface_size(&self) -> mindustry_desktop::DesktopSurfaceSize {
         let size = self.window.inner_size();
         mindustry_desktop::DesktopSurfaceSize::new(size.width, size.height)
+    }
+
+    fn set_cursor_hint(&self, hint: mindustry_desktop::DesktopCursorHint) {
+        self.window.set_cursor(desktop_native_cursor_icon_for_hint(hint));
     }
 
     fn request_redraw(&self) {
@@ -3495,6 +3510,7 @@ impl<'a> DesktopNativeOpenGlApp<'a> {
             graphics_renderer,
             &mut self.effect_renderer,
         );
+        graphics_renderer.runtime.set_cursor_hint(result.cursor_hint);
         self.sync_graphics_settings_to_native_runtime();
         if desktop_native_trace_enabled() {
             desktop_native_trace(format!(
@@ -3692,6 +3708,22 @@ mod tests {
                 mindustry_desktop::DESKTOP_JAVA_DEFAULT_RUNTIME_FPS_CAP
             ),
             "without vsync the software frame cap should follow ClientLauncher fpscap default instead of the old 16ms/60fps fallback"
+        );
+    }
+
+    #[test]
+    fn native_opengl_cursor_hint_maps_to_winit_system_cursors_like_java() {
+        assert_eq!(
+            desktop_native_cursor_icon_for_hint(mindustry_desktop::DesktopCursorHint::Arrow),
+            winit::window::CursorIcon::Default
+        );
+        assert_eq!(
+            desktop_native_cursor_icon_for_hint(mindustry_desktop::DesktopCursorHint::Hand),
+            winit::window::CursorIcon::Pointer
+        );
+        assert_eq!(
+            desktop_native_cursor_icon_for_hint(mindustry_desktop::DesktopCursorHint::Ibeam),
+            winit::window::CursorIcon::Text
         );
     }
 

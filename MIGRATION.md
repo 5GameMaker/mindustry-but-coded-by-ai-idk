@@ -19,6 +19,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1016. 前端系统鼠标光标接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，处理 Java `Fonts.loadSystemCursors()` / Scene2D hover 下 `arrow/hand/ibeam` 的可见交互差异。
+- 本轮总体进度更新：约 **97.55%**，仍未达到完整可玩，不能宣告目标完成；后续继续字体动态字形、Join/Mods/Settings 等子菜单像素级视觉对齐。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopCursorHint::{Arrow, Hand, Ibeam}`；
+    - `DesktopPresentResult` 携带当前前端光标 hint；
+    - 根据 `last_menu_cursor`、主菜单按钮、route shell action、Load/Save 卡片、About 链接、Pause overlay、各路由文本框/搜索框推导 Java 风格系统光标：按钮/可点元素为 `Hand`，TextField/搜索框/文本输入为 `Ibeam`，空白区域为 `Arrow`。
+  - `desktop/src/main.rs`
+    - native OpenGL/winit runtime 将 `DesktopCursorHint` 映射为 `CursorIcon::Default` / `Pointer` / `Text`，每帧 present 后同步到系统窗口光标。
+- 已验证：
+  - 未运行全量 `cargo fmt --all`，避免引入无关格式化 diff；
+  - `cargo test -p mindustry-desktop desktop_launcher_cursor_hint_matches_java_system_cursor_roles -- --nocapture`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime native_opengl_cursor_hint_maps_to_winit_system_cursors_like_java -- --nocapture`
+- 注意：
+  - 本轮只接入系统光标语义，不代表 UI/font/language 已像素级完成；
+  - 子代理审查指出字体动态增量字形、`font_jp` 真覆盖层、动态图标注册、FreeType 级 outline/shadow 仍是字体/语言链路后续高优先缺口。
+
 ## 1015. 字体/语言 bundle 与 Settings 子窗视觉收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，聚焦用户指出的“前端视觉表现和字体/语言部分仍有缺失”。
