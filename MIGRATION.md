@@ -32335,3 +32335,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings、Mods、Database、MapList/MapPlay 等子菜单仍需继续像素级/布局级对齐；
   - 前端字体/语言表现仍需继续补齐，尤其是默认 locale、语言列表来源和日文字体启动期策略；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1019. JoinDialog 社区搜索框对齐 Java TextField
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.10%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `JoinDialog.refreshCommunity()` 搜索行使用 `t.add("@search").padRight(10)`、`t.field(serverSearch, ...).grow().pad(8)` 与 `t.button(Icon.zoom, Styles.emptyi, ...).size(54f)`；
+  - 社区搜索输入框是标准 `TextField`，应使用 Java `defaultField` 皮肤、聚焦态和 cursor，而不是 Rust 旧的 `grayt` 按钮壳；
+  - zoom 刷新按钮保持 `54f`，本轮只收敛 TextField 视觉，不改变搜索刷新语义。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_join_route_page(...)` 的 community search 背景由 `settings_text_button_symbol("grayt", false, false)` 改为 `settings_text_field_background_symbol()`；
+    - `join_search_focused` 时绘制 Java TextField 聚焦描边；
+    - `join_search_focused` 时使用 `settings_text_field_cursor_symbol()` 与 `single_line_text_field_cursor_rect(search, &self.join_search)` 绘制 cursor；
+    - 扩展 `desktop_launcher_join_route_renders_server_browser_skeleton`，断言社区搜索框使用 `defaultField` 背景并在聚焦输入后绘制 cursor。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_community_search_filters_only_on_refresh_like_java -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - JoinDialog section header、saved/community server card chrome、社区 host 行正文、空态 fallback 与 loading/error/modal 层级仍需继续对齐；
+  - Settings、Mods、Database、MapList/MapPlay 等子菜单仍需继续像素级/布局级对齐；
+  - 前端字体/语言表现仍需继续补齐，尤其是默认 locale、语言列表来源、bundle fallback 和启动期字体策略；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
