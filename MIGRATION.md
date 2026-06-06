@@ -32508,3 +32508,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 日文字体 override 是否按启动期 locale gating 仍需审查；
   - MapLocalesDialog、Settings/Database/MapPlay/Load/Save 等前端子菜单视觉仍需继续逐项对齐 Java；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1026. font_jp 作为 fallback 防止覆盖主字体 glyph
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.17%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - Java `Fonts.def` 先加载主字体，`font_jp` 只作为额外字体来源参与非 ASCII/日文字形兜底；
+  - Rust 为避免多语言缺字仍预烘焙 `font_jp` source，但不应让后续 source 覆盖 `font.woff` 已经成功提供的同一 `RenderFontId::Default` glyph；
+  - 字体 fallback 应优先保持主 UI 字体的既有字形指标，只有主字体缺字时才由 `font_jp` 补足。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `desktop_build_real_font_atlas(...)` 新增 `planned_glyph_keys`，同一字体 id/字符已经由前序 source 成功规划后，后续 source 跳过，不再覆盖；
+    - 空格/制表符 placeholder advance 也登记 key，避免后续 source 重复覆盖；
+    - 新增 `desktop_graphics_font_atlas_uses_font_jp_as_fallback_without_overwriting_primary_glyphs`，动态从真实 `font.woff` 与 `font_jp.woff` 找共同支持但指标不同的非 ASCII glyph，确认合并 atlas 保留主字体指标；
+    - 保留 `font_jp` 缺字兜底能力，未移除 CJK/本地化文本 rasterization。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_uses_font_jp_as_fallback_without_overwriting_primary_glyphs -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_rasterizes_bundle_locale_glyphs_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - `font_jp` 是否进一步按 Java 启动期 locale gating 仍需审查；当前保守保留多语言预烘焙 fallback，避免中文/日文/韩文缺字；
+  - MapLocalesDialog、Settings/Database/MapPlay/Load/Save 等前端子菜单视觉仍需继续逐项对齐 Java；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
