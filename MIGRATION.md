@@ -32483,3 +32483,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - LanguageDialog 默认 locale 来源、语言列表资产化和日文字体 override gating 仍需继续审查；
   - Settings、Database、MapPlay、Load/Save 等子菜单的按钮皮肤、字号、间距和 ScrollPane chrome 仍需继续逐项对齐 Java；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1025. LanguageDialog 显示名兜底与 locales 资产校验
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.16%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `Vars.init()` 从 `core/assets/locales` 读取 locale code，按 `LanguageDialog.getDisplayName(...)` 的可见名排序后追加 `router`；
+  - `LanguageDialog.getDisplayName(Locale)` 将 legacy `in_ID` 归一到 `id_ID`，命中 `displayNames` 时返回可见名，未命中时回退 raw locale code；
+  - LanguageDialog 的按钮文案和字体 seed 都应使用可见显示名，而不是把 code 和 label 混在一起。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_language_display_name_for_code(...)`，实现 `id_ID` 显示映射、legacy `in_ID` 归一和未知 locale raw code 兜底；
+    - 新增测试侧 `settings_language_codes_from_locales_asset_like_java(...)`，从 `core/assets/locales` 读取资产并按 Java 显示名排序生成预期列表；
+    - LanguageDialog 按钮文本与真实字体 atlas seed 统一走显示名 helper；
+    - 将 `desktop_launcher_language_options_match_upstream_vars_locales_like_java` 从硬编码顺序改为读取 `core/assets/locales` 生成预期；
+    - 新增 `desktop_launcher_language_display_name_falls_back_to_locale_code_like_java` 锁住已知显示名、`in_ID` alias 和未知 code 兜底。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_language -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_seed_scans_upstream_bundle_texts_like_java -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - 运行时语言列表仍是静态表，后续可继续向 Java 的运行时 `Vars.locales` 模型收敛；
+  - 日文字体 override 是否按启动期 locale gating 仍需审查；
+  - MapLocalesDialog、Settings/Database/MapPlay/Load/Save 等前端子菜单视觉仍需继续逐项对齐 Java；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
