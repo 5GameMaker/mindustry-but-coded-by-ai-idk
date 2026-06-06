@@ -19,6 +19,21 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1022. Settings 子按钮 flatt 额外描边清理
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉收口，处理通过通用 Settings helper 渲染的 `Styles.flatt` 子按钮仍叠加 Rust-only cyan/blue 描边的问题。
+- 本轮总体进度更新：约 **97.61%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Settings/Controls、Join/Host、Database/About/Mods 等子菜单。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_text_button_style_uses_java_drawable_border(...)`；
+    - `push_settings_text_button_enabled_with_style(...)` 对 `flatt`、`flatTogglet`、`flatToggleMenut` 不再额外推 `StrokeRect`，让 Java drawable skin 自身决定按钮边框/背景；
+    - 补强 Data/PlanetData 断言，确保 `flatt` 数据按钮、星球数据按钮不会重新出现单独 Rust cyan stroke。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_dialog_overlay_and_back_stack_match_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_data_actions_dispatch_platform_hooks_like_java -- --nocapture`
+- 注意：
+  - 这只清理 Settings 通用 helper 的 flat 系列按钮；仍有地图过滤、战役星球切换等手写 flatTogglet 路径需要继续统一到同一套 symbol+tint 逻辑。
+
 ## 1021. SettingsMenuDialog 主按钮 flatt 视觉收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉优先级，把 Settings 主页面入口按钮从 Rust 自定义蓝灰/蓝边改回 Java `Styles.flatt`。
