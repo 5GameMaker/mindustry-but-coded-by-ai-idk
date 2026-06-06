@@ -1494,6 +1494,22 @@ fn upstream_bundle_value_from_properties_source(
     })
 }
 
+fn upstream_collect_bundle_values_from_properties_source(
+    source: &'static str,
+    values: &mut std::collections::BTreeSet<&'static str>,
+) {
+    for line in source.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.trim_start().starts_with('#') || line.trim().is_empty() {
+            continue;
+        }
+        let Some((_, value)) = line.split_once('=') else {
+            continue;
+        };
+        values.insert(value.trim_start());
+    }
+}
+
 fn upstream_menu_bundle_properties_source_for_locale(locale: &str) -> &'static str {
     let locale = locale.trim().replace('-', "_");
     if locale.eq_ignore_ascii_case("zh_TW") || locale.eq_ignore_ascii_case("zh_HK") {
@@ -1506,6 +1522,31 @@ fn upstream_menu_bundle_properties_source_for_locale(locale: &str) -> &'static s
     } else {
         UPSTREAM_BUNDLE_PROPERTIES_SOURCE
     }
+}
+
+pub fn upstream_menu_bundle_raw_texts_for_locale(locale: &str) -> Vec<&'static str> {
+    let mut values = std::collections::BTreeSet::new();
+    upstream_collect_bundle_values_from_properties_source(
+        UPSTREAM_GLOBAL_BUNDLE_PROPERTIES_SOURCE,
+        &mut values,
+    );
+    for (_, value) in upstream_menu_bundle_entries_for_locale(locale) {
+        values.insert(*value);
+    }
+    upstream_collect_bundle_values_from_properties_source(
+        upstream_menu_bundle_properties_source_for_locale(locale),
+        &mut values,
+    );
+    if !locale.trim().eq_ignore_ascii_case("en") {
+        for (_, value) in UPSTREAM_MENU_BUNDLE_ENTRIES {
+            values.insert(*value);
+        }
+        upstream_collect_bundle_values_from_properties_source(
+            UPSTREAM_BUNDLE_PROPERTIES_SOURCE,
+            &mut values,
+        );
+    }
+    values.into_iter().collect()
 }
 
 pub fn upstream_menu_bundle_entries_for_locale(
@@ -1764,6 +1805,35 @@ mod tests {
             upstream_menu_bundle_value_for_locale("zh_CN", "sector.origin.credit"),
             Some("Mechanical Fishe"),
             "Java Vars.loadSettings merges bundles/global.properties into Core.bundle after locale loading"
+        );
+    }
+
+    #[test]
+    fn upstream_menu_bundle_raw_texts_scan_locale_and_global_bundle_like_java() {
+        let zh_cn = upstream_menu_bundle_raw_texts_for_locale("zh_CN");
+        assert!(
+            zh_cn.contains(&"开始游戏"),
+            "raw text scanner should expose locale bundle values for font atlas seeding"
+        );
+        assert!(
+            zh_cn.contains(&"Mechanical Fishe"),
+            "Java Vars.loadSettings merges bundles/global.properties after locale loading"
+        );
+        assert!(
+            zh_cn.contains(&"Restart required to apply changes."),
+            "locale bundles must carry the English fallback chain used by I18NBundle"
+        );
+
+        let router = upstream_menu_bundle_raw_texts_for_locale("router");
+        assert!(
+            router.contains(&"Play"),
+            "raw bundle text scanning should not routerize values before glyph atlas seeding"
+        );
+        assert!(
+            !router
+                .iter()
+                .any(|value| value.contains(UPSTREAM_ROUTER_LANGUAGE_GLYPH)),
+            "router replacement is a runtime bundle transform, not the raw-text font seed"
         );
     }
 
