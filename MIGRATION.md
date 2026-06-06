@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1026. DiscordDialog 三按钮尺寸与顺序对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端子菜单视觉收口，处理 `DiscordDialog.java` 中 `buttons.defaults().size(170f, 50)` 与 Rust 旧 route-shell 按钮尺寸不一致的问题。
+- 本轮总体进度更新：约 **97.68%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Discord/Database/About/Mods、Load/Save、Editor/MapList 等页面的 Java 视觉与交互收口。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DISCORD_DIALOG_BUTTON_WIDTH = 170.0`、`DISCORD_DIALOG_BUTTON_HEIGHT = 50.0`、`DISCORD_DIALOG_BUTTON_GAP = 10.0`；
+    - 新增 Discord 专用三按钮 rect helper，`@back`、`@copylink`、`@openlink` 按 Java 顺序同一行排列；
+    - Discord copy/open 不再使用 36px 高分裂按钮，改用 170×50 footer 按钮；
+    - Discord `@back` footer 按钮正式接入点击命中，返回 `CloseRoute`；
+    - 渲染层改用 settings text button helper 带 `left/copy/discord` 图标，更贴近 Java `buttons.button(label, Icon.*)`。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_records_discord_and_becheck_actions -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_desktop_and_discord_chrome_buttons -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 本轮只收 DiscordDialog footer 按钮；DatabaseDialog/AboutDialog 的搜索栏、tab、content info close、credits close 等关键 metric 已有测试与实现基础，后续可继续查 Mods/Editor/MapList 或更细的 Database/ContentInfo 视觉层级。
+
 ## 1025. LoadDialog 空列表提示流式布局对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端子菜单视觉收口，处理 `LoadDialog.java` 空存档提示在 Java 表格流中显示、Rust 旧实现居中显示的问题。
