@@ -32218,3 +32218,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Load/Save TextField caret/focus、错误 modal details/stacktrace 仍需继续贴近 Java；
   - MapList/Filter 长语言文本裁剪和 About 链接卡片命中区仍需继续审查；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 609. AboutDialog 链接卡片宽度、字号与命中区
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.06%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `AboutDialog.setup()` 中链接卡片高度为 portrait `90f` / landscape `80f`，宽度为 portrait `400f` / landscape `600f`；
+  - 左侧颜色条宽 `40f`，图标单元和右侧 `Icon.link` 按钮都是 `size(h - 5, h)`；
+  - 链接点击由右侧 `table.button(Icon.link, Styles.clearNonei, ...)` 触发，不是整张卡触发；
+  - 描述使用 `labelWrap(link.description).width(w - 100f - h)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `about_link_card_width_for_panel(...)` 按 Java portrait/landscape 目标宽度返回 `400/600`；
+    - `about_links_clip_rect_for_panel(...)` 随卡片目标宽度居中放大，避免 route panel 把 Java 400 宽卡片裁窄；
+    - 新增 `about_link_action_rect_for_card(...)`，右侧链接按钮尺寸对齐 `h - 5` × `h`；
+    - `about_link_name_at_surface_point(...)` 仅命中右侧 link 按钮，不再把标题/描述区域当成链接按钮；
+    - `push_about_link_card(...)` 将左色条扩到 `40f`，图标单元/右侧按钮按 Java 尺寸绘制；
+    - 标题字号提升到 `14.0`、描述字号提升到 `11.5/10.5`，描述增加 wrap width，贴近 Java `Label` / `labelWrap` 观感。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_about_route_uses_upstream_link_cards_and_hitboxes -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_route_scrolls_links_and_credits_like_scrollpane -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_link_rows_dispatch_from_menu_mouse_input -- --nocapture`
+  - `git diff --check`
+- 本轮探索结论：
+  - 主菜单 logo/version chrome 已有 `push_menu_logo_and_version_chrome(...)` 主路径和测试覆盖，本轮不重复实现；
+  - `font_jp` 不应按运行时 `settings_locale` gate；严格 Java 语义应按系统启动 locale gate，但当前常驻 `font_jp` 对跨语言 UI glyph 兜底更稳，后续需要作为独立字体策略改造处理。
+- 仍未完成：
+  - About 链接卡片的 `Styles.grayPanel` / `Styles.clearNonei` 贴图细节仍可继续像素级校准；
+  - Load/Save TextField caret/focus、错误 modal details/stacktrace 仍需继续贴近 Java；
+  - MapList/Filter 长语言文本裁剪仍需继续处理；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
