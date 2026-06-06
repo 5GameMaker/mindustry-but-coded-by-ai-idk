@@ -32532,3 +32532,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `font_jp` 是否进一步按 Java 启动期 locale gating 仍需审查；当前保守保留多语言预烘焙 fallback，避免中文/日文/韩文缺字；
   - MapLocalesDialog、Settings/Database/MapPlay/Load/Save 等前端子菜单视觉仍需继续逐项对齐 Java；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1027. LoadDialog 存档预览 BorderImage 灰边对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.18%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `LoadDialog.rebuild()` 对每个存档预览使用 `new BorderImage(def, 4f)`；
+  - 缺失预览时底图为 `Core.atlas.find("nomap")`，有预览时直接替换 region；
+  - BorderImage 的 4f 灰边应与 MapList/MapPlay/EditorMaps 的 BorderImage 视觉一致。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_load_game_route_page(...)` 中存档预览 `stroke_rect(preview, ...)` 从蓝灰色改为 `Pal::GRAY` 且 alpha 为 `1.0`；
+    - 扩展 `desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click`，不仅断言厚度 `4.0`，也断言颜色为 `Pal::GRAY`；
+    - 保持 `nomap` fallback、真实 preview sprite 替换和无额外 `whiteui` 背板的既有行为。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_save -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Load/Save 的按钮皮肤、搜索栏焦点细节和保存过渡仍需继续与 Java 逐项核对；
+  - MapLocalesDialog、Settings/Database/MapPlay 等前端子菜单视觉仍需继续对齐 Java；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
