@@ -32280,3 +32280,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings、Join、Mods、Database、MapList/MapPlay 等子菜单视觉仍需逐项审查并对齐；
   - 前端字体/语言表现仍需继续补齐，尤其是长语言文本裁剪、locale fallback 和启动期字体策略；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1017. Bundle properties 解析语义对齐 Java
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.08%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `Vars.loadSettings()` 使用 `I18NBundle.createBundle(...)` 加载外置/内置 bundle；
+  - `Vars.loadSettings()` 在 locale bundle 后使用 `PropertiesUtils.load(...)` 读取 `bundles/global.properties` 并合并进 `Core.bundle`；
+  - Java properties 语义需要支持 `\uXXXX`、续行、转义分隔符、空白分隔、注释和无 value key。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_properties_logical_lines(...)`，支持 Java properties 奇数反斜杠续行，并在续行时去掉下一物理行前导空白；
+    - 新增 `desktop_properties_split_key_value(...)`，识别未转义的 `=`、`:` 与空白分隔，同时支持转义 key 分隔符；
+    - 新增 `desktop_decode_properties_escapes(...)`，统一解码 `\n`、`\r`、`\t`、`\f`、`\uXXXX` 与普通转义字符；
+    - `desktop_parse_bundle_properties_source(...)` 改为走上述 Java-like parser；
+    - `desktop_extend_font_seed_characters_from_bundle_source(...)` 改为复用同一 parser 的 value，避免字体种子与实际 bundle 文案解析语义分叉；
+    - 新增 `desktop_bundle_properties_parser_handles_java_escape_semantics`，覆盖 Unicode、续行、转义 key 分隔符、转义空格、tab 和无分隔符 key。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_bundle_properties_parser_handles_java_escape_semantics -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_loads_asset_locale_bundles_like_java_vars_load_settings -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_loads_external_bundle_before_internal_locale_like_java -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - 默认 locale 来源仍需继续向 Java `Locale.getDefault()` 语义收敛，尤其是 Windows 系统语言与环境变量不一致时；
+  - LanguageDialog 语言列表仍需进一步减少硬编码同步风险，最好从 `core/assets/locales` 构建或强校验；
+  - 日文字体 override 的启动期 locale gating、router locale bundle 级变换仍需继续对齐；
+  - Settings、Join、Mods、Database、MapList/MapPlay 等子菜单视觉仍需逐项审查并对齐；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
