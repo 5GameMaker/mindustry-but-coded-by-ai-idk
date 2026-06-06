@@ -6,8 +6,8 @@
 //! the desktop renderer can later replace the `DrawText` placeholder with a
 //! FreeType/icon-atlas backed pipeline without rediscovering Java-side names.
 
-use crate::mindustry::graphics::RenderFontId;
-use std::{char, fmt, num::ParseIntError};
+use crate::mindustry::{game::TeamRegistry, graphics::RenderFontId};
+use std::{char, collections::BTreeMap, fmt, num::ParseIntError};
 
 pub const UPSTREAM_MAIN_FONT_SOURCE_PATH: &str = "fonts/font.woff";
 pub const UPSTREAM_ICON_FONT_SOURCE_PATH: &str = "fonts/icon.ttf";
@@ -905,6 +905,55 @@ pub fn parse_upstream_icon_properties(
     Ok(icons)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpstreamContentIconHeadlessRegistry {
+    pub unicode_icons: BTreeMap<String, u32>,
+    pub string_icons: BTreeMap<String, String>,
+}
+
+impl UpstreamContentIconHeadlessRegistry {
+    pub fn string_icon(&self, name: &str) -> Option<&str> {
+        self.string_icons.get(name).map(String::as_str)
+    }
+
+    pub fn unicode_icon(&self, name: &str) -> Option<u32> {
+        self.unicode_icons.get(name).copied()
+    }
+}
+
+pub fn upstream_content_icon_headless_registry_like_java(
+    icons: &[UpstreamContentIcon],
+) -> UpstreamContentIconHeadlessRegistry {
+    let mut unicode_icons = BTreeMap::new();
+    let mut string_icons = BTreeMap::new();
+
+    for icon in icons {
+        unicode_icons.insert(icon.name.clone(), icon.unicode);
+        if let Some(emoji) = icon.emoji_string() {
+            string_icons.insert(icon.name.clone(), emoji);
+        }
+    }
+
+    if let Some(alphaaaa) = string_icons.get("alphaaaa").cloned() {
+        string_icons.entry("alphachan".into()).or_insert(alphaaaa);
+    }
+
+    UpstreamContentIconHeadlessRegistry {
+        unicode_icons,
+        string_icons,
+    }
+}
+
+pub fn populate_base_team_emojis_from_headless_content_icons_like_java(
+    teams: &mut TeamRegistry,
+    icons: &[UpstreamContentIcon],
+) {
+    let registry = upstream_content_icon_headless_registry_like_java(icons);
+    for team in teams.base_teams_mut() {
+        team.emoji = registry.string_icon(&team.name).unwrap_or("").to_string();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1055,6 +1104,44 @@ mod tests {
         assert_eq!(icons[0].emoji_string(), Some('\u{f8ff}'.to_string()));
         assert_eq!(icons[1].name, "ore-copper");
         assert_eq!(icons[1].atlas_symbol, "block-ore-copper-ui");
+    }
+
+    #[test]
+    fn content_icon_headless_registry_matches_fonts_load_content_icons_headless() {
+        let icons = vec![
+            UpstreamContentIcon {
+                unicode: 0xf8ff,
+                name: "alphaaaa".to_string(),
+                atlas_symbol: "block-alpha-ui".to_string(),
+            },
+            UpstreamContentIcon {
+                unicode: 0xf900,
+                name: "crux".to_string(),
+                atlas_symbol: "team-crux-ui".to_string(),
+            },
+        ];
+
+        let registry = upstream_content_icon_headless_registry_like_java(&icons);
+        assert_eq!(registry.unicode_icon("alphaaaa"), Some(0xf8ff));
+        assert_eq!(registry.string_icon("alphaaaa"), Some("\u{f8ff}"));
+        assert_eq!(registry.string_icon("alphachan"), Some("\u{f8ff}"));
+        assert_eq!(
+            registry.unicode_icon("alphachan"),
+            None,
+            "Java loadContentIconsHeadless only creates the alphachan stringIcons alias"
+        );
+
+        let mut teams = crate::mindustry::game::vanilla_teams();
+        populate_base_team_emojis_from_headless_content_icons_like_java(&mut teams, &icons);
+        assert_eq!(
+            teams.get(crate::mindustry::game::TEAM_CRUX as i32).emoji,
+            "\u{f900}"
+        );
+        assert_eq!(
+            teams.get(crate::mindustry::game::TEAM_SHARDED as i32).emoji,
+            "",
+            "base teams without a content icon keep Java's empty emoji fallback"
+        );
     }
 
     #[test]

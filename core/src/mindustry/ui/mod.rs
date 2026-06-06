@@ -1944,11 +1944,13 @@ pub use bar::{
 pub use dialogs::BaseDialog;
 pub use displayable::{DisplayTable, Displayable};
 pub use fonts::{
-    parse_upstream_icon_properties, upstream_font_asset, upstream_font_asset_by_name,
-    upstream_font_assets, upstream_font_source_paths, upstream_ui_icon_glyph,
-    upstream_ui_icon_glyph_char, upstream_ui_icon_glyph_string, IconPropertiesParseError,
-    UpstreamContentIcon, UpstreamFontAsset, UpstreamFontRole, UpstreamUiIconGlyph,
-    UPSTREAM_FONT_ASSETS, UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH, UPSTREAM_ICON_FONT_SOURCE_PATH,
+    parse_upstream_icon_properties, populate_base_team_emojis_from_headless_content_icons_like_java,
+    upstream_content_icon_headless_registry_like_java, upstream_font_asset,
+    upstream_font_asset_by_name, upstream_font_assets, upstream_font_source_paths,
+    upstream_ui_icon_glyph, upstream_ui_icon_glyph_char, upstream_ui_icon_glyph_string,
+    IconPropertiesParseError, UpstreamContentIcon, UpstreamContentIconHeadlessRegistry,
+    UpstreamFontAsset, UpstreamFontRole, UpstreamUiIconGlyph, UPSTREAM_FONT_ASSETS,
+    UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH, UPSTREAM_ICON_FONT_SOURCE_PATH,
     UPSTREAM_JAPANESE_FONT_SOURCE_PATH, UPSTREAM_LOGIC_FONT_CHARACTERS,
     UPSTREAM_LOGIC_FONT_SOURCE_PATH, UPSTREAM_MAIN_FONT_SOURCE_PATH,
     UPSTREAM_MONOSPACE_FONT_SOURCE_PATH, UPSTREAM_TECH_FONT_SOURCE_PATH,

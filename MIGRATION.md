@@ -19,6 +19,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1019. 前端日文字体 outline override 与 headless 图标语义收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续处理“前端视觉表现和字体/语言部分还有很多缺失”，优先补齐 Java `Fonts.loadExtraFonts()` 与 `Fonts.loadContentIconsHeadless()` 的字体/语言底层语义。
+- 本轮总体进度更新：约 **97.58%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Settings/Data/Language、Join/Host、Database/About/Mods 等子菜单的 Java 视觉与交互收口。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - Japanese locale 下 `fonts/font_jp.woff` 不再只作为 `Fonts.def.data.setOverride`，同时新增 `RenderFontId::Outline` override 源，对齐 Java `font_jp_outline` 加载后调用 `Fonts.outline.data.setOverride(f.data)`；
+    - 扩展测试 `desktop_graphics_font_atlas_loads_font_jp_only_for_japanese_locale_and_overrides`，分别断言 Default/Outline 两条 override 源。
+  - `core/src/mindustry/ui/fonts.rs`
+    - 新增 `UpstreamContentIconHeadlessRegistry`、`upstream_content_icon_headless_registry_like_java(...)`；
+    - 新增 `populate_base_team_emojis_from_headless_content_icons_like_java(...)`，复刻 Java headless 读取 `icons/icons.properties` 后填充 `unicodeIcons`、`stringIcons`、`alphachan -> alphaaaa` 字符串别名，以及 `Team.baseTeams` emoji 的语义。
+  - `core/src/mindustry/ui/mod.rs`
+    - 导出 headless content icon registry 与 team emoji 填充入口，便于后续 server/headless runtime 正式接入。
+- 已验证：
+  - `cargo test -p mindustry-core content_icon_headless_registry_matches_fonts_load_content_icons_headless -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_loads_font_jp_only_for_japanese_locale_and_overrides -- --nocapture`
+- 注意：
+  - 本轮补齐的是字体/语言底层语义，不代表所有 UI 子菜单视觉已经完成；下一轮优先收 Settings/Data/Language 或 Join/Host/Dialog chrome。
+
 ## 1018. 前端 packed atlas 低纹理尺寸 fallback 对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端/资源视觉链路，处理 Java `ClientLauncher` 在低 `GL_MAX_TEXTURE_SIZE` 时加载 fallback packed atlas 的差异。
