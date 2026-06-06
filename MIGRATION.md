@@ -32249,3 +32249,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Load/Save TextField caret/focus、错误 modal details/stacktrace 仍需继续贴近 Java；
   - MapList/Filter 长语言文本裁剪仍需继续处理；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 610. Load/Save TextField 光标与聚焦态
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.07%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `LoadDialog.setup()` 中搜索框由 `search.field(...).maxTextLength(50).growX()` 创建，空文本 message 为 `@save.search`，左侧带 `Icon.zoom`；
+  - `LoadDialog.show()` 在 desktop 上调用 `Core.scene.setKeyboardFocus(searchField)`；
+  - `UI.showTextInput(...)` 桌面版使用 `cont.field(def, ...).size(330f, 50f)`，按钮默认 `120x54`，显示后将键盘焦点给 field 并把 cursor 移到默认文本末尾；
+  - `SaveDialog.addSetup()` 的新建存档输入复用 `UI.showTextInput("@save", "@save.newslot", 30, "", ...)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `load_save_text_field_cursor_rect(...)`，统一计算 Load/Save 单行输入框光标位置；
+    - `push_load_game_route_page(...)` 的搜索框背景从 `grayt` 按钮皮肤切换到 Java `defaultField` 背景，并在 `load_game_search_focused` 时绘制聚焦描边与 `defaultField` cursor；
+    - `push_load_game_rename_dialog(...)` 的重命名输入框切换到 `defaultField` 背景，补聚焦描边与 cursor；
+    - `push_save_game_new_dialog(...)` 的新建存档输入框切换到 `defaultField` 背景，补聚焦描边与 cursor；
+    - 更新 Load/Save 既有渲染测试断言，从旧 `grayt` 按钮皮肤改为 Java TextField 皮肤，并覆盖 cursor rect。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_save_dialog_new_save_input_contract_matches_upstream_savegame -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_save_game_new_dialog_and_load_search_focus_are_stable -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click -- --nocapture`
+  - `git diff --check`
+- 本轮探索结论：
+  - Settings 页已经有 `settings_text_field_background_symbol()` / `settings_text_field_cursor_symbol()` 作为可信 Java TextField 风格来源；
+  - 后续建议继续把 Join/Settings/Mods/Database/MapList 的输入框统一收敛到同一绘制 helper，避免子菜单间 TextField 视觉再次分叉；
+  - 字体/语言仍需独立推进：`LanguageDialog` 默认 locale、bundle 覆盖、font fallback 与 Java `Fonts.loadExtraFonts()` 的启动期语义仍需继续审查。
+- 仍未完成：
+  - 错误 modal details/stacktrace 仍需继续贴近 Java；
+  - Settings、Join、Mods、Database、MapList/MapPlay 等子菜单视觉仍需逐项审查并对齐；
+  - 前端字体/语言表现仍需继续补齐，尤其是长语言文本裁剪、locale fallback 和启动期字体策略；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
