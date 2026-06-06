@@ -159,6 +159,10 @@ impl TeamRegistry {
     pub fn base_teams(&self) -> &[Team] {
         &self.teams[..BASE_TEAM_COUNT]
     }
+
+    pub fn base_teams_mut(&mut self) -> &mut [Team] {
+        &mut self.teams[..BASE_TEAM_COUNT]
+    }
 }
 
 impl Default for TeamRegistry {
