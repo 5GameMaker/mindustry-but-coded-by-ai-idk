@@ -32798,3 +32798,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 仍需继续审查各个页面中显式传入 `with_markup(false)` 或未设置 wrap/outline 的文本，逐项确认是否符合 Java widget 默认；
   - Join/Settings/Controls/LoadSave/About/Database/Editor 等子菜单仍需继续逐项做像素与交互回归；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1038. desktop Controls 搜索框 TextField 高度收敛
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.29%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/KeybindDialog.java` 顶部搜索栏使用 `table.image(Icon.zoom)` + `table.field(...).growX()`，即正常 `TextField` 控件，而不是短窄自绘条；
+  - `shown(...)` 清空搜索并请求 keyboard focus，Rust 既有实现已覆盖该交互，本轮补齐可见几何。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `SETTINGS_KEYBIND_SEARCH_HEIGHT = 54.0`；
+    - `settings_keybind_search_rect(...)` 改为按标题下方 accent line 定位，保持上边缘与旧布局一致，同时把搜索框高度扩展到 Java TextField 风格；
+    - `desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell` 增加搜索框高度断言，继续验证背景 sprite、cursor、zoom icon 与本地化过滤链路。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_keybind_search_matches_localized_labels_like_java -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Controls 搜索框还需继续向 Java `TextField` 的选区、IME、复制粘贴与完整焦点行为收敛；
+  - KeybindDialog 行布局、按钮 skin、轴绑定提示与 `getName()` 覆盖面仍需继续审查；
+  - Join/LoadSave/About/Database/Editor 等子菜单仍需继续逐项做像素与交互回归；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
