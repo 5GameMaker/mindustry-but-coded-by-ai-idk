@@ -32191,3 +32191,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - JoinDialog community group header/host card 结构仍需继续对齐；
   - Settings / Editor 等子菜单仍需继续逐项对齐 Java 原版；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 608. 前端视觉：Editor 信息弹窗、About Credits 与 Load/Save confirm
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.05%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `EditorMapsDialog.showMap(...)` 使用 `Image(map.safeTexture()) + BorderImage(map.safeTexture())`，右侧信息容器是 `Styles.black`；
+  - `AboutDialog.showCredits()` 调用 `BaseDialog.addCloseButton()`，关闭按钮为默认 `210x64`；
+  - `UI.showConfirm(...)` 的按钮默认 `200x54`，并带 `Icon.cancel` / `Icon.ok`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_editor_map_info_dialog(...)` 的预览边框改为 `4.0 + Pal::GRAY`，右侧信息容器改为不透明黑底，贴近 Java `BorderImage` / `Styles.black`；
+    - `about_credits_dialog_close_rect(...)` 改为复用 `SETTINGS_BACK_BUTTON_WIDTH/HEIGHT`，对齐 Java `BaseDialog.addCloseButton()`；
+    - 新增 `load_game_confirm_button_rect(...)`，Load/Save 的 overwrite/delete/missing-mods confirm 弹窗在空间允许时使用 Java `200x54` confirm 按钮；
+    - overwrite/delete/missing-mods confirm 按钮补 `cancel` / `ok` 图标，并将 `@overwrite`、`@save.overwrite`、`@confirm`、`@save.delete.confirm` 改为显式本地化文本。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_info_disables_builtin_delete_action -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_menu_route_renders_upstream_credits_links_and_contributors -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_cautious_load_confirms_missing_mods_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_save_dialog_creates_and_overwrites_save_slots -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - 主菜单 logo/version chrome、日文字体 override 的 locale gating / runtime 映射仍需继续对齐；
+  - Load/Save TextField caret/focus、错误 modal details/stacktrace 仍需继续贴近 Java；
+  - MapList/Filter 长语言文本裁剪和 About 链接卡片命中区仍需继续审查；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
