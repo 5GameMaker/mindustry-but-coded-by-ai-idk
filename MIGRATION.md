@@ -32600,3 +32600,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 语言列表仍需进一步从 `core/assets/locales` 进入生产路径，外部 bundle root/locale suffix 语义仍需补齐；
   - Settings/Language/MapPlay/Load/Save/Mods 等前端子菜单视觉仍需继续逐项对齐 Java；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1030. LanguageDialog 语言列表改为 locales 资产驱动
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.21%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `Vars.init()` 在 `loadLocales` 时读取 `Core.files.internal("locales")`，把每行 code 转成 `Locale`；
+  - Java 之后按 `LanguageDialog.getDisplayName` 的 case-insensitive 顺序排序；
+  - 排序完成后追加 `new Locale("router")`，供 `LanguageDialog` 迭代 `Vars.locales`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 将原 `SETTINGS_LANGUAGE_OPTIONS` 静态列表拆为 `SETTINGS_LANGUAGE_DISPLAY_NAMES`，保留 Java `LanguageDialog.displayNames` 的显示名映射；
+    - 新增 `settings_language_options_from_locales_asset_like_java(...)`，按 `core/assets/locales` 生成排序后的语言项并追加 `router`；
+    - 新增 `settings_language_options_like_java()`，生产路径通过 `include_str!("../../core/assets/locales")` 缓存生成语言列表；
+    - LanguageDialog 渲染、点击选择、滚动范围、路线行、locale fallback 和字体 seed 均改为使用资产驱动的语言项；
+    - 扩展 `desktop_launcher_language_options_match_upstream_vars_locales_like_java`，确认生产语言项包含每一个 `core/assets/locales` raw code，并且最后追加 `router`。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_language -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - `core/src/mindustry/ui/mod.rs` 的 bundle 镜像仍需扩展到全部 `bundle_*.properties`，否则多数语言 core lookup 仍退化；
+  - 外部 bundle root 与 `bundle_<locale>.properties` suffix 语义仍需按 Java `I18NBundle.createBundle` 补齐；
+  - `font_jp` 的 Java 日文 locale override 语义、MapLocales fallback 和 MapLocalesDialog UI 仍需继续接入；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
