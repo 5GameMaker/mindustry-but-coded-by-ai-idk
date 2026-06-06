@@ -32461,3 +32461,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 日文字体 override 是否按启动期 locale gating 仍需审查；
   - LanguageDialog 长文本裁剪、Settings/Join/Mods/Database/MapList/MapPlay 等子菜单视觉仍需继续对齐；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1024. EditorMaps 地图信息 ScrollPane chrome 对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.15%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `EditorMapsDialog.showMap()` 右侧描述区使用 `table(Styles.black, desc -> { ScrollPane pane = new ScrollPane(t); desc.add(pane).grow(); })`；
+  - 地图信息文字溢出时应表现为完整 `ScrollPane`，不仅要裁剪和滚动内容，也应提供可见 scrollbar chrome；
+  - 预览区仍维持 `Image(map.safeTexture()) + BorderImage(map.safeTexture())` 的 4f `Pal.gray` 边框。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_editor_info_scrollbar_track_rect(...)` 和 `map_editor_info_scrollbar_knob_rect(...)`，按内容高度与 `editor_map_info_scroll_offset` 计算右侧信息区 scrollbar；
+    - `push_editor_map_info_dialog(...)` 在 `clear_clip()` 后为溢出的信息 ScrollPane 绘制暗色轨道与 accent 滑块；
+    - 扩展 `desktop_launcher_editor_map_info_scrollpane_matches_java`，断言长描述时存在 track/knob，且滚动后滑块位置随 offset 变化，同时保持文本裁剪、按钮命中和预览不动。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_info_scrollpane_matches_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_info -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - LanguageDialog 默认 locale 来源、语言列表资产化和日文字体 override gating 仍需继续审查；
+  - Settings、Database、MapPlay、Load/Save 等子菜单的按钮皮肤、字号、间距和 ScrollPane chrome 仍需继续逐项对齐 Java；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
