@@ -32651,3 +32651,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `MapInfoDialog -> MapLocalesDialog` 的 desktop 编辑入口、dirty/apply/back 保存链仍需实现；
   - 前端主菜单 submenu 锚点/安全区、Mods/About/Discord/Campaign/Join 等视觉差异仍需继续逐项对齐 Java；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1032. desktop 外部 bundle family 与整包选择语义
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.23%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `Vars.loadSettings()` 先尝试 `Core.files.local("bundle")`，并通过 `I18NBundle.createBundle(handle, Locale.ENGLISH)` 加载外部 bundle family；
+  - 外部 bundle 成功后，内部 `Core.files.internal("bundles/bundle")` 不再按 key 混入，只有外部整包完全不可读时才回退内部；
+  - `global.properties` 仍在最后 overlay 到最终 `Core.bundle`；
+  - `bundle.external` notice 使用 base handle 的 `absolutePath()`，不是某个具体 `.properties` 文件。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_bundle_locale_suffixes(...)` 与 `desktop_external_bundle_source_paths_for_data_dir(...)`，支持 Java 风格 `bundle.properties` / `bundle_en.properties` family；
+    - 保留旧裸文件 `data_dir/bundle` 作为兼容低优先级来源，但 `bundle.properties` 与 `bundle_en.properties` 会按 I18NBundle 语义覆盖它；
+    - 新增 `desktop_external_bundle_values_for_data_dir(...)`，一次合并外部 family source；
+    - `bundle_value_for_current_locale(...)` 改为 `global -> external family 或 internal bundle` 的整包选择，不再外部缺 key 时偷偷落入内部 locale；
+    - `sync_external_bundle_loaded_notice_like_java(...)` 仍以 `data_dir/bundle` base handle 作为 notice 路径，同时把 legacy/root/en family 全部纳入外部字体 seed；
+    - 新增 `desktop_launcher_loads_external_bundle_properties_family_like_java_vars_load_settings`，覆盖 `bundle < bundle.properties < bundle_en.properties` 优先级、缺失 key 不回落内部、global 覆盖与 notice base path。
+- 已验证：
+  - `cargo test -p mindustry-desktop external_bundle -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_loads_asset_locale_bundles_like_java_vars_load_settings -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Java `I18NBundle` 的系统默认 locale fallback、非 English 外部 locale candidate 后续仍可继续细化；
+  - `font_jp` 仍需按 Java 只在日文 locale 启用，并在 `ja` 下体现 override 而非 fallback；
+  - `MapInfoDialog -> MapLocalesDialog` 的 desktop 编辑入口、dirty/apply/back 保存链仍需实现；
+  - 前端主菜单 submenu 锚点/安全区、Mods/About/Discord/Campaign/Join 等视觉差异仍需继续逐项对齐 Java；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
