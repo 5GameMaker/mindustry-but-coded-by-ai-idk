@@ -32728,3 +32728,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings/Language/Controls/Data 的底部 footer 返回按钮、Controls 真 TextField 行为、语言 default 写回 settings 仍需继续对齐；
   - Join/Mods/About/Database 等子菜单仍有卡片、搜索栏、分区标题与 Rust-only 诊断文案可见层差异；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1035. desktop 语言 default fallback 写回 settings
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.26%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java` 的 `getLocale()` 在 settings locale 为 `default` 时调用 `findClosestLocale()`；
+  - `findClosestLocale()` 会按系统默认 locale 先精确匹配、再语言匹配、最后回退 English，并把最终 `loc.toString()` 写回 `Core.settings.put("locale", ...)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::load_settings_locale_from_settings()` 读取 `default`、空字符串、无效 locale 或平台/旧别名 locale 后，会把 `settings_closest_locale_code(...)` 得到的最终 canonical locale 写回 `settings_overrides["locale"]`；
+    - 同步保持 `settings_locale` 与 `player_locale` 指向同一个 canonical locale；
+    - 加入 `desktop_launcher_settings_language_default_locale_persists_fallback_like_java`，覆盖缺省 key、显式 `default`、空 locale、未知 locale、`in_ID` 与 `pt-AO` 等回退/别名路径，同时断言加载 settings 不会误触发 `@language.restart`。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_language_default_locale -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Settings 子页返回/关闭按钮仍需继续向 Java `BaseDialog` 底部 footer 语义收敛；
+  - Controls 搜索框仍需从手绘输入框继续对齐 Java `TextField` 的焦点、光标与输入行为；
+  - Join/Mods/About/Database/LoadSave/Editor 等子菜单仍有卡片、搜索栏、分区标题、弹窗按钮与 Rust-only 诊断文案可见层差异；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
