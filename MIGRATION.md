@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1017. 前端字体动态字形与核心资源缺项补齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续处理用户指出的“前端视觉表现和字体/语言部分还有很多缺失”，优先补齐会影响所有子菜单文本显示的字体增量字形链。
+- 本轮总体进度更新：约 **97.56%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Join/Host、Load/Save/Editor、Settings/Language/Controls/Data、Database/About/Mods 等页面的 Java 视觉收口。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增外部字体 seed 登记入口，复用到外部 bundle 字符登记；
+    - `DrawText` 真实字体路径对齐 Java `FreeTypeFontParameter.incremental` 语义：遇到当前 atlas 未覆盖、但字体支持的运行时字符时，先把字符加入 seed，再按当前 locale 重建真实 glyph atlas，避免直接退回 `primitive:DrawText` / `?` placeholder；
+    - 保留字体本身不支持字符时的 placeholder fallback，避免错误阻断渲染链；
+    - 新增测试 `desktop_graphics_opengl_backend_draw_text_registers_incremental_real_font_glyphs_like_java`、`desktop_external_font_seed_registration_tracks_korean_bundle_source_characters`、`desktop_menu_graphics_frame_registers_thai_external_bundle_seed_and_refreshes_cache_key`。
+  - `core/assets/version.properties`
+    - 从参考目录原样复制，保留原始字节与上游生成内容；
+  - `core/assets/basepartnames`
+    - 从参考目录原样复制，补齐 Rust 资源树中上游明确存在的 basepart 清单。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_registers_incremental_real_font_glyphs_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop font_seed -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_menu_graphics_frame_registers_thai_external_bundle_seed_and_refreshes_cache_key -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames -- --nocapture`
+- 注意：
+  - 本轮改善的是字体/语言底层缺字路径，不代表所有 UI 子菜单视觉已完全贴近 Java；
+  - 子代理审查仍保留高优缺口：`font_jp` outline override 单独收口、headless/server content icon emoji 语义、MapLocalesDialog 完整编辑 UI、fallback atlas 选择链、以及各子菜单 chrome/scrollpane/footer/弹窗层级对齐。
+
 ## 1016. 前端系统鼠标光标接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，处理 Java `Fonts.loadSystemCursors()` / Scene2D hover 下 `arrow/hand/ibeam` 的可见交互差异。
