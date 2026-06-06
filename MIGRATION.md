@@ -32409,3 +32409,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - LanguageDialog 默认 locale 来源、字体 override 和长语言文本裁剪仍需继续推进；
   - Join、Mods、Database、MapList/MapPlay 等子菜单仍需继续像素级/布局级对齐；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1022. 外部翻译 bundle 加载提示对齐 Java
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.13%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `Vars.loadSettings()` 先尝试 `Core.files.local("bundle")`；
+  - 外部 bundle 成功加载后，Java 在非 headless 下延迟调用 `ui.showInfo(Core.bundle.format("bundle.external", handle.absolutePath()))`；
+  - `bundle.external` 文案来自当前 bundle，并带入外部 bundle 的绝对路径。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_external_bundle_path_for_data_dir(...)` 与 `desktop_readable_external_bundle_path_for_data_dir(...)`，统一 external bundle 路径与可读检测；
+    - 新增 `external_bundle_notice_path` 状态，避免同一路径每帧重复弹提示；
+    - 新增 `sync_external_bundle_loaded_notice_like_java(...)`，检测 `data_dir/bundle` 可读后用 `format_bundle_text("bundle.external", ...)` 写入既有 `last_menu_info_message`；
+    - 在 `menu_graphics_frame_for_surface(...)` 中接入该同步，使提示通过现有 info panel 实际渲染；
+    - 扩展 `desktop_launcher_loads_external_bundle_before_internal_locale_like_java`，覆盖 external bundle 文案覆盖、`bundle.external` 可见提示和同一路径只提示一次。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_loads_external_bundle_before_internal_locale_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_loads_asset_locale_bundles_like_java_vars_load_settings -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - 外部 bundle 文本仍需纳入真实字体 atlas seed，避免自定义翻译出现缺字；
+  - 默认 locale 来源仍需继续向 Java `Locale.getDefault()` 收敛；
+  - 日文字体 override、LanguageDialog 长文本裁剪和子菜单 UI 仍需继续对齐；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
