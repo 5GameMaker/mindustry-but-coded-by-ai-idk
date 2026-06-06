@@ -32359,3 +32359,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings、Mods、Database、MapList/MapPlay 等子菜单仍需继续像素级/布局级对齐；
   - 前端字体/语言表现仍需继续补齐，尤其是默认 locale、语言列表来源、bundle fallback 和启动期字体策略；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1020. Locale BCP47/legacy alias 规范化
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.11%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `Vars.init()` 从 `core/assets/locales` 读取 locale，排序后供 `LanguageDialog` 迭代；
+  - `LanguageDialog.findClosestLocale()` 先尝试 exact locale，再按 `Locale.getDefault().getLanguage()` 兜底；
+  - `LanguageDialog.getDisplayName()` 保留 Java 旧 Indonesian locale alias：`in_ID` → `id_ID`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `settings_normalize_locale_code(...)` 现在先统一 BCP47/平台 locale 分隔符、大小写与 suffix；
+    - legacy `in`/`in-id`/`in_ID` 均归一到 `id_ID`；
+    - 显式识别中文 script/region：`zh-Hans-*`、`zh-CN`、`zh-SG`、`zh-MY` → `zh_CN`；`zh-Hant-*`、`zh-TW`、`zh-HK`、`zh-MO` → `zh_TW`，避免 Windows/BCP47 默认 locale 落入错误 `zh_*` 语言兜底；
+    - 新增 `desktop_launcher_locale_normalization_handles_bcp47_and_legacy_aliases_like_java`，独立覆盖 BCP47 中文、region 大小写和 legacy Indonesian alias。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_locale_normalization_handles_bcp47_and_legacy_aliases_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_options_match_upstream_vars_locales_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_loads_asset_locale_bundles_like_java_vars_load_settings -- --nocapture`
+  - `git diff --check`
+- 已知非本轮阻塞：
+  - `desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell` 在 Data/PlanetData 子页点击路径上仍有既有失败：确认 clear planet 后关闭 PlanetData 时状态仍为 `PlanetData`；该问题独立于 locale normalizer，后续应单独修。
+- 仍未完成：
+  - 默认 locale 来源还需要继续向 Java `Locale.getDefault()` 收敛，尤其 Windows 系统区域与 `LANG` 环境变量不一致时；
+  - 日文字体 override 是否应按 Java 启动期 locale gating 继续审查；
+  - Settings、Join、Mods、Database、MapList/MapPlay 等子菜单仍需继续像素级/布局级对齐；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
