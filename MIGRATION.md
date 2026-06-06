@@ -32820,3 +32820,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - KeybindDialog 行布局、按钮 skin、轴绑定提示与 `getName()` 覆盖面仍需继续审查；
   - Join/LoadSave/About/Database/Editor 等子菜单仍需继续逐项做像素与交互回归；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1039. Settings/Language 默认字体阴影语义收敛
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.30%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/ui/Styles.java` 中 `flatt` / `flatTogglet` / `grayt` 等 TextButton 样式使用 `Fonts.def`，不是 `Fonts.outline`；
+  - `core/src/mindustry/ui/Fonts.java` 的 `Fonts.def` 由 `fontParameter()` 提供 darkGray shadow + offsetY=2，按钮文字应继承默认字体阴影，而不是额外叠一圈 outline；
+  - `SettingsMenuDialog.java` 和 `LanguageDialog.java` 的菜单按钮、语言按钮都走这些默认 TextButton 样式。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Settings 主菜单按钮文字与 icon glyph 去掉额外 `with_outline(true)`，保留 Default/Icon 字体与 integer position，让后端使用 `Fonts.def` 自带阴影语义；
+    - LanguageDialog 语言行、Settings 子窗标题、Controls 分类/绑定行、搜索图标、重绑 prompt 与 tooltip 等高可见文本去掉 Rust 额外描边；
+    - 新增 `desktop_launcher_language_dialog_uses_fonts_def_shadow_not_outline_like_java`，锁定 LanguageDialog 的 `Fonts.def` + 非 outline；
+    - 新增 `desktop_launcher_settings_menu_buttons_use_fonts_def_shadow_not_outline_like_java`，锁定 SettingsMenuDialog 语言按钮 label/icon 不再叠加额外 outline。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_uses_fonts_def_shadow_not_outline_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_menu_buttons_use_fonts_def_shadow_not_outline_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_renders_every_display_name_with_default_font -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+- 仍未完成：
+  - 仍需继续审查其他前端页面里把 `Fonts.def` 错当 `Fonts.outline` 的文本路径，逐页决定是否保留 outline；
+  - Controls 搜索框还需继续向 Java `TextField` 的选区、IME、复制粘贴与完整焦点行为收敛；
+  - Join/LoadSave/About/Database/Editor 等子菜单仍需继续逐项做像素与交互回归；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
