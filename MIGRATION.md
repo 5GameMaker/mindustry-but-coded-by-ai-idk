@@ -32577,3 +32577,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 桌面端 `MapLocalesDialog` UI 壳仍需接入 map tags 的 `locales` JSON 工作副本，并实现 apply/back/dirty/search/filter；
   - Settings/Database/MapPlay/Load/Save 等前端子菜单视觉仍需继续对齐 Java；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1029. DatabaseDialog 搜索栏 TextField 视觉对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.20%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `DatabaseDialog` 构造搜索行时使用 `s.image(Icon.zoom)` 加 `s.field(null, text -> rebuild()).growX()`，空态为 `@players.search`；
+  - 搜索行不是普通 `grayt` 文本按钮壳，输入区应走默认 `TextField` 皮肤；
+  - 聚焦输入时应保留搜索文本、重置滚动，并显示 TextField 焦点/光标状态。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `database_search_field_rect_for_panel(...)`，将 Java 的左侧 `Icon.zoom` 和右侧 TextField 区域分开；
+    - `push_database_route_page(...)` 中搜索栏背景从 `settings_text_button_symbol("grayt", false, false)` 改为 `settings_text_field_background_symbol()`；
+    - 聚焦搜索时绘制 1px 焦点描边与 `settings_text_field_cursor_symbol()` 光标，文本起点改为 TextField 内部 padding；
+    - 扩展 `desktop_launcher_menu_sub_action_routes_to_database_dialog_shell`，断言搜索行不再绘制 `grayt` 壳、会绘制 TextField 背景、聚焦后会绘制 cursor 和焦点边框。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Database 的 grid scrollbar、hover 高亮、locked/banned/patched 叠层、ContentInfoDialog 间距还需继续对齐 Java；
+  - 语言列表仍需进一步从 `core/assets/locales` 进入生产路径，外部 bundle root/locale suffix 语义仍需补齐；
+  - Settings/Language/MapPlay/Load/Save/Mods 等前端子菜单视觉仍需继续逐项对齐 Java；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
