@@ -189,6 +189,51 @@ impl ContentCatalog {
             .find(|weather| weather.name() == name)
     }
 
+    pub fn unlock_content_by_name(&mut self, content_type: ContentType, name: &str) -> bool {
+        match content_type {
+            ContentType::Item => self
+                .item_by_name_mut(name)
+                .map(|item| item.base.unlock())
+                .is_some(),
+            ContentType::Liquid => self
+                .liquid_by_name_mut(name)
+                .map(|liquid| liquid.base.unlock())
+                .is_some(),
+            ContentType::Status => self
+                .status_effect_by_name_mut(name)
+                .map(|status| status.base.unlock())
+                .is_some(),
+            ContentType::Unit => self
+                .unit_by_name_mut(name)
+                .map(|unit| unit.base.unlock())
+                .is_some(),
+            ContentType::Weather => self
+                .weather_by_name_mut(name)
+                .map(|weather| weather.weather_mut().base.unlock())
+                .is_some(),
+            ContentType::Sector => self
+                .sectors
+                .iter_mut()
+                .find(|sector| sector.name == name)
+                .map(|sector| sector.always_unlocked = true)
+                .is_some(),
+            ContentType::Planet => self
+                .planets
+                .iter_mut()
+                .find(|planet| planet.name() == name)
+                .map(|planet| planet.always_unlocked = true)
+                .is_some(),
+            ContentType::Team => self
+                .team_entries
+                .iter_mut()
+                .find(|entry| entry.name() == name)
+                .map(|entry| entry.base.unlock())
+                .is_some(),
+            ContentType::Block => self.blocks.get_by_name(name).is_some(),
+            _ => false,
+        }
+    }
+
     pub fn has_content_errors(&self) -> bool {
         !self.errors.is_empty()
             || self.errors.iter().any(|content| content.base.has_errored())
@@ -621,5 +666,36 @@ mod tests {
         assert!(graphite_tabs.iter().any(|tab| tab == "erekir"));
         assert!(router_tabs.iter().any(|tab| tab == "serpulo"));
         assert!(duct_tabs.iter().any(|tab| tab == "erekir"));
+    }
+
+    #[test]
+    fn unlock_content_by_name_marks_registry_entries_like_java_unlockable_content() {
+        let mut catalog = ContentCatalog::load_base_content();
+
+        assert!(!catalog.unit_by_name("crawler").unwrap().base.unlocked());
+        assert!(catalog.unlock_content_by_name(ContentType::Unit, "crawler"));
+        assert!(catalog.unit_by_name("crawler").unwrap().base.unlocked());
+
+        assert!(!catalog.item_by_name("silicon").unwrap().base.unlocked());
+        assert!(catalog.unlock_content_by_name(ContentType::Item, "silicon"));
+        assert!(catalog.item_by_name("silicon").unwrap().base.unlocked());
+
+        assert!(!catalog.weather_by_name("rain").unwrap().weather().base.unlocked());
+        assert!(catalog.unlock_content_by_name(ContentType::Weather, "rain"));
+        assert!(catalog.weather_by_name("rain").unwrap().weather().base.unlocked());
+
+        assert!(!catalog
+            .sector_by_name("stainedMountains")
+            .unwrap()
+            .always_unlocked);
+        assert!(catalog.unlock_content_by_name(ContentType::Sector, "stainedMountains"));
+        assert!(catalog
+            .sector_by_name("stainedMountains")
+            .unwrap()
+            .always_unlocked);
+
+        assert!(!catalog.planet_by_name("tantros").unwrap().always_unlocked);
+        assert!(catalog.unlock_content_by_name(ContentType::Planet, "tantros"));
+        assert!(catalog.planet_by_name("tantros").unwrap().always_unlocked);
     }
 }
