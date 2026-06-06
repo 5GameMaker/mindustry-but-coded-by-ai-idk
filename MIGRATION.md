@@ -32308,3 +32308,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 日文字体 override 的启动期 locale gating、router locale bundle 级变换仍需继续对齐；
   - Settings、Join、Mods、Database、MapList/MapPlay 等子菜单视觉仍需逐项审查并对齐；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1018. JoinDialog 添加服务器输入框对齐 Java TextField
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.09%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `JoinDialog` 的添加服务器弹窗使用 `add.cont.field(Core.settings.getString("ip"), ...).size(320f, 54f).maxTextLength(100)`；
+  - 该输入框是标准 `TextField`，不是 `grayt` 文本按钮；
+  - `add.buttons.defaults().size(140f, 60f).pad(4f)`，当前 Rust 按钮尺寸已保持该基线。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 将 `load_save_text_field_cursor_rect(...)` 泛化重命名为 `single_line_text_field_cursor_rect(...)`，供 Load/Save 与 Join 共用；
+    - `push_join_add_server_dialog(...)` 中 IP 输入框背景从 `grayt` 改为 Java `defaultField` 背景；
+    - 在 `join_add_server_focused` 时绘制 TextField 聚焦描边与 `defaultField` cursor；
+    - 调整错误提示层级，避免与 cursor 层级重叠；
+    - 扩展 `desktop_launcher_join_route_renders_server_browser_skeleton`，断言添加服务器 IP 输入框使用 `defaultField` 背景并绘制 cursor；
+    - 同步更新 Load/Save 旧断言到泛化 helper 名称。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_save_game_new_dialog_and_load_search_focus_are_stable -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - JoinDialog 顶部按钮行、社区搜索栏、分区标题、server card 与折叠器视觉仍需继续逐项贴近 Java；
+  - Settings、Mods、Database、MapList/MapPlay 等子菜单仍需继续像素级/布局级对齐；
+  - 前端字体/语言表现仍需继续补齐，尤其是默认 locale、语言列表来源和日文字体启动期策略；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
