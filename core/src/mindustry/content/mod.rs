@@ -680,19 +680,33 @@ mod tests {
         assert!(catalog.unlock_content_by_name(ContentType::Item, "silicon"));
         assert!(catalog.item_by_name("silicon").unwrap().base.unlocked());
 
-        assert!(!catalog.weather_by_name("rain").unwrap().weather().base.unlocked());
-        assert!(catalog.unlock_content_by_name(ContentType::Weather, "rain"));
-        assert!(catalog.weather_by_name("rain").unwrap().weather().base.unlocked());
-
         assert!(!catalog
-            .sector_by_name("stainedMountains")
+            .weather_by_name("rain")
             .unwrap()
-            .always_unlocked);
-        assert!(catalog.unlock_content_by_name(ContentType::Sector, "stainedMountains"));
+            .weather()
+            .base
+            .unlocked());
+        assert!(catalog.unlock_content_by_name(ContentType::Weather, "rain"));
         assert!(catalog
-            .sector_by_name("stainedMountains")
+            .weather_by_name("rain")
             .unwrap()
-            .always_unlocked);
+            .weather()
+            .base
+            .unlocked());
+
+        assert!(
+            !catalog
+                .sector_by_name("stainedMountains")
+                .unwrap()
+                .always_unlocked
+        );
+        assert!(catalog.unlock_content_by_name(ContentType::Sector, "stainedMountains"));
+        assert!(
+            catalog
+                .sector_by_name("stainedMountains")
+                .unwrap()
+                .always_unlocked
+        );
 
         assert!(!catalog.planet_by_name("tantros").unwrap().always_unlocked);
         assert!(catalog.unlock_content_by_name(ContentType::Planet, "tantros"));

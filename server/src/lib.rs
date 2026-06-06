@@ -30,7 +30,7 @@ use mindustry_core::mindustry::entities::{
     PuddleLiquidInfo, PuddleTileView, PuddleUpdateEvent, Puddles, ShotMover, UnitCapRules,
     UnitCapTeam, UnitCapType, UnitSpawnAbility, BULLET_CLASS_ID, FIRE_CLASS_ID, PUDDLE_CLASS_ID,
 };
-use mindustry_core::mindustry::game::{vanilla_teams, Trigger};
+use mindustry_core::mindustry::game::{vanilla_teams, TeamRegistry, Trigger};
 use mindustry_core::mindustry::input::{
     drop_item, payload_dropped, picked_build_payload, picked_unit_payload, request_build_payload,
     request_drop_payload, request_item, request_unit_payload, take_items, transfer_inventory,
@@ -57,6 +57,10 @@ use mindustry_core::mindustry::net::{
     UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
 };
 use mindustry_core::mindustry::r#type::{PayloadKey, UnitType};
+use mindustry_core::mindustry::ui::{
+    parse_upstream_icon_properties,
+    populate_base_team_emojis_from_headless_content_icons_like_java, UpstreamContentIcon,
+};
 use mindustry_core::mindustry::vars::{
     AppContext, RuntimeMode, ITEM_TRANSFER_RANGE, MAX_PLAYER_PREVIEW_PLANS, TILE_SIZE,
 };
@@ -266,6 +270,7 @@ pub struct ServerLauncher {
     pub control: ServerControl,
     pub runtime: GameRuntime,
     pub content_loader: ContentLoader,
+    pub team_registry: TeamRegistry,
     pub mod_resources: ServerModResources,
     pub last_runtime_effect_report: Option<EffectBlockFrameBatchReport>,
     pub last_runtime_item_transport_report: Option<GameRuntimeOwnedItemTransportFrameReport>,
@@ -336,11 +341,19 @@ impl ServerLauncher {
         let mut runtime = GameRuntime::default();
         runtime.set_network_context(GameRuntimeNetworkContext::server());
 
+        let headless_content_icons = headless_content_icons_like_java();
+        let mut team_registry = vanilla_teams();
+        populate_base_team_emojis_from_headless_content_icons_like_java(
+            &mut team_registry,
+            &headless_content_icons,
+        );
+
         Self {
             context,
             control: ServerControl::new(args.clone()),
             runtime,
             content_loader: ContentLoader::create_base_content_or_panic(),
+            team_registry,
             mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
@@ -1800,7 +1813,6 @@ impl ServerLauncher {
 
     fn tick_server_unit_spawn_abilities(&mut self, delta_ticks: f32) -> io::Result<usize> {
         let parent_ids: Vec<i32> = self.server_units.keys().copied().collect();
-        let team_registry = vanilla_teams();
         let mut spawned = 0;
 
         for parent_id in parent_ids {
@@ -1823,7 +1835,7 @@ impl ServerLauncher {
                 .teams
                 .get_or_null(team.0)
                 .map_or(0, |data| data.unit_cap);
-            let ignore_unit_cap = team_registry.get(team.0 as i32).ignore_unit_cap;
+            let ignore_unit_cap = self.team_registry.get(team.0 as i32).ignore_unit_cap;
             let mut spawn_targets: BTreeMap<String, (ContentId, bool, bool, i32)> = BTreeMap::new();
 
             for descriptor in &parent_snapshot.type_info.abilities {
@@ -5002,6 +5014,11 @@ fn has_playable_smoke_arg(args: &[String]) -> bool {
         .any(|arg| arg == "--playable-smoke" || arg == "--smoke")
 }
 
+fn headless_content_icons_like_java() -> Vec<UpstreamContentIcon> {
+    parse_upstream_icon_properties(include_str!("../../core/assets/icons/icons.properties"))
+        .expect("core assets/icons/icons.properties must parse like Java")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -5308,6 +5325,30 @@ mod tests {
         assert!(launcher.net_server.is_active());
         assert_eq!(launcher.network_error, None);
         launcher.close_network();
+    }
+
+    #[test]
+    fn server_launcher_populates_base_team_emojis_from_headless_content_icons_like_java() {
+        let launcher = ServerLauncher::new(Vec::new());
+
+        let base_team_emojis = launcher
+            .team_registry
+            .base_teams()
+            .iter()
+            .map(|team| (team.name.as_str(), team.emoji.as_str()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            base_team_emojis,
+            vec![
+                ("derelict", "\u{f77e}"),
+                ("sharded", "\u{f77c}"),
+                ("crux", "\u{f77d}"),
+                ("malis", "\u{f6a9}"),
+                ("green", ""),
+                ("blue", ""),
+            ]
+        );
     }
 
     #[test]
@@ -6452,6 +6493,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            team_registry: super::vanilla_teams(),
             mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
@@ -6566,6 +6608,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            team_registry: super::vanilla_teams(),
             mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
@@ -8957,6 +9000,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            team_registry: super::vanilla_teams(),
             mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
@@ -9144,6 +9188,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            team_registry: super::vanilla_teams(),
             mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
@@ -9268,6 +9313,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            team_registry: super::vanilla_teams(),
             mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
@@ -9404,6 +9450,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            team_registry: super::vanilla_teams(),
             mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
@@ -9559,6 +9606,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            team_registry: super::vanilla_teams(),
             mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,

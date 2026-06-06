@@ -1445,7 +1445,8 @@ impl DesktopNativeOpenGlRuntime {
     }
 
     fn set_cursor_hint(&self, hint: mindustry_desktop::DesktopCursorHint) {
-        self.window.set_cursor(desktop_native_cursor_icon_for_hint(hint));
+        self.window
+            .set_cursor(desktop_native_cursor_icon_for_hint(hint));
     }
 
     fn request_redraw(&self) {
@@ -3510,7 +3511,9 @@ impl<'a> DesktopNativeOpenGlApp<'a> {
             graphics_renderer,
             &mut self.effect_renderer,
         );
-        graphics_renderer.runtime.set_cursor_hint(result.cursor_hint);
+        graphics_renderer
+            .runtime
+            .set_cursor_hint(result.cursor_hint);
         self.sync_graphics_settings_to_native_runtime();
         if desktop_native_trace_enabled() {
             desktop_native_trace(format!(

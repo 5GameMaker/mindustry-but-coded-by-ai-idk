@@ -1585,7 +1585,12 @@ fn upstream_properties_is_whitespace(character: char) -> bool {
 }
 
 fn upstream_properties_line_continues(line: &str) -> bool {
-    line.chars().rev().take_while(|character| *character == '\\').count() % 2 == 1
+    line.chars()
+        .rev()
+        .take_while(|character| *character == '\\')
+        .count()
+        % 2
+        == 1
 }
 
 fn upstream_properties_logical_lines(source: &str) -> Vec<String> {
@@ -1711,10 +1716,8 @@ fn upstream_properties_split_key_value(line: &str) -> Option<(String, String)> {
     if whitespace_separator && value_start < line.len() {
         if let Some(character) = line[value_start..].chars().next() {
             if character == '=' || character == ':' {
-                value_start = upstream_properties_skip_whitespace(
-                    line,
-                    value_start + character.len_utf8(),
-                );
+                value_start =
+                    upstream_properties_skip_whitespace(line, value_start + character.len_utf8());
             }
         }
     }
@@ -1736,8 +1739,7 @@ fn upstream_parse_properties_source(
     values
 }
 
-fn upstream_properties_source_cache(
-) -> &'static std::sync::Mutex<
+fn upstream_properties_source_cache() -> &'static std::sync::Mutex<
     std::collections::BTreeMap<
         (usize, usize),
         &'static std::collections::BTreeMap<String, &'static str>,
@@ -1871,7 +1873,9 @@ pub fn upstream_menu_bundle_entries_for_locale(
 
 pub fn upstream_menu_bundle_value_for_locale(locale: &str, key: &str) -> Option<&'static str> {
     upstream_global_bundle_value(key)
-        .or_else(|| upstream_bundle_value_from_entries(upstream_menu_bundle_entries_for_locale(locale), key))
+        .or_else(|| {
+            upstream_bundle_value_from_entries(upstream_menu_bundle_entries_for_locale(locale), key)
+        })
         .or_else(|| {
             upstream_bundle_value_from_properties_source(
                 upstream_menu_bundle_properties_source_for_locale(locale),
@@ -1882,7 +1886,10 @@ pub fn upstream_menu_bundle_value_for_locale(locale: &str, key: &str) -> Option<
 }
 
 fn upstream_is_router_locale(locale: &str) -> bool {
-    locale.trim().replace('-', "_").eq_ignore_ascii_case("router")
+    locale
+        .trim()
+        .replace('-', "_")
+        .eq_ignore_ascii_case("router")
 }
 
 fn upstream_strip_color_markup(value: &str) -> String {
@@ -1944,7 +1951,8 @@ pub use bar::{
 pub use dialogs::BaseDialog;
 pub use displayable::{DisplayTable, Displayable};
 pub use fonts::{
-    parse_upstream_icon_properties, populate_base_team_emojis_from_headless_content_icons_like_java,
+    parse_upstream_icon_properties,
+    populate_base_team_emojis_from_headless_content_icons_like_java,
     upstream_content_icon_headless_registry_like_java, upstream_font_asset,
     upstream_font_asset_by_name, upstream_font_assets, upstream_font_source_paths,
     upstream_ui_icon_glyph, upstream_ui_icon_glyph_char, upstream_ui_icon_glyph_string,

@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1023. 前端字体/语言视觉细节与 headless 图标接线
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续处理“前端视觉表现和字体/语言部分还有很多缺失”，以本地 Java 参考为准，不上网检索。
+- 本轮总体进度更新：约 **97.65%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Settings/Controls、Join/Host、Load/Save、Database/About/Mods 等子菜单的 Java 视觉与交互收口。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - Join 已保存服务器卡片右上角 `upOpen/downOpen/refresh/pencil/trash` 操作图标改回 Java `Styles.emptyi` 语义：白色 Icon 字体、无 Rust-only outline；
+    - Controls/Keybind 页的 per-row `@settings.rebind`、`@settings.resetKey` 和末尾 `@settings.reset` 改用 Java `Styles.grayt`，正文/分类标题继续保持普通 Default 字体；
+    - Planet chooser 的 `@back` 关闭按钮改用 Settings/BaseDialog 210×64 底部居中 rect，pane 布局和点击命中不再复用 46px `schematic_info_button_rect`；
+    - 补强 Join、Controls、Settings/Planet chooser 的视觉/命中断言。
+  - `server/src/lib.rs`
+    - server/headless 启动链路接入 core headless content icon helper，读取 `icons/icons.properties` 并填充 base team emoji；
+    - unit spawn ability tick 改用 `ServerLauncher` 保存的 `TeamRegistry`，不再临时构造未填 emoji 的 `vanilla_teams()`。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_uses_java_like_grid_slots_for_local_and_saved_servers -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_keybind_categories_are_real_scroll_rows_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_dialog_backdrops_cover_viewport_like_java_basedialog -- --nocapture`
+  - `cargo test -p mindustry-server server_launcher_populates_base_team_emojis_from_headless_content_icons_like_java -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - Tech 字体 `Fonts.tech.getData().down *= 1.5f` 已由 `DESKTOP_TECH_FONT_DOWN_SCALE` 与现有测试覆盖，本轮未重复修改。
+  - LanguageDialog 的 locale 表和显示名当前基本对齐；下一步视觉收益更高的是继续收 Settings/Data/Controls、Join/Host、Load/Save、Database/About/Mods 的 chrome、按钮状态、滚动窗和子弹窗层级。
+
 ## 1022. Settings 子按钮 flatt 额外描边清理
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉收口，处理通过通用 Settings helper 渲染的 `Styles.flatt` 子按钮仍叠加 Rust-only cyan/blue 描边的问题。

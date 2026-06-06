@@ -658,10 +658,8 @@ mod tests {
     #[test]
     fn base_dialog_title_separator_uses_java_title_table_pad() {
         let panel = RenderRect::new(140.0, 160.0, 520.0, 220.0);
-        let layout = DialogShellLayout::from_stage_and_panel(
-            RenderRect::new(0.0, 0.0, 800.0, 600.0),
-            panel,
-        );
+        let layout =
+            DialogShellLayout::from_stage_and_panel(RenderRect::new(0.0, 0.0, 800.0, 600.0), panel);
 
         assert_eq!(
             layout.accent_line_rect,
