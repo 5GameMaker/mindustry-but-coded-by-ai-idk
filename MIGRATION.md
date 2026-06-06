@@ -32554,3 +32554,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Load/Save 的按钮皮肤、搜索栏焦点细节和保存过渡仍需继续与 Java 逐项核对；
   - MapLocalesDialog、Settings/Database/MapPlay 等前端子菜单视觉仍需继续对齐 Java；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1028. MapLocales 编辑器可变操作接入 core 模型
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.19%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `MapInfoDialog` 的 `@editor.locales` 按钮打开 `MapLocalesDialog`；
+  - `MapLocalesDialog` 编辑工作副本后，`@editor.apply` / back 保存路径会写回 `editor.tags.put("locales", JsonIO.write(locales))` 并同步 `state.mapLocales`；
+  - Rust 后续桌面 UI 壳需要能对 `MapLocales` 工作副本执行 set/remove locale/property，并稳定写回同样的 nested JSON shape。
+- 本轮主改动：
+  - `core/src/mindustry/type/map_locales.rs`
+    - 新增 `put_property(...)`，供 MapLocalesDialog 新增/编辑 locale property；
+    - 新增 `remove_property(...)` 与 `remove_locale(...)`，供删除属性/删除 locale；
+    - 新增 `locale_codes()` 与 `property_count_for(...)`，供 UI 列表、计数和 dirty 状态展示；
+    - 新增 `map_locales_editor_mutations_persist_java_json_shape`，验证编辑后 JSON 仍是 Java `JsonIO.write(locales)` 兼容的 nested locale/property 对象，并可 round-trip。
+- 已验证：
+  - `cargo test -p mindustry-core map_locales -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - 桌面端 `MapInfoDialog` 仍需补 `@editor.locales` 入口；
+  - 桌面端 `MapLocalesDialog` UI 壳仍需接入 map tags 的 `locales` JSON 工作副本，并实现 apply/back/dirty/search/filter；
+  - Settings/Database/MapPlay/Load/Save 等前端子菜单视觉仍需继续对齐 Java；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。

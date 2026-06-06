@@ -33,6 +33,36 @@ impl MapLocales {
         Self { locales: values }
     }
 
+    pub fn put_property(
+        &mut self,
+        locale: impl Into<String>,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) {
+        self.locales
+            .entry(locale.into())
+            .or_default()
+            .insert(key.into(), value.into());
+    }
+
+    pub fn remove_property(&mut self, locale: &str, key: &str) -> Option<String> {
+        self.locales
+            .get_mut(locale)
+            .and_then(|values| values.remove(key))
+    }
+
+    pub fn remove_locale(&mut self, locale: &str) -> Option<BTreeMap<String, String>> {
+        self.locales.remove(locale)
+    }
+
+    pub fn locale_codes(&self) -> Vec<String> {
+        self.locales.keys().cloned().collect()
+    }
+
+    pub fn property_count_for(&self, locale: &str) -> usize {
+        self.locales.get(locale).map(BTreeMap::len).unwrap_or(0)
+    }
+
     pub fn to_json_string(&self) -> String {
         let mut out = String::from("{");
         for (locale_index, (locale, values)) in self.locales.iter().enumerate() {
@@ -407,6 +437,43 @@ mod tests {
 
         assert_eq!(read, locales);
         assert_eq!(MapLocales::from_json_map(map), locales);
+    }
+
+    #[test]
+    fn map_locales_editor_mutations_persist_java_json_shape() {
+        let mut locales = sample_locales();
+
+        locales.put_property("fr", "name", "Secteur @");
+        locales.put_property("en", "desc", "Updated");
+        assert_eq!(locales.property_count_for("fr"), 1);
+        assert_eq!(
+            locales.locale_codes(),
+            vec!["en".to_string(), "fr".to_string(), "zh".to_string()],
+            "MapLocalesDialog should expose deterministic locale rows while editing"
+        );
+        assert_eq!(
+            locales.remove_property("zh", "quote"),
+            Some("\"引号\" 与 \\".to_string())
+        );
+        assert_eq!(locales.property_count_for("zh"), 1);
+        assert!(locales.remove_property("zh", "missing").is_none());
+        let removed = locales
+            .remove_locale("zh")
+            .expect("delete locale should return its property map for undo/confirmation UI");
+        assert_eq!(removed["name"], "区域@");
+        assert_eq!(locales.property_count_for("zh"), 0);
+
+        let json = locales.to_json_string();
+        assert_eq!(
+            json,
+            "{\"en\":{\"desc\":\"Updated\",\"name\":\"Sector @\"},\"fr\":{\"name\":\"Secteur @\"}}",
+            "MapLocalesDialog apply should write the same nested locale/property JSON shape as Java JsonIO.write(locales)"
+        );
+        assert_eq!(
+            MapLocales::from_json_str(&json).unwrap(),
+            locales,
+            "edited locale JSON must round-trip before desktop UI writes it into editor.tags"
+        );
     }
 
     #[test]
