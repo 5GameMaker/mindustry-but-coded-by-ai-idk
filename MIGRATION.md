@@ -32652,6 +32652,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 前端主菜单 submenu 锚点/安全区、Mods/About/Discord/Campaign/Join 等视觉差异仍需继续逐项对齐 Java；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
 
+## 1033. desktop `font_jp` 日文 locale override 语义
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.24%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/ui/Fonts.java` 的 `loadExtraFonts()` 仅在 `Locale.getDefault().getLanguage().equals("ja")` 时加载 `fonts/font_jp.woff`；
+  - Java 对 `Fonts.def.data` / `Fonts.outline.data` 调用的是 `setOverride(...)`，语义是 override，不是普通 fallback。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopRealFontAtlasSource` 增加 `override_existing`，atlas 构建在 override source 中允许同 glyph 覆盖既有 glyph；
+    - 新增 `desktop_default_real_font_atlas_sources_for_locale(...)` 与 `desktop_default_real_font_atlas_for_locale(...)`，英文/非日文 locale 不再默认加入 `font_jp`；
+    - `DesktopFontGlyphUploadPlan` 与 cache key 增加 locale，`DesktopLauncher::font_glyph_upload_plan()` 使用当前 `settings_locale`；
+    - OpenGL backend frame step 传播 `font_locale`，真实 executor 的文本 quad 生成与 font atlas binding 使用同一 locale；
+    - 将旧 fallback 测试改为 `desktop_graphics_font_atlas_loads_font_jp_only_for_japanese_locale_and_overrides`，并补充 locale 切换会 dirty font upload cache 的回归断言。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas -- --nocapture`
+  - `cargo test -p mindustry-desktop font_glyph_upload -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - core 侧 `.properties` parser 仍需进一步补齐 Java `PropertiesUtils` 语义，避免 bundle 文案与字体 seed 漏字；
+  - Settings/Language/Controls/Data 的底部 footer 返回按钮、Controls 真 TextField 行为、语言 default 写回 settings 仍需继续对齐；
+  - Join/Mods/About/Database 等子菜单仍有卡片、搜索栏、分区标题与 Rust-only 诊断文案可见层差异；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1032. desktop 外部 bundle family 与整包选择语义
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
