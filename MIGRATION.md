@@ -19,6 +19,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1084. MapLocalesDialog 当前 locale 接入游戏 `settings.locale`
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.50%**，仍未达到完整可玩；当前仍优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/type/MapLocales.java`：`currentLocale()` 先读取 `settings.locale`，只有 `default` 时才回退 `Locale.getDefault().getLanguage()`；
+  - `core/src/mindustry/editor/MapLocalesDialog.java`：构造时 `selectedLocale = MapLocales.currentLocale()`，因此地图本地化编辑器应服从游戏设置语言，而不是裸读系统环境语言。
+- 本轮主改动：
+  - `core/src/mindustry/ui/dialogs/map_locales_dialog.rs`
+    - 新增 `MapLocalesDialog::new_for_game_setting(locale)`，通过 `MapLocales::current_locale_from_game_setting(locale)` 初始化 `selected_locale`；
+    - 新增 `constructor_for_game_setting_uses_settings_locale_like_java_current_locale`，保护 settings locale 优先级。
+  - `desktop/src/lib.rs`
+    - `map_editor_locales_dialog_from_map(...)` 改为接收 `settings_locale`，打开编辑器地图本地化 overlay 时传入 `self.settings_locale`；
+    - 桌面测试显式构造 `LANG=en_US.UTF-8`、`settings_locale=fr` 的冲突场景，断言 MapLocalesDialog 选中并渲染法语地图本地化值。
+  - `README.md`
+    - 迁移进度更新到 **98.50%**。
+- 已验证：
+  - `cargo test -p mindustry-core constructor_for_game_setting_uses_settings_locale_like_java_current_locale -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_info_locales_button_opens_map_locales_dialog_like_java -- --nocapture`
+  - `cargo test -p mindustry-core map_locales_current_locale_prefers_game_settings_locale_over_env_like_java -- --nocapture`
+  - `cargo test -p mindustry-core map_locales_dialog -- --nocapture`
+  - `cargo test -p mindustry-desktop editor_map_locales_search_filter -- --nocapture`
+  - `cargo test -p mindustry-desktop back_key_closes_locales -- --nocapture`
+- 仍未完成：
+  - 下一步继续补 MapLocales locale 显示名：Java 用 `loc.getDisplayName(Core.bundle.getLocale())`，Rust 仍需把 MapLocales 专用显示名 resolver 从 LanguageDialog 静态表里拆出来；
+  - `settings.locale=default` 的加载生命周期仍需按 Java `Vars.loadSettings()` 修正，不能在 load/import 路径提前吞掉 sentinel；
+  - 前端所有子菜单、完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1083. 日文 `font_jp_outline` 对齐 Java outline border 元数据
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

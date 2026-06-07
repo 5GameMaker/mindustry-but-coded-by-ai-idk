@@ -142,6 +142,12 @@ impl MapLocalesDialog {
         }
     }
 
+    pub fn new_for_game_setting(locale: &str) -> Self {
+        let mut dialog = Self::new();
+        dialog.selected_locale = MapLocales::current_locale_from_game_setting(locale);
+        dialog
+    }
+
     /// Mirrors Java `show(MapLocales locales)`: load data and snapshot the
     /// saved state. The row-building helpers materialize the selected locale on
     /// demand, matching `buildTables()`.
@@ -668,6 +674,19 @@ mod tests {
             dialog.property_view_search_message_key(),
             "@locales.searchlocale"
         );
+    }
+
+    #[test]
+    fn constructor_for_game_setting_uses_settings_locale_like_java_current_locale() {
+        let dialog = MapLocalesDialog::new_for_game_setting("zh_CN");
+
+        assert_eq!(
+            dialog.selected_locale, "zh_CN",
+            "Java MapLocalesDialog selectedLocale comes from MapLocales.currentLocale(), which reads settings.locale before the OS locale"
+        );
+        assert_eq!(dialog.base.title, "@editor.locales");
+        assert!(dialog.saved);
+        assert!(dialog.apply_to_all);
     }
 
     #[test]
