@@ -33186,3 +33186,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings/Language 仍需继续逐项核对实际截图中的字号、阴影、UI scale 与按钮皮肤细节；
   - MapLocalesDialog、地图本地化属性编辑、外部 bundle 更复杂 fallback 与其它子菜单语言链路仍需继续迁移；
   - 前端完整还原、完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1043. LoadDialog 空槽诊断文案收口
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.75%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `LoadDialog.rebuild()` 在没有任何可见存档时只执行 `slots.add("@save.none")`；
+  - `SaveDialog` 继承 `LoadDialog` 的列表与空态，新增按钮是 `@save.new`，没有目录路径或 `.msav` 诊断文案。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `load_game_slot_lines()` 在 `load_game_slots.is_empty()` 时从 Rust-only 的 `empty: no valid .msav files found` 与 `dir: ...` 改为只输出 `empty: @save.none`；
+    - 在 `desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog` 中补空 save dir 的 LoadDialog/SaveDialog 断言，锁定 route-shell 不再暴露 `.msav` 或 `dir:` 诊断。
+- 已验证：
+  - `cargo test -p mindustry-desktop load_game_route_toggles_mode_filters -- --nocapture`
+  - `cargo test -p mindustry-desktop load_game -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - `load_game_slot_lines()` 中 `save slots:`、`search:`、`hidden modes:` 等 shell 摘要仍需继续按 Java 可见 UI 收口；
+  - Load/Save pending status 里的 `| slot ...` / `| name ...` 细节仍需拆下一个小闭环处理；
+  - Mods/Join 的 Rust-only cache/scanned 诊断、其它子菜单视觉与完整可玩性仍需继续推进，不能宣告目标完成。
