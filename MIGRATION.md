@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1027. ModsDialog 空态与 Browser 空结果视觉对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，专门对照 `ModsDialog.java` 收口 Mods 主列表空态与 Mods Browser 过滤空结果。
+- 本轮总体进度更新：约 **97.70%**，仍未达到完整可玩，不能宣告目标完成；后续继续优先 UI 所有子菜单、字体/语言 bundle 链路、可玩性 runtime 与 Java↔Rust 联机兼容。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - Mods 主列表无 mod 时改为 Java `cont.table(Styles.black6, t -> t.add("@mods.none")).height(80f)` 对应表现：`black6` 背景、80 高度、只显示 `@mods.none`；
+    - 移除主列表空态里 Rust-only 的 `@mod.import / @mods.browser` hint 行，并同步 route-shell 文本不再输出 `hint:`；
+    - Mods Browser 搜索无匹配条目时保留列表 pane 但不再绘制 `@mods.none` / `@none.found` / `Search: ...` 等 Rust-only 空态提示，更接近 Java `rebuildBrowser()` 清空后不加条目的行为；
+    - 删除已不再需要的 `mods_browser_empty_state_texts()`。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_empty_state_uses_java_black6_row -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_pending_menu_routes_use_upstream_dialog_structure -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries -- --nocapture`
+- 注意：
+  - 本轮只收 Mods 空态/Browser 空结果视觉，不代表 Mods 全部完成；
+  - 子代理只读审查确认字体/语言仍有较大缺口：后续优先处理 mod `bundles/*.properties` 并入 bundle lookup、mod bundle 文本进入字体 seed、JP/CJK outline 渲染收口。
+
 ## 1026. DiscordDialog 三按钮尺寸与顺序对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端子菜单视觉收口，处理 `DiscordDialog.java` 中 `buttons.defaults().size(170f, 50)` 与 Rust 旧 route-shell 按钮尺寸不一致的问题。
