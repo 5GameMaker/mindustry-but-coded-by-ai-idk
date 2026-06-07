@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1077. Desktop Controls 分类 divider 改为独立滚动项
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 Controls 前端视觉细节收口，把 desktop 渲染模型同步到上一轮 core KeybindDialog 的分类 divider 语义。
+- 本轮总体进度更新：约 **98.39%**，仍未达到完整可玩，不能宣告目标完成；后续继续字体/语言、所有子菜单与可玩主链路。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/KeybindDialog.java:69-75` 分类标题后调用 `table.image().color(Color.gray).fillX().height(3).pad(6).colspan(4).padTop(0).padBottom(10).row()`；
+  - 因此 divider 是分类标题后的独立 widget 行，不应继续画在分类文字同一行。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopSettingsKeybindListItem` 增加 `CategoryDivider`；
+    - `settings_keybind_visible_items()` 在每个分类标题后插入独立 divider item；
+    - Controls 渲染与 hit-test 跳过 divider action，`move_x` 交互行从 index 1 移到 index 2；
+    - 滚动断言改为从可见 item 模型寻找首个 Binding，避免把 item offset 错当 raw keybind spec offset；
+    - 扩展 categories 测试，断言 5 个分类标题与 5 个独立 divider 行。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_keybind_categories_are_real_scroll_rows_like_java -- --nocapture`
+
 ## 1076. MainMenu 桌面 submenu black6 层级与 fade 回归
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮吸收并行 worker 的 MainMenu 回归，继续锁第一屏前端视觉行为。
