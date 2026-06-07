@@ -19,6 +19,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1036. LoadingFragment 主文案跟随显式文本
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端 loading 视觉/语言缺口，对照 `LoadingFragment.show(text)` / `setText(text)` 的中央 `nameLabel` 行为。
+- 本轮总体进度更新：约 **97.89%**，仍未达到完整可玩，不能宣告目标完成；后续继续 LoadingFragment 字体回退、progress bar 百分比/颜色、tooltip chrome 与所有子菜单视觉。
+- 主改动：
+  - `core/src/mindustry/graphics/load_renderer.rs`
+    - `LoadRenderCommand::LoadingFragment.label` 不再无条件固定为 `@loading`；
+    - 当 `LoadFrameInput.prompt` 明确存在时，中央 label 跟随该文本（例如 `@saving`），对应 Java `show(text)` / `setText(text)`；
+    - 没有显式 prompt 时仍保留 Java `show()` 默认 `@loading`；
+    - 补回归测试，验证显式 prompt 会出现在 LoadingFragment 中央 label 层。
+- 已验证：
+  - `cargo test -p mindustry-core loading_fragment -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 本轮只修主文案映射；bar 文案仍待从 stage 名改向 Java 百分比语义，loading 字体缺字回退仍待接入。
+
 ## 1035. Settings 文本按钮字体颜色接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉/字体缺口，把 TextButtonStyle 字体颜色元数据接入 desktop Settings 共享文本按钮渲染入口。

@@ -186,6 +186,7 @@ impl LoadRendererState {
             .prompt
             .clone()
             .unwrap_or_else(|| input.stage.default_prompt().to_string());
+        let fragment_label_text = input.prompt.clone().unwrap_or_else(|| "@loading".to_string());
         let completion_text = input
             .completion
             .clone()
@@ -246,7 +247,7 @@ impl LoadRendererState {
             overlay: LoadRect::new(0.0, 0.0, width, height),
             top_warning: fragment_layout.top_warning,
             bottom_warning: fragment_layout.bottom_warning,
-            label: "@loading".to_string(),
+            label: fragment_label_text,
             label_center: (
                 center_x,
                 fragment_layout.label.y + fragment_layout.label.height * 0.5,
@@ -1184,6 +1185,37 @@ mod tests {
                 >= 4,
             "LoadingFragment should render the two WarningBar stripe/edge groups"
         );
+    }
+
+    #[test]
+    fn loading_fragment_label_follows_explicit_prompt_like_java_show_text() {
+        let mut state = LoadRendererState::default();
+        let mut input = LoadFrameInput::new(1280.0, 720.0, 1.0, 0.0, LoadStage::LoadingAssets, 0.2);
+        input.prompt = Some("@saving".to_string());
+        let plan = state.build_plan(input);
+
+        let label = plan
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                LoadRenderCommand::LoadingFragment { label, .. } => Some(label.as_str()),
+                _ => None,
+            })
+            .expect("load plan should include LoadingFragment");
+        assert_eq!(
+            label, "@saving",
+            "Java LoadingFragment.show(text)/setText(text) updates the central nameLabel"
+        );
+
+        let pass = plan
+            .to_render_pass()
+            .expect("load plan with explicit prompt should render");
+        assert!(pass.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, layer, .. }
+                if text == "@saving"
+                    && (*layer - LOAD_FRAGMENT_LABEL_LAYER).abs() < f32::EPSILON
+        )));
     }
 
     #[test]
