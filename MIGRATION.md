@@ -19,6 +19,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1033. Settings 控件文字颜色接入 Java Styles 元数据
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉/字体缺口，把上一轮补齐的 core style 元数据接入 Settings 子菜单实际渲染。
+- 本轮总体进度更新：约 **97.86%**，仍未达到完整可玩，不能宣告目标完成；后续继续清理更多子菜单硬编码颜色、tooltip chrome、loading 文案/字体回退，以及完整可玩性 runtime。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - Settings CheckBox 文本颜色改为读取 `defaultCheck.fontColor`；
+    - Settings Slider 标签和值文本改为读取 `outlineLabel.fontColor`，对应 Java `SettingsMenuDialog.SliderSetting` 中 `Styles.outlineLabel`；
+    - Settings TextField/TextArea 正文与光标颜色改为读取 `defaultField.fontColor`；
+    - Settings Text/AreaText 的 label 改为读取 `defaultLabel.fontColor`；
+    - 新增/扩展渲染断言，确认实际 `RenderCommand::DrawText` 输出颜色来自 Java style 元数据 helper。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_dynamic_text_and_area_prefs_render_edit_and_reset_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_checkbox_layout_uses_upstream_left_check_box -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 本轮只接 Settings preference widget 的文字/光标颜色；按钮文字颜色、tooltip 样式、更多 dialog label/textfield/checkbox 仍需要继续统一到 core Styles 元数据。
+
 ## 1032. Styles 字体颜色元数据补齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉/字体缺口，对照 `Styles.java` 补齐 Scene2D style 的字体与颜色元数据。
