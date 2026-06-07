@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1103. 移除 Settings TextField/TextArea 的 Rust-only 边框
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.69%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/SettingsMenuDialog.java`：`TextSetting` 使用 Scene2D `TextField`，`AreaTextSetting` 使用 `TextArea`；
+  - `core/src/mindustry/ui/Styles.java`：`defaultField` / `areaField` 由 background、selection、cursor、font 组成，不在字段外额外画 Rust 风格蓝灰 `StrokeRect`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 移除 `DesktopSettingsPrefKind::Text` 渲染里的字段 `StrokeRect`；
+    - 移除 `DesktopSettingsPrefKind::AreaText` 渲染里的字段 `StrokeRect`；
+    - 扩展 `desktop_launcher_settings_dynamic_text_and_area_prefs_render_edit_and_reset_like_java`，断言 TextField/TextArea 仍绘制 style background，同时字段 rect 不再出现 `StrokeRect` 边框。
+  - `README.md`
+    - 迁移进度更新到 **98.69%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib dynamic_text_and_area_prefs_render_edit --no-default-features`
+  - `cargo test -p mindustry-desktop --lib settings_text --no-default-features`
+- 仍未完成：
+  - TextField/AreaText 的 selection、cursor、focus tint 与输入行为还需继续逐项按 Java Scene2D style 对齐；
+  - Settings 子对话框/confirm 的其它 Rust-only 描边仍需继续清理；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1102. LanguageDialog 滚动支持子行像素偏移
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
