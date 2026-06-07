@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1091. MapLocalesDialog 删除最后 locale 保留 raw settings locale
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.57%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java:190-195`：删除 locale 后，如果 map 里仍有 locale，就选第一个剩余 key；如果已删空，则 `selectedLocale = Core.settings.getString("locale")`，保留原始 settings locale 字符串。
+- 本轮主改动：
+  - `core/src/mindustry/ui/dialogs/map_locales_dialog.rs`
+    - `MapLocalesDialog` 新增 `settings_locale`，把原始游戏设置语言和运行时解析后的 `selected_locale` 分开保存；
+    - `new_for_game_setting(locale)` 保留 raw `settings_locale`，仍用 `MapLocales::current_locale_from_game_setting(locale)` 初始化当前选中 locale；
+    - `delete_locale(...)` 在删空后回退 raw `settings_locale`，因此 `default` 哨兵会像 Java 一样被 materialize 成空 locale，而不是被提前解析成系统语言；
+    - 新增 `delete_last_locale_falls_back_to_raw_settings_locale_like_java`。
+  - `README.md`
+    - 迁移进度更新到 **98.57%**。
+- 已验证：
+  - `cargo test -p mindustry-core --lib map_locales_dialog`
+  - `cargo test -p mindustry-desktop --lib map_locales --no-default-features`
+- 仍未完成：
+  - MapLocalesDialog 的 property edit/delete/add 弹窗、addLocaleDialog 候选列表、apply/save/import/export 仍需继续按 Java 接入；
+  - 其他 UI locale 的全量 Java display-name 覆盖、外部/mod bundle fallback 与字体 atlas merge 语义仍需继续补；
+  - 前端所有子菜单、完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1090. MapLocales 非英文 UI locale 显示名对齐 Java `Locale.getDisplayName`
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

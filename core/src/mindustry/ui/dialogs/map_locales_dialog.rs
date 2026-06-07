@@ -108,6 +108,7 @@ pub struct MapLocalesDialog {
     pub locales: MapLocales,
     pub last_saved: MapLocales,
     pub selected_locale: String,
+    pub settings_locale: String,
     pub saved: bool,
     pub apply_to_all: bool,
     pub collapsed: bool,
@@ -131,6 +132,7 @@ impl MapLocalesDialog {
             locales: MapLocales::new(),
             last_saved: MapLocales::new(),
             selected_locale: MapLocales::current_locale(),
+            settings_locale: MapLocales::current_locale(),
             saved: true,
             apply_to_all: true,
             collapsed: false,
@@ -144,6 +146,7 @@ impl MapLocalesDialog {
 
     pub fn new_for_game_setting(locale: &str) -> Self {
         let mut dialog = Self::new();
+        dialog.settings_locale = locale.to_string();
         dialog.selected_locale = MapLocales::current_locale_from_game_setting(locale);
         dialog
     }
@@ -430,7 +433,7 @@ impl MapLocalesDialog {
                 .locale_codes()
                 .into_iter()
                 .next()
-                .unwrap_or_else(MapLocales::current_locale);
+                .unwrap_or_else(|| self.settings_locale.clone());
             self.ensure_selected_locale_present();
         }
 
@@ -666,6 +669,7 @@ mod tests {
         assert_eq!(dialog.base.title, "@editor.locales");
         assert_eq!(dialog.base.style, Default::default());
         assert_eq!(dialog.selected_locale, MapLocales::current_locale());
+        assert_eq!(dialog.settings_locale, MapLocales::current_locale());
         assert!(dialog.saved);
         assert!(dialog.apply_to_all);
         assert!(!dialog.collapsed);
@@ -684,9 +688,51 @@ mod tests {
             dialog.selected_locale, "zh_CN",
             "Java MapLocalesDialog selectedLocale comes from MapLocales.currentLocale(), which reads settings.locale before the OS locale"
         );
+        assert_eq!(
+            dialog.settings_locale, "zh_CN",
+            "Java delete-locale fallback uses the raw Core.settings locale value, so Rust must keep it separate from selectedLocale"
+        );
         assert_eq!(dialog.base.title, "@editor.locales");
         assert!(dialog.saved);
         assert!(dialog.apply_to_all);
+    }
+
+    #[test]
+    fn delete_last_locale_falls_back_to_raw_settings_locale_like_java() {
+        let mut dialog = MapLocalesDialog::new_for_game_setting("default");
+        let mut locales = MapLocales::new();
+        locales.put_property("en", "name", "Only Locale");
+        dialog.show(locales);
+        dialog.selected_locale = "en".into();
+
+        let removed = dialog
+            .delete_locale("en")
+            .expect("locale should be removed");
+
+        assert_eq!(removed["name"], "Only Locale");
+        assert_eq!(
+            dialog.selected_locale, "default",
+            "Java MapLocalesDialog delete path falls back to Core.settings.getString(\"locale\"), preserving the raw default sentinel"
+        );
+        assert!(
+            dialog.locales.locales.contains_key("default"),
+            "buildTables() immediately materializes the raw fallback selectedLocale as an empty bundle"
+        );
+        assert!(dialog.is_dirty());
+
+        let mut non_empty = MapLocalesDialog::new_for_game_setting("default");
+        let mut locales = MapLocales::new();
+        locales.put_property("en", "name", "English");
+        locales.put_property("fr", "name", "French");
+        non_empty.show(locales);
+        non_empty.selected_locale = "fr".into();
+
+        non_empty.delete_locale("fr");
+        assert_eq!(
+            non_empty.selected_locale, "en",
+            "Java selects the first remaining locale instead of the raw settings fallback while the map still has locales"
+        );
+        assert!(!non_empty.locales.locales.contains_key("default"));
     }
 
     #[test]
