@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1085. MapLocalesDialog locale 显示名拆出 Java `getDisplayName` 语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.51%**，仍未达到完整可玩；当前仍优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java`：locale 行显示使用 `loc.getDisplayName(Core.bundle.getLocale())`，不是 LanguageDialog 自己的 native-name `locale.getDisplayName(locale)`；
+  - 本轮用本机 Java 17 对 35 个上游 locale + `router` 打印 `Locale.getDisplayName(Locale.ENGLISH)`，作为英文 UI 下的可复现映射基线。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `MAP_LOCALES_ENGLISH_DISPLAY_NAMES` 与 `map_locales_display_name_for_code(code, ui_locale)`；
+    - 英文 UI 下 MapLocalesDialog 行显示 `French`、`Chinese (China)` 等 Java 英文显示名，不再复用 LanguageDialog 的 `Français`、`简体中文` native-name 表；
+    - MapLocalesDialog 的命中检测与实际渲染都改用专用 resolver，LanguageDialog 的 `settings_language_display_name_for_code` 保持不变；
+    - 新增/强化测试，断言 resolver 与渲染文本均使用 MapLocales 专用显示名。
+  - `README.md`
+    - 迁移进度更新到 **98.51%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_map_locales_display_name_uses_current_ui_locale_not_language_dialog_native_name -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_locales_search_filter_and_row_selection_match_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_options_match_upstream_vars_locales_like_java -- --nocapture`
+- 仍未完成：
+  - MapLocalesDialog 非英文 UI locale 的显示名仍需继续扩展完整 Java `Locale.getDisplayName(Core.bundle.getLocale())` 覆盖；
+  - `settings.locale=default` 的加载生命周期仍需按 Java `Vars.loadSettings()` 修正，不能在 load/import 路径提前吞掉 sentinel；
+  - 前端所有子菜单、完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1084. MapLocalesDialog 当前 locale 接入游戏 `settings.locale`
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
