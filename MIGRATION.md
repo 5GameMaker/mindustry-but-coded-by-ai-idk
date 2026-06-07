@@ -19,6 +19,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1037. LoadingFragment 百分比与 UTF-8 locale 查找收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉/字体/语言缺口，优先处理 LoadingFragment 和 bundle 乱码。
+- 本轮总体进度更新：约 **97.92%**，仍未达到完整可玩，不能宣告目标完成；后续继续 LoadingFragment tech/default 字体回退、label 颜色状态、TreeStyle、菜单 locale-aware 生产路径与更多子菜单视觉。
+- 主要改动：
+  - `core/src/mindustry/graphics/load_renderer.rs`
+    - `LoadTheme::default()` 的加载 accent/bar 配色改为读取 `Pal::ACCENT` / `Pal::BAR` 元数据，不再在加载器里硬编码蓝色数组；
+    - `ProgressBar.label` 改为 Java `LoadingFragment.setProgress` 风格整数百分比（如 `42%` / `25%`），不再显示 `assets/content` 阶段词；
+    - Boot 阶段默认 prompt 改为 `@loading`，保持 bundle key 路径可解析，fallback plan 同步使用该默认值；
+    - 补测试锁定 Pal 配色、Boot 默认 `@loading`、百分比 progress label 和 fallback 文本。
+  - `core/src/mindustry/ui/mod.rs`
+    - 非英文 locale 的菜单文本查找改为优先官方 UTF-8 `bundle_*.properties`，再走英文 fallback；
+    - `upstream_menu_bundle_entries_for_locale(...)` 不再对 `zh_CN/zh_TW` 暴露历史生成的乱码静态表，避免 UI 文本和字体 seed 命中 mojibake；
+    - `upstream_menu_bundle_raw_texts_for_locale(...)` 移除非英文旧静态表值，保留 locale properties + English fallback 的 Java I18NBundle 字体 seed 语义；
+    - 新增 UTF-8 locale 回归测试，锁定 `zh_CN`、`zh_TW`、`ja`、`ru` 不再返回乱码；旧乱码期望测试标为 ignored。
+  - `desktop/src/lib.rs`
+    - Settings preference description tooltip 接入统一 `DesktopTooltipChrome`；
+    - tooltip 背景改用 Java `Styles.black6` 对应 drawable，边界限制使用 Java tooltip margin `4f`；
+    - tooltip 文本颜色、边框颜色、字号和 margin 集中到 chrome 元数据，减少分散硬编码。
+- 已验证：
+  - `cargo test -p mindustry-core upstream_menu_bundle_value_uses_utf8_locale_properties_before_generated_entries_like_java -- --nocapture`
+  - `cargo test -p mindustry-core upstream_menu_bundle -- --nocapture`
+  - `cargo test -p mindustry-core load_renderer::tests -- --nocapture`
+  - `cargo test -p mindustry-desktop tooltip -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - PowerShell 默认显示 UTF-8 文档会出现假乱码，读取 README/MIGRATION/源码文案时优先用 UTF-8。
+  - `cargo fmt --check` 在当前超大 `ui/mod.rs` 上曾触发 rustfmt 内存分配失败，本轮已手动按 rustfmt diff 修正修改点，并用 `git diff --check` 兜底空白错误。
+  - 只读审查确认 `core/src/mindustry/graphics/menu_renderer.rs` 的生产菜单文本仍偏英文 fallback，下一轮应优先把 `MenuButtonPlan` 接到 locale-aware bundle lookup。
+
 ## 1036. LoadingFragment 主文案跟随显式文本
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端 loading 视觉/语言缺口，对照 `LoadingFragment.show(text)` / `setText(text)` 的中央 `nameLabel` 行为。

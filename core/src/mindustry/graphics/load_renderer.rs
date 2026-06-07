@@ -5,6 +5,7 @@
 //! stage selection, progress bar, prompt text, logo/planet/background layers,
 //! plus error and completion overlays.
 
+use super::Pal;
 use super::{RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderRect, RenderTextAlign};
 use crate::mindustry::ui::{WarningBar, WarningBarDrawCommand, WarningBarLayout};
 
@@ -118,8 +119,8 @@ impl Default for LoadTheme {
             planet_name: "serpulo".to_string(),
             background_rgba: [0.04, 0.04, 0.06, 1.0],
             glow_rgba: [0.20, 0.42, 0.83, 0.18],
-            accent_rgba: [0.30, 0.70, 1.00, 1.0],
-            accent_alt_rgba: [0.10, 0.18, 0.28, 1.0],
+            accent_rgba: [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, Pal::ACCENT.a],
+            accent_alt_rgba: [Pal::BAR.r, Pal::BAR.g, Pal::BAR.b, Pal::BAR.a],
             error_rgba: [0.95, 0.26, 0.22, 1.0],
             success_rgba: [0.32, 0.84, 0.50, 1.0],
             show_logo: true,
@@ -185,8 +186,11 @@ impl LoadRendererState {
         let prompt_text = input
             .prompt
             .clone()
-            .unwrap_or_else(|| input.stage.default_prompt().to_string());
-        let fragment_label_text = input.prompt.clone().unwrap_or_else(|| "@loading".to_string());
+            .unwrap_or_else(|| default_prompt_text(input.stage));
+        let fragment_label_text = input
+            .prompt
+            .clone()
+            .unwrap_or_else(|| "@loading".to_string());
         let completion_text = input
             .completion
             .clone()
@@ -260,7 +264,7 @@ impl LoadRendererState {
             commands.push(LoadRenderCommand::ProgressBar {
                 rect: LoadRect::new(bar_x, bar_y, bar_width, bar_height),
                 progress,
-                label: input.stage.label().to_string(),
+                label: progress_percent_text(progress),
                 fill_color: self.theme.accent_rgba,
                 track_color: self.theme.accent_alt_rgba,
             });
@@ -522,7 +526,7 @@ impl LoadFramePlan {
                     stage_text
                 },
                 if prompt_text.is_empty() {
-                    stage.default_prompt().to_string()
+                    default_prompt_text(stage)
                 } else {
                     prompt_text
                 }
@@ -1044,6 +1048,18 @@ fn prompt_or(value: &str, fallback: &str) -> String {
     }
 }
 
+fn default_prompt_text(stage: LoadStage) -> String {
+    if stage == LoadStage::Boot {
+        "@loading".to_string()
+    } else {
+        stage.default_prompt().to_string()
+    }
+}
+
+fn progress_percent_text(progress: f32) -> String {
+    format!("{}%", (clamp_progress(progress) * 100.0) as i32)
+}
+
 fn clamp_progress(progress: f32) -> f32 {
     if progress.is_finite() {
         progress.clamp(0.0, 1.0)
@@ -1074,6 +1090,39 @@ mod tests {
     }
 
     #[test]
+    fn load_theme_default_uses_pal_metadata_for_accent_and_bar_colors() {
+        let theme = LoadTheme::default();
+
+        assert_eq!(
+            theme.accent_rgba,
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, Pal::ACCENT.a]
+        );
+        assert_eq!(
+            theme.accent_alt_rgba,
+            [Pal::BAR.r, Pal::BAR.g, Pal::BAR.b, Pal::BAR.a]
+        );
+    }
+
+    #[test]
+    fn boot_stage_prompt_defaults_to_bundle_key_for_loading_fragment_text() {
+        let mut state = LoadRendererState::default();
+        let plan = state.build_plan(LoadFrameInput::new(
+            1280.0,
+            720.0,
+            1.0,
+            0.0,
+            LoadStage::Boot,
+            0.0,
+        ));
+
+        assert_eq!(plan.prompt_text, "@loading");
+        assert!(plan.commands.iter().any(|command| matches!(
+            command,
+            LoadRenderCommand::PromptText { text, .. } if text == "@loading"
+        )));
+    }
+
+    #[test]
     fn loading_plan_includes_background_logo_planet_progress_and_prompt() {
         let mut state = LoadRendererState::default();
         let plan = state.build_plan(LoadFrameInput {
@@ -1095,6 +1144,20 @@ mod tests {
         assert_eq!(plan.stage_text, "content  42%");
         assert_eq!(plan.prompt_text, "loading content");
         assert_eq!(plan.commands.len(), 9);
+
+        match &plan.commands[6] {
+            LoadRenderCommand::ProgressBar {
+                label,
+                fill_color,
+                track_color,
+                ..
+            } => {
+                assert_eq!(label, "42%");
+                assert_eq!(*fill_color, state.theme.accent_rgba);
+                assert_eq!(*track_color, state.theme.accent_alt_rgba);
+            }
+            other => panic!("expected ProgressBar command, got {other:?}"),
+        }
 
         assert!(matches!(plan.commands[0], LoadRenderCommand::Clear { .. }));
         assert!(matches!(
@@ -1427,7 +1490,7 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(texts, vec!["boot | booting"]);
+        assert_eq!(texts, vec!["boot | @loading"]);
 
         assert!(plan.into_render_pass().is_some());
     }
@@ -1470,7 +1533,7 @@ mod tests {
                 LoadRenderCommand::ProgressBar {
                     rect: LoadRect::new(20.0, 140.0, 160.0, 18.0),
                     progress: 0.25,
-                    label: "assets".to_string(),
+                    label: "25%".to_string(),
                     fill_color: [0.30, 0.70, 1.00, 1.0],
                     track_color: [0.10, 0.18, 0.28, 1.0],
                 },
@@ -1537,7 +1600,7 @@ mod tests {
                 >= 4
         );
         for expected in [
-            "assets",
+            "25%",
             "error  25%",
             "loading assets",
             "asset loader crashed",

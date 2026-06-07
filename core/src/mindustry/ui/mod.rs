@@ -1852,9 +1852,6 @@ pub fn upstream_menu_bundle_raw_texts_for_locale(locale: &str) -> Vec<&'static s
         UPSTREAM_GLOBAL_BUNDLE_PROPERTIES_SOURCE,
         &mut values,
     );
-    for (_, value) in upstream_menu_bundle_entries_for_locale(locale) {
-        values.insert(*value);
-    }
     upstream_collect_bundle_values_from_properties_source(
         upstream_menu_bundle_properties_source_for_locale(locale),
         &mut values,
@@ -1875,17 +1872,7 @@ pub fn upstream_menu_bundle_entries_for_locale(
     locale: &str,
 ) -> &'static [(&'static str, &'static str)] {
     let locale = locale.trim().replace('-', "_");
-    if locale.eq_ignore_ascii_case("zh_TW")
-        || locale.eq_ignore_ascii_case("zh_HK")
-        || locale.eq_ignore_ascii_case("zh_Hant")
-    {
-        UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES
-    } else if locale.eq_ignore_ascii_case("zh_CN")
-        || locale.eq_ignore_ascii_case("zh")
-        || locale.eq_ignore_ascii_case("zh_Hans")
-    {
-        UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES
-    } else if locale.is_empty() || locale.eq_ignore_ascii_case("en") {
+    if locale.is_empty() || locale.eq_ignore_ascii_case("en") {
         UPSTREAM_MENU_BUNDLE_ENTRIES
     } else {
         &[]
@@ -1893,15 +1880,11 @@ pub fn upstream_menu_bundle_entries_for_locale(
 }
 
 pub fn upstream_menu_bundle_value_for_locale(locale: &str, key: &str) -> Option<&'static str> {
+    let locale_properties = upstream_menu_bundle_properties_source_for_locale(locale);
     upstream_global_bundle_value(key)
+        .or_else(|| upstream_bundle_value_from_properties_source(locale_properties, key))
         .or_else(|| {
             upstream_bundle_value_from_entries(upstream_menu_bundle_entries_for_locale(locale), key)
-        })
-        .or_else(|| {
-            upstream_bundle_value_from_properties_source(
-                upstream_menu_bundle_properties_source_for_locale(locale),
-                key,
-            )
         })
         .or_else(|| upstream_bundle_en_value(key))
 }
@@ -2292,6 +2275,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "deprecated generated mojibake expectations; UTF-8 locale properties are covered below"]
     fn upstream_menu_bundle_value_uses_full_locale_properties_before_english_entries_like_java() {
         for (locale, key, expected) in [
             ("fr", "play", "Jouer"),
@@ -2319,6 +2303,65 @@ mod tests {
     }
 
     #[test]
+    fn upstream_menu_bundle_value_uses_utf8_locale_properties_before_generated_entries_like_java() {
+        for (locale, key) in [
+            ("fr", "play"),
+            ("ja", "database"),
+            ("ru", "settings.language"),
+            ("pt-BR", "play"),
+            ("id_ID", "database"),
+            ("in_ID", "settings.language"),
+        ] {
+            let expected = upstream_bundle_value_from_properties_source(
+                upstream_menu_bundle_properties_source_for_locale(locale),
+                key,
+            );
+            assert_eq!(
+                upstream_menu_bundle_value_for_locale(locale, key),
+                expected,
+                "Java I18NBundle resolves {locale}:{key} from UTF-8 locale properties before English fallback entries"
+            );
+        }
+
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "play"),
+            Some("开始游戏")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "joingame"),
+            Some("多人連線")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("ja", "database"),
+            Some("コアデータベース")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("ru", "settings.language"),
+            Some("Язык")
+        );
+
+        let ru_import_fail = upstream_bundle_value_from_properties_source(
+            upstream_menu_bundle_properties_source_for_locale("ru"),
+            "save.import.fail",
+        )
+        .unwrap()
+        .replace("{0}", "broken.msav");
+        assert_eq!(
+            upstream_menu_bundle_format_for_locale("ru", "save.import.fail", &["broken.msav"])
+                .as_deref(),
+            Some(ru_import_fail.as_str())
+        );
+
+        let zh_cn_raw_texts = upstream_menu_bundle_raw_texts_for_locale("zh_CN");
+        assert!(zh_cn_raw_texts.contains(&"开始游戏"));
+        assert!(
+            !zh_cn_raw_texts.iter().any(|text| text.contains("寮€")),
+            "font atlas seeding must not include the deprecated mojibake generated Chinese menu entries"
+        );
+        assert!(zh_cn_raw_texts.contains(&"Restart required to apply changes."));
+    }
+
+    #[test]
     fn upstream_menu_bundle_router_locale_replaces_non_whitespace_like_java() {
         let play = upstream_menu_bundle_value_for_locale_owned("router", "play")
             .expect("router locale should resolve normal bundle keys");
@@ -2334,6 +2377,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "deprecated generated mojibake expectations; UTF-8 locale properties are covered above"]
     fn upstream_menu_bundle_locale_entries_cover_chinese_menu_fragment_buttons() {
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "play"),
