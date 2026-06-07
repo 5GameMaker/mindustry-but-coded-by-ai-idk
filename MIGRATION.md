@@ -33715,3 +33715,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings/Language/Data/Controls 子弹窗仍需继续对照 Java 的 window-empty 皮肤、按钮行、ScrollPane 滚动条、checkbox/slider/text field hover/pressed 细节；
   - 字体 fallback、CJK/多语言 atlas 动态补字、UI 文本 markup 渲染和所有子菜单视觉仍需继续收口；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1056. Settings 子 BaseDialog 切换 window-empty 皮肤
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **98.01%**，仍未达到完整可玩；继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- Java 对照证据：
+  - `BaseDialog` 默认样式走 `Styles.defaultDialog`，背景为 `Tex.windowEmpty` / `window-empty.9`；
+  - 标题、stage 背景、accent line 都属于 BaseDialog shell，不应由 Settings 子弹窗各自手写 `pane`、stroke 或独立几何。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_child_dialog()` 改为调用 `BaseDialog::shell_render_commands(DialogShellLayout::from_stage_and_panel(...))`；
+    - Settings 子弹窗背景从手写 `pane` + 蓝灰 `StrokeRect` 收敛为 Java `window-empty.9`；
+    - `settings_child_dialog_title_accent_rect()` 改为复用 `DialogShellLayout` 的 BaseDialog accent line 几何；
+    - 更新 Controls 与 Settings 子弹窗测试，断言 `whiteui` accent drawable 与 `window-empty.9` panel。
+  - `README.md`
+    - 迁移进度更新到 **98.01%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_dialogs_render_basedialog_accent_line_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+- 仍未完成：
+  - Settings/Language/Data/Controls 的内容区行高、按钮状态、ScrollPane knob、输入框焦点和移动端差异仍需继续按 Java 对齐；
+  - 字体 fallback、CJK/多语言 atlas 动态补字、UI 文本 markup 渲染和所有子菜单视觉仍需继续收口；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
