@@ -19,6 +19,21 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1078. FullTextDialog 锁定默认 dialog shell 与居中正文语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮吸收并行 worker 的共享对话框小闭环，继续收紧前端弹窗基础视觉。
+- 本轮总体进度更新：约 **98.40%**，仍未达到完整可玩，不能宣告目标完成；后续继续字体/语言、所有子菜单与可玩主链路。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/FullTextDialog.java:7-18` 使用 `super("")`、`addCloseButton()`，`show(title, text)` 会替换标题和正文；
+  - 正文 `cont.margin(15f).add(text).width(500f).wrap().center()`，因此模型必须保留 wrap/center；
+  - 默认 `BaseDialog` shell 仍应包含 black9 stage、`window-empty.9` panel、居中 title 与 3f accent separator。
+- 主改动：
+  - `core/src/mindustry/ui/dialogs/full_text_dialog.rs`
+    - 新增 `full_text_dialog_show_replaces_title_and_text_and_centers_body_like_java`；
+    - 锁定标题/正文替换、pause/show 行为、wrap/center 状态、默认 dialog shell 四类 render command。
+- 已验证：
+  - `cargo test -p mindustry-core full_text_dialog -- --nocapture`
+
 ## 1077. Desktop Controls 分类 divider 改为独立滚动项
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 Controls 前端视觉细节收口，把 desktop 渲染模型同步到上一轮 core KeybindDialog 的分类 divider 语义。
