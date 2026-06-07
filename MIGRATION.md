@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1059. 补齐 Settings 动态图标与 router 内容图标字形
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体和语言收口，重点处理 Settings 动态分类 region icon 以及 Java `Fonts.registerIcon()` 会把 content icon 写入 `Fonts.def/outline` 的缺口。
+- 本轮总体进度更新：约 **98.21%**，仍未达到完整可玩，不能宣告目标完成；后续继续所有子菜单的 Java Scene2D 视觉表现、字体语言覆盖、可玩性与 Java↔Rust 联机兼容。
+- Java 对照证据：
+  - `SettingsMenuDialog.addCategory(name, icon, builder)` 的自定义 region icon 应是 `Image(TextureRegionDrawable).scaling(Scaling.fit)`，不能把 region 名当 icon font 文本画出来；
+  - `Fonts.loadContentIcons()` 读取 `icons/icons.properties`，`registerIcon()` 会把 UI page 上的 content icon 作为 glyph 写入 `Fonts.def` / `Fonts.outline`；
+  - `icons/icons.properties` 中 `63630=router|block-router-ui`，`Vars.loadSettings()` 的 `router` locale 会把普通 bundle 非空白字符替换成 `Iconc.blockRouter`。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - Settings 主菜单内置 `Icon.*` 继续走 icon font，自定义动态分类 region（如 `whiteui`）改走 `DrawSprite`，并新增 `settings_main_menu_button_icon_rect(...)` 统一图标落点；
+    - LanguageDialog 测试补强：所有可见非 ASCII 语言显示名必须在真实 Default font atlas 中有字形；
+    - 真实字体 atlas 构建链路新增 content icon bitmap glyph 注入：从 `icons/icons.properties` 读取 registry，按 Java `Scaling.fit` 语义把 `sprites/ui/<atlas>.png` 图标缩放写入 runtime font atlas，并让 cache key 包含 content icon registry；
+    - router locale 测试收紧为 `Iconc.blockRouter` 必须是 Default atlas 中非零尺寸 bitmap glyph，避免空占位误判。
+  - `README.md`
+    - 迁移进度更新到 **98.21%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_router_locale_keeps_java_language_easter_egg -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_dynamic_categories_join_main_menu_model -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_main_page_renders_upstream_menu_buttons -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_renders_every_display_name_with_default_font -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_covers_language_dialog_display_names_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_seed_scans_upstream_bundle_texts_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_default_uses_real_font_atlas_not_placeholder -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 全量 `mindustry-desktop` 测试不能用默认并发方式当作本轮结论，多个历史测试会互相修改环境变量/全局 cache；本轮只采用逐条定向测试结果。
+  - 后续继续优先 Host/Join/Settings/Language/Database/Mods/Load/Save/Editor 等前端子菜单的像素级 Java 对齐，尤其是字体、语言、icon、modal 遮罩、滚动和按钮状态。
+
 ## 1057. Host/Join 颜色按钮改回 Java ImageButton
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉对齐，处理 HostDialog 和 JoinDialog 的玩家颜色按钮仍是 Rust-only `FillRect + StrokeRect` 的问题。
