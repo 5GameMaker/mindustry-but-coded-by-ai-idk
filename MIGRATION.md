@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1097. KeybindDialog 列表顶部 spacer 对齐 Java
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.63%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/KeybindDialog.java:60-64`：`rebuildBinds()` 一开始执行 `table.add().height(10); table.row();`，即 ScrollPane 内容顶部先留 10f 空白，再渲染第一个分类行。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `SETTINGS_KEYBIND_TOP_SPACER_HEIGHT = 10.0`；
+    - `settings_keybind_row_rect(...)` 的顶部计算加入该 spacer，使视觉 row 与 hit-test/rebind/reset button rect 共享同一偏移；
+    - 新增 `desktop_launcher_settings_keybind_has_java_top_spacer_before_first_category`，断言第一个分类行不会贴住 ScrollPane 顶边，且顶部分类/空白区域不暴露伪 rebind 命中目标。
+  - `README.md`
+    - 迁移进度更新到 **98.63%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_settings_keybind_has_java_top_spacer_before_first_category --no-default-features`
+  - `cargo test -p mindustry-desktop --lib settings_keybind --no-default-features`
+- 仍未完成：
+  - KeybindDialog 仍需继续细抠像素滚动、重绑轴二段式弹窗、移动端输入差异和更多按钮 pressed/disabled 状态；
+  - Settings/Language/Data/Controls 的其它内容区细节、字体动态补字、router locale 和所有子菜单视觉仍需继续逐项对齐；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1096. LanguageDialog 显示名接入真实 OpenGL 字体字形闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
