@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1088. 非 Windows 默认 locale 探测区分 POSIX system locale 与 fallback
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.54%**，仍未达到完整可玩；当前仍优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/Vars.java` / `LanguageDialog.java`：默认语言来源应先等价于 `Locale.getDefault()`，再进入 closest-locale 逻辑；
+  - POSIX 环境下 Java 默认 Locale 主要来自 locale 类别，而不是 `LANGUAGE`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_system_default_locale_code_from_posix_environment(...)`；
+    - 非 Windows `desktop_system_default_locale_code_like_java()` 改为按 `LC_ALL` → `LC_MESSAGES` → `LANG` 探测 system locale；
+    - `LANGUAGE` 不再冒充 system `Locale.getDefault()`，仍保留在后续 environment fallback 里；
+    - 新增 `desktop_launcher_non_windows_system_locale_probe_uses_posix_locale_vars_like_java`。
+  - `README.md`
+    - 迁移进度更新到 **98.54%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_non_windows_system_locale_probe_uses_posix_locale_vars_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_locale_prefers_system_locale_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_language_default_locale_keeps_default_sentinel_like_java -- --nocapture`
+- 仍未完成：
+  - MapLocalesDialog 非英文 UI locale 的显示名仍需继续扩展完整 Java `Locale.getDisplayName(Core.bundle.getLocale())` 覆盖；
+  - 前端所有子菜单、完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1087. MapLocales `getProperty` / `getFormatted` fallback 语义拆分
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
