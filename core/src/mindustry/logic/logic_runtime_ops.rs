@@ -1,3 +1,4 @@
+use crate::mindustry::ui::format_icon_tokens_like_java;
 use crate::mindustry::world::meta::BlockFlag;
 
 use std::collections::BTreeMap;
@@ -1116,7 +1117,12 @@ pub fn exec_flush_message_runtime(
         return;
     }
 
-    let text = exec.text_buffer.clone();
+    let mut text = format_icon_tokens_like_java(&exec.text_buffer);
+    if let Some(key) = text.strip_prefix('@') {
+        if let Some(localized) = exec.map_locales.get(key).cloned() {
+            text = localized;
+        }
+    }
     if type_ == MessageType::Mission {
         exec.rules.mission = text.clone();
     } else {
@@ -1215,6 +1221,49 @@ where
     }
 
     best.map(|(name, _)| name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flush_message_formats_icons_and_preserves_non_tokens_like_java() {
+        let mut exec = LogicExecutor::new();
+        exec.map_locales
+            .insert("mission".into(), "mission :play:".into());
+        exec.text_buffer = "hello :play: keep :missing: and 127.0.0.1:6567".into();
+
+        let mut out_success = LVar::new("ok");
+        exec_flush_message_runtime(
+            &mut exec,
+            MessageType::Announce,
+            &LVar::new("duration"),
+            &mut out_success,
+        );
+
+        assert_eq!(out_success.value(), LVarValue::Number(1.0));
+        assert_eq!(
+            exec.message_events,
+            vec![LogicMessageEvent {
+                type_: MessageType::Announce,
+                text: format_icon_tokens_like_java(
+                    "hello :play: keep :missing: and 127.0.0.1:6567"
+                ),
+                duration: 0.0,
+            }]
+        );
+        assert!(exec.text_buffer.is_empty());
+
+        exec.text_buffer = "@mission".into();
+        exec_flush_message_runtime(
+            &mut exec,
+            MessageType::Mission,
+            &LVar::new("duration"),
+            &mut out_success,
+        );
+        assert_eq!(exec.rules.mission, "mission :play:");
+    }
 }
 
 fn find_closest_ore(

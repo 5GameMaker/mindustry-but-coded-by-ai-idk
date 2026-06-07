@@ -5,6 +5,7 @@
 //! usable by server/network code while the full client renderer is migrated.
 
 use crate::mindustry::logic::{double_bits_to_rgba, LMarkerControl, LOGIC_TILE_SIZE};
+use crate::mindustry::ui::format_icon_tokens_like_java;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1287,9 +1288,9 @@ pub fn fetch_marker_text(
     mobile: bool,
 ) -> String {
     let Some(key) = text.strip_prefix('@') else {
-        return text.to_string();
+        return format_icon_tokens_like_java(text);
     };
-    if mobile {
+    let localized = if mobile {
         map_locales
             .get(&format!("{key}.mobile"))
             .or_else(|| map_locales.get(key))
@@ -1300,7 +1301,8 @@ pub fn fetch_marker_text(
             .get(key)
             .cloned()
             .unwrap_or_else(|| key.to_string())
-    }
+    };
+    format_icon_tokens_like_java(&localized)
 }
 
 fn control_common(common: &mut MarkerCommon, type_: LMarkerControl, p1: f64) {
@@ -1558,5 +1560,27 @@ mod tests {
         assert_eq!(quad.vertices[13], 64.0);
         assert_eq!(quad.vertices[15], 0.25);
         assert_eq!(quad.vertices[16], 0.25);
+    }
+
+    #[test]
+    fn fetch_marker_text_formats_localized_and_literal_text_like_java() {
+        let mut map_locales = BTreeMap::new();
+        map_locales.insert(
+            "objective".into(),
+            "tap :play: keep :missing: and 127.0.0.1:6567".into(),
+        );
+        map_locales.insert("objective.mobile".into(), "mobile :play:".into());
+
+        let desktop = fetch_marker_text("@objective", &map_locales, false);
+        let play = format_icon_tokens_like_java(":play:");
+        assert!(desktop.starts_with(&format!("tap {play}")));
+        assert!(desktop.contains(":missing:"));
+        assert!(desktop.contains("127.0.0.1:6567"));
+
+        let mobile = fetch_marker_text("@objective", &map_locales, true);
+        assert_eq!(mobile, format!("mobile {play}"));
+
+        let literal = fetch_marker_text("server 127.0.0.1:6567", &map_locales, false);
+        assert_eq!(literal, "server 127.0.0.1:6567");
     }
 }

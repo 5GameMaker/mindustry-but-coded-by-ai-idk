@@ -41,6 +41,7 @@ use crate::mindustry::net::{
     UnitTetherBlockSpawnedCallPacket, UpdateMarkerCallPacket, UpdateMarkerTextCallPacket,
     UpdateMarkerTextureCallPacket,
 };
+use crate::mindustry::ui::format_icon_tokens_like_java;
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 use crate::mindustry::world::blocks::defense::{
     auto_door_remote_toggle_valid, auto_door_set_open_plan,
@@ -2827,12 +2828,14 @@ impl NetClient {
                     }
                     PacketKind::SetHudTextCallPacket(ui_packet) => {
                         state.record_client_ui_packet(&packet);
-                        state.last_hud_text = Some(ui_packet.message.clone());
+                        state.last_hud_text =
+                            Some(format_icon_tokens_like_java(&ui_packet.message));
                         (false, false)
                     }
                     PacketKind::SetHudTextReliableCallPacket(ui_packet) => {
                         state.record_client_ui_packet(&packet);
-                        state.last_hud_text = Some(ui_packet.0.message.clone());
+                        state.last_hud_text =
+                            Some(format_icon_tokens_like_java(&ui_packet.0.message));
                         (false, false)
                     }
                     PacketKind::HideHudTextCallPacket(_) => {
@@ -3697,22 +3700,22 @@ mod tests {
         RemoveWorldLabelCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
         RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
         SendMessageCallPacket, SendMessageCallPacket2, SetCameraPositionCallPacket,
-        SetFlagCallPacket, SetFloorCallPacket, SetHudTextCallPacket, SetItemCallPacket,
-        SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, SetMapAreaCallPacket,
-        SetObjectivesCallPacket, SetOverlayCallPacket, SetPlayerTeamEditorCallPacket,
-        SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetTeamCallPacket,
-        SetTeamsCallPacket, SetTileBlocksCallPacket, SetTileCallPacket, SetTileFloorsCallPacket,
-        SetTileItemsCallPacket, SetTileLiquidsCallPacket, SetTileOverlaysCallPacket,
-        SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
-        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, SyncVariableCallPacket,
-        TakeItemsCallPacket, TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket,
-        TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
-        TransferItemToCallPacket, TransferItemToUnitCallPacket,
-        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-        UnitDeathCallPacket, UnitDestroyCallPacket, UnitEnteredPayloadCallPacket,
-        UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket, UpdateGameOverCallPacket,
-        UpdateMarkerCallPacket, UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket,
-        WarningToastCallPacket, WorldDataBeginCallPacket,
+        SetFlagCallPacket, SetFloorCallPacket, SetHudTextCallPacket, SetHudTextReliableCallPacket,
+        SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket,
+        SetMapAreaCallPacket, SetObjectivesCallPacket, SetOverlayCallPacket,
+        SetPlayerTeamEditorCallPacket, SetPositionCallPacket, SetRuleCallPacket,
+        SetRulesCallPacket, SetTeamCallPacket, SetTeamsCallPacket, SetTileBlocksCallPacket,
+        SetTileCallPacket, SetTileFloorsCallPacket, SetTileItemsCallPacket,
+        SetTileLiquidsCallPacket, SetTileOverlaysCallPacket, SetUnitCommandCallPacket,
+        SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket,
+        StreamBegin, StreamChunk, Streamable, SyncVariableCallPacket, TakeItemsCallPacket,
+        TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket,
+        TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
+        TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
+        UnitControlCallPacket, UnitDeathCallPacket, UnitDestroyCallPacket,
+        UnitEnteredPayloadCallPacket, UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
+        UpdateGameOverCallPacket, UpdateMarkerCallPacket, UpdateMarkerTextCallPacket,
+        UpdateMarkerTextureCallPacket, WarningToastCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
@@ -3944,6 +3947,47 @@ mod tests {
             Some("https://example.invalid")
         );
         assert_eq!(state.last_clipboard_text.as_deref(), Some("copy me"));
+    }
+
+    #[test]
+    fn update_formats_hud_icon_tokens_like_java_ui_format_icons() {
+        let client = NetClient::default();
+        let play = crate::mindustry::ui::format_icon_tokens_like_java(":play:");
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::SetHudTextCallPacket(SetHudTextCallPacket {
+                message: "tap :play: keep :missing: at 127.0.0.1:6567".into(),
+            }));
+        }
+
+        client.update();
+
+        {
+            let state = client.state();
+            let state = state.lock().unwrap();
+            assert_eq!(
+                state.last_hud_text.as_deref(),
+                Some(format!("tap {play} keep :missing: at 127.0.0.1:6567").as_str()),
+                "Java HudFragment appends UI.formatIcons(text) before drawing HUD text"
+            );
+        }
+
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::SetHudTextReliableCallPacket(
+                SetHudTextReliableCallPacket(SetHudTextCallPacket {
+                    message: ":play:".into(),
+                }),
+            ));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.last_hud_text.as_deref(), Some(play.as_str()));
     }
 
     #[test]

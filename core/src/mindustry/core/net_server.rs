@@ -17,6 +17,7 @@ use crate::mindustry::net::{
     WorldReloadBeginAction, WorldReloadBeginPlan, WorldReloadEndAction, WorldReloadEndPlan,
     WorldReloadPlayer, WorldReloader,
 };
+use crate::mindustry::ui::format_icon_tokens_like_java;
 use crate::mindustry::vars::{MAX_TCP_SIZE, MAX_TEXT_LENGTH};
 
 pub type PacketHandler = Arc<Mutex<Box<dyn FnMut(&PacketKind) + Send + 'static>>>;
@@ -3326,7 +3327,9 @@ impl NetServer {
             info.last_sent_message = Some(sanitized_message.clone());
         }
 
-        let packet = SendChatMessageCallPacket { message };
+        let packet = SendChatMessageCallPacket {
+            message: format_icon_tokens_like_java(&message),
+        };
         state.last_chat_message = Some(packet.message.clone());
         state.events.push(ProviderEvent::ServerPacket {
             connection_id: connection_id.unwrap_or(-1),
@@ -5687,6 +5690,43 @@ mod tests {
             Some("foo")
         );
         assert_eq!(state.events.len(), 1);
+    }
+
+    #[test]
+    fn chat_messages_format_icon_tokens_like_java_chat_fragment() {
+        let server = NetServer::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let play = crate::mindustry::ui::format_icon_tokens_like_java(":play:");
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            state
+                .connection_states
+                .insert(21, ready_chat_connection("1.2.3.21", "uuid-chat-icons"));
+        }
+
+        let seen_handler = Arc::clone(&seen);
+        server.add_packet_handler(move |packet| {
+            if let PacketKind::SendChatMessageCallPacket(packet) = packet {
+                seen_handler.lock().unwrap().push(packet.message.clone());
+            }
+        });
+
+        send_chat(&server, 21, "tap :play: keep :missing: at 127.0.0.1:6567");
+
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![format!("tap {play} keep :missing: at 127.0.0.1:6567")],
+            "Java ChatFragment calls UI.formatIcons(message) before Call.sendChatMessage"
+        );
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(
+            state.last_chat_message.as_deref(),
+            Some(format!("tap {play} keep :missing: at 127.0.0.1:6567").as_str())
+        );
     }
 
     #[test]

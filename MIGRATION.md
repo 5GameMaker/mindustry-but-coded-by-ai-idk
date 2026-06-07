@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1038. 前端文字图标运行链路与色板/语言弹窗视觉收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，重点把 Java `UI.formatIcons()` 的更多真实运行点接到 Rust runtime，并修复 Settings/PaletteDialog 可见 chrome 差异。
+- 本轮总体进度更新：约 **97.96%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Settings/Controls chrome、HintsFragment runtime、MessageBlock 选中渲染、更多子菜单视觉和完整可玩性。
+- 主改动：
+  - `core/src/mindustry/game/map_objectives.rs`
+    - `fetch_marker_text(...)` 对 literal 文本和 map locale 本地化结果统一调用 `format_icon_tokens_like_java(...)`，对齐 Java `MapObjectives.fetchText()` 的 `UI.formatIcons(...)`。
+  - `core/src/mindustry/logic/logic_runtime_ops.rs`
+    - `exec_flush_message_runtime(...)` 在写入 `message_events` / `rules.mission` 前调用 `format_icon_tokens_like_java(...)`，并保留 Java `LExecutor.FlushMessageI.run` 的 `@key` bundle 后处理顺序。
+  - `core/src/mindustry/core/net_client.rs`
+    - `SetHudTextCallPacket` / `SetHudTextReliableCallPacket` 记录到 `last_hud_text` 前调用 formatter，补上真实 HUD 文本路径的图标替换。
+  - `core/src/mindustry/core/net_server.rs`
+    - 聊天消息通过过滤后、记录/广播前调用 formatter，补上 Rust 服务端可见聊天文本的 Java `ChatFragment` 图标替换等价行为。
+  - `desktop/src/lib.rs`
+    - `LanguageDialog` 子弹窗标题下方补 Java `BaseDialog` 3px `Pal.accent` 分隔线；
+    - Join/Host 的颜色选择器删除错误可见标题 `PaletteDialog`，对齐 Java `PaletteDialog` 的空标题构造。
+- 已验证：
+  - `rustfmt --edition 2021 --check core/src/mindustry/core/net_client.rs core/src/mindustry/core/net_server.rs core/src/mindustry/game/map_objectives.rs core/src/mindustry/logic/logic_runtime_ops.rs`
+  - `cargo test -p mindustry-core fetch_marker_text_formats_localized_and_literal_text_like_java -- --nocapture`
+  - `cargo test -p mindustry-core flush_message_formats_icons_and_preserves_non_tokens_like_java -- --nocapture`
+  - `cargo test -p mindustry-core update_formats_hud_icon_tokens_like_java_ui_format_icons -- --nocapture`
+  - `cargo test -p mindustry-core chat_messages_format_icon_tokens_like_java_chat_fragment -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_language_dialog_draws_base_dialog_accent_line -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_opens_host_dialog_route -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+- 注意：
+  - `desktop/src/lib.rs` 体量过大，`rustfmt --check` 对整文件仍可能 OOM；本轮 desktop 改动已由定向测试和后续 `git diff --check` 兜底。
+  - `MessageBlock.drawSelect` 与 `HintsFragment` 的实际 runtime/渲染入口仍待继续接入，不能把本轮 formatter 覆盖误认为所有 `UI.formatIcons()` 调用点已完成。
+
 ## 1037. LoadingFragment 百分比与 UTF-8 locale 查找收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉/字体/语言缺口，优先处理 LoadingFragment 和 bundle 乱码。
