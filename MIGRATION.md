@@ -33694,3 +33694,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `HintsFragment.checkNext()` 的完整 hint 排序、完成/隐藏事件、playtime、cutscene、state/game 和 tutorial/事件触发链仍需继续接入真实 runtime；
   - `MessageBlock.drawSelect()`、PlanetDialog/Database/Mods/Settings 等剩余 UI.formatIcons 与文本渲染入口仍需逐个对照；
   - 前端各子菜单视觉、字体 fallback、语言切换持久化、完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1055. Settings 子 BaseDialog 标题 accent 线统一
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **98.00%**，仍未达到完整可玩；继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- Java 对照证据：
+  - `LanguageDialog`、`SettingsMenuDialog` 下的 Data/Controls 等子弹窗都来自 `BaseDialog` 体系；
+  - BaseDialog 标题下方的 `Pal.accent` 视觉分隔线属于通用弹窗 chrome，而不应只出现在 Keybind/Controls 子弹窗。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_child_dialog()` 改为对 Language/Data/Controls/PlanetData 四类 Settings 子 BaseDialog 统一绘制 3px `Pal.accent` 标题分隔线；
+    - 新增 `settings_child_dialog_title_accent_rect()`，`settings_keybind_title_accent_rect()` 仅作为 Controls 兼容别名复用同一几何；
+    - 补 `desktop_launcher_settings_child_dialogs_render_basedialog_accent_line_like_java`，覆盖四类子弹窗。
+  - `README.md`
+    - 迁移进度更新到 **98.00%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_dialogs_render_basedialog_accent_line_like_java -- --nocapture`
+- 仍未完成：
+  - Settings/Language/Data/Controls 子弹窗仍需继续对照 Java 的 window-empty 皮肤、按钮行、ScrollPane 滚动条、checkbox/slider/text field hover/pressed 细节；
+  - 字体 fallback、CJK/多语言 atlas 动态补字、UI 文本 markup 渲染和所有子菜单视觉仍需继续收口；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
