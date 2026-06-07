@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1068. Controls 重绑捕获弹窗改回 Java Dialog(prompt) 语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端/UI 子菜单视觉对齐，先收口 Controls/Keybind 的重绑捕获弹窗。
+- 本轮总体进度更新：约 **98.30%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Language/Fonts、Settings/Data、JoinDialog、主菜单与所有子菜单视觉一致性。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/KeybindDialog.java:152-183` 的 `openDialog(...)` 使用 `new Dialog(prompt)`，prompt 是弹窗标题语义；
+  - Java 只保留裸捕获弹窗和输入监听，不添加 Rust-only body hint、footer 按钮或额外描边；
+  - `titleTable.getCells().first().pad(4)` 表明该 prompt 属于 Dialog title table，而不是居中正文。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_keybind_rebind_dialog()` 改为复用 `BaseDialog::with_style(prompt, DialogStyle::default_dialog())` 的默认 Dialog chrome；
+    - 去掉旧的 `fill_rect(parent)` + `pane` + 居中正文提示路径；
+    - 对 plain `Dialog(prompt)` 明确关闭 BaseDialog 3px accent separator，保留 window-empty/black9 弹窗外壳；
+    - 设置对应 overlay layer，确保仍阻断 Controls 背后按钮与滚动；
+    - 更新设置路由大回归断言：prompt 位于 Dialog title position，弹窗使用 `window-empty.9`，且不出现 BaseDialog accent 分隔线。
+  - `README.md`
+    - 迁移进度更新到 **98.30%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_keybind_rebinds_persist_to_java_keybind_settings_shape -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_uses_java_scrollpane_button_metrics -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_uses_fonts_def_shadow_not_outline_like_java -- --nocapture`
+- 仍未完成：
+  - LanguageDialog/Fonts 仍需继续审查系统 locale、日文字体 override、首帧 glyph 与语言选择重启语义；
+  - Settings/Data、JoinDialog community/header/tooltip、多列卡片布局仍需继续逐项贴近 Java；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1067. JoinDialog community host 补 45f Java 顶栏
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 JoinDialog community/global 卡片分层对齐，先把 host 行恢复出 Java `addCommunityHost()` 的 45f `Tex.whiteui` 顶栏。
