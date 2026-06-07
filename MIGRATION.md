@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1060. PaletteDialog 去掉占位标题并改回色块 ImageButton
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉对齐，处理 HostDialog/JoinDialog 打开玩家颜色选择器时仍显示 Rust-only `PaletteDialog` 标题、可见 `@back` 按钮和裸矩形色块的问题。
+- 本轮总体进度更新：约 **98.22%**，仍未达到完整可玩，不能宣告目标完成；后续继续所有前端子菜单、字体语言与 Java Scene2D 表现对齐。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/PaletteDialog.java` 构造函数为 `super("")`，标题为空；
+  - `PaletteDialog.build()` 只向 `cont` 添加 `playerColors` 的 `ImageButton(Tex.whiteui, Styles.squareTogglei, 34, ...) .size(48)` 网格，未添加可见 `@back` 按钮；
+  - `HostDialog` 和 `JoinDialog` 的玩家颜色入口都调用 `new PaletteDialog().show(...)`。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `palette_color_tint(...)`、`palette_color_button_image_rect(...)`、`push_palette_color_image_button(...)`；
+    - Host/Join color picker overlay 移除可见 `"PaletteDialog"` 标题和 `@back` 按钮行；
+    - Host/Join palette 色块从 `FillRect + StrokeRect` 改成 Java `Styles.squareTogglei` 背景 + 34f `Tex.whiteui` tinted image；
+    - Host/Join 对应测试改为断言 palette 内没有 Rust-only 标题/返回按钮，并断言 swatch 背景与内层 tinted `whiteui` 图像。
+  - `README.md`
+    - 迁移进度更新到 **98.22%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_opens_host_dialog_route -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 本轮没有改共享 ambient-light palette 的命中/布局，也没有删除 Host/Join 隐藏 close rect 行为；后续若继续像素级对齐 PaletteDialog，可再收紧 dialog 几何尺寸、取消路径与 closeOnBack 行为。
+
 ## 1059. 补齐 Settings 动态图标与 router 内容图标字形
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体和语言收口，重点处理 Settings 动态分类 region icon 以及 Java `Fonts.registerIcon()` 会把 content icon 写入 `Fonts.def/outline` 的缺口。
