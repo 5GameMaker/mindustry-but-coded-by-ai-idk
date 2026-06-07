@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1106. Mods 卡片 action 图标消费 Java clearNonei 状态色
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.72%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `Styles.clearNonei` 设置 `imageUpColor = Color.white`、`imageDisabledColor = Color.gray`，hover 时使用 `flatOver` drawable。
+  - `ModsDialog` mod card 的 enable/disable 与 delete/listing action 是 icon-only image button，不应使用 Rust 手写蓝白/暗灰图标颜色。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Mods mod card action 图标改为通过 `settings_image_button_image_color("clearNonei", ...)` 取得 Java image color；
+    - 可操作按钮 hover 时使用 `clearNonei` 的 hover drawable；
+    - unsupported / disabled toggle 图标使用 Java `Color.gray`。
+  - `README.md`
+    - 迁移进度更新到 **98.72%**。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_mods_route_renders_java_like_card_icon_and_short_description --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_mods_route_toggle_enabled_and_delete_confirm_follow_java_semantics --no-default-features`
+
 ## 1105. content icon 字形补 packed UI atlas 裁剪来源
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
