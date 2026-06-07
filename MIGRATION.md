@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1065. LanguageDialog 语言排序改为 Java CASE_INSENSITIVE_ORDER
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续字体/语言前端收口，处理 LanguageDialog 语言列表排序逻辑与 Java `String.CASE_INSENSITIVE_ORDER` 不完全同源的问题。
+- 本轮总体进度更新：约 **98.27%**，仍未达到完整可玩，不能宣告目标完成；后续继续字体 atlas 日文 override/placeholder、LanguageDialog 首帧缺字、Settings 子菜单与 community host 分层。
+- Java 对照证据：
+  - Java `Vars.init()` 会按 `LanguageDialog::getDisplayName` 与 `String.CASE_INSENSITIVE_ORDER` 排序真实 locale，再追加 synthetic `router`；
+  - Rust 原先用 `display_name.to_lowercase()` 排序，和 Java 逐字符 case-insensitive comparator 并不完全等价。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `java_case_insensitive_order_char(...)` 与 `java_case_insensitive_order_cmp(...)`；
+    - `settings_language_options_from_locales_asset_like_java(...)` 改用 Java-style comparator 排序；
+    - 新增 `desktop_launcher_language_options_sort_like_java_case_insensitive_display_names` 回归测试，验证真实 locale 排序与 router 追加位置。
+  - `README.md`
+    - 迁移进度更新到 **98.27%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_language_options_sort_like_java_case_insensitive_display_names -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_options_match_upstream_vars_locales_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_display_names_match_upstream_language_dialog_java -- --nocapture`
+- 注意：
+  - 当前语言显示名表仍是 Rust/Java 双份手写真源；后续可继续加 hard check 或生成化，避免新增 locale 时静默漏 seed/漏显示名。
+
 ## 1064. JoinDialog saved refresh/failed body 改为 Java 单行提示
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 JoinDialog 前端视觉收口，处理 saved server 刷新中/失败时仍渲染假版本、人数、地图和 ping 详情的问题。
