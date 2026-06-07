@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1086. `settings.locale=default` 加载阶段保留 sentinel
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.52%**，仍未达到完整可玩；当前仍优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/Vars.java`：`loadSettings()` 阶段用 `settings.locale=default` 解析运行时 bundle locale，但不把 `default` 立刻写回成具体 locale；
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java`：真正 materialize default 的写回发生在 `findClosestLocale()`/用户语言对话框路径。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `load_settings_locale_from_settings()` 保持设置运行时 `settings_locale/player_locale/font_locale`；
+    - 当存储值是 `default` 时不再写回具体 locale，避免启动/导入阶段提前冻结系统默认语言；
+    - 空值、非法 locale、旧别名或需规范化的显式 locale 仍写回规范结果；
+    - 调整 `desktop_launcher_settings_language_default_locale_keeps_default_sentinel_like_java`，并强化导入数据路径断言：导入后 runtime locale 正常解析，但 `settings_overrides` 不因 default 被 materialize。
+  - `README.md`
+    - 迁移进度更新到 **98.52%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_language_default_locale_keeps_default_sentinel_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_settings_language_select_persists_locale_and_emits_restart_notice_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_import_data_validates_settings_and_replaces_save_tmp_dirs -- --nocapture`
+- 仍未完成：
+  - LanguageDialog 打开/选择路径后续仍需继续校验是否完全等价 Java `findClosestLocale()` 的 materialize 时机；
+  - MapLocalesDialog 非英文 UI locale 的显示名仍需继续扩展完整 Java `Locale.getDisplayName(Core.bundle.getLocale())` 覆盖；
+  - 前端所有子菜单、完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1085. MapLocalesDialog locale 显示名拆出 Java `getDisplayName` 语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
