@@ -259,6 +259,7 @@ impl LoadRendererState {
                 fragment_layout.label.y + fragment_layout.label.height * 0.5,
             ),
             cancel_button: fragment_layout.cancel_button,
+            cancel_label: "@cancel".to_string(),
             overlay_color: [0.0, 0.0, 0.0, 0.80],
         });
 
@@ -605,6 +606,7 @@ pub enum LoadRenderCommand {
         label_color: [f32; 4],
         label_center: (f32, f32),
         cancel_button: Option<LoadRect>,
+        cancel_label: String,
         overlay_color: [f32; 4],
     },
     ErrorBanner {
@@ -791,6 +793,7 @@ impl LoadRenderCommand {
                 label_color,
                 label_center,
                 cancel_button,
+                cancel_label,
                 overlay_color,
             } => {
                 commands.push(RenderCommand::fill_rect(
@@ -828,7 +831,7 @@ impl LoadRenderCommand {
                         LOAD_FRAGMENT_EDGE_LAYER,
                     ));
                     commands.push(RenderCommand::draw_text(
-                        "@cancel",
+                        cancel_label,
                         rect.center(),
                         [0.90, 0.96, 1.0, 1.0],
                         18.0,

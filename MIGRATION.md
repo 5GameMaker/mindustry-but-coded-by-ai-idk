@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1048. LoadingFragment 桌面文案进入本地化链路
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 desktop load payload 与 LoadGame loading overlay 直接渲染 `@loading/@cancel` 等 bundle key 的问题。
+- 本轮总体进度更新：约 **98.11%**，仍未达到完整可玩，不能宣告目标完成；后续继续 LoadingFragment `Fonts.tech` 缺字回退、Settings Data 子弹窗 `BaseDialog` chrome、LanguageDialog ScrollPane 几何与完整 UI 子菜单对齐。
+- 主改动：
+  - `core/src/mindustry/graphics/load_renderer.rs`
+    - `LoadRenderCommand::LoadingFragment` 新增 `cancel_label`，默认仍为 `@cancel`，让桌面层能够像 Java bundle 一样本地化取消按钮文案；
+  - `desktop/src/lib.rs`
+    - 新增 `localize_load_frame_plan(...)`，在 `load_frame_for_render(...)` 输出 `DesktopFramePayload::Load` 前，统一本地化/formatIcons 处理 `stage_text`、`prompt_text`、LoadingFragment label/cancel、progress label、banner message/details 等可见文本；
+    - `push_load_game_loading_overlay(...)` 的菜单内 loading label 改用 `localize_bundle_markup_text("@loading")`，避免 LoadDialog loading overlay 裸出 bundle key；
+    - 新增 `desktop_launcher_loading_fragment_texts_are_localized_like_java`，用 `zh_CN` 验证 `@loading/@cancel` 均按当前 locale 渲染且不再裸出 key；
+    - 更新 load payload、LoadingFragment state、LoadGame pending、Mods GitHub download 等回归断言，区分内部 state/diagnostic 的 raw key 与最终渲染层的本地化文本。
+- 已验证：
+  - `cargo test -p mindustry-core loading_fragment -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_loading_fragment_texts_are_localized_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_frame_for_render_uses_load_payload_without_world_bundle -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_loading_fragment_state_builds_java_like_load_frames -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_github_download_syncs_loading_fragment_state -- --nocapture`
+  - `rustfmt --edition 2021 --check core/src/mindustry/graphics/load_renderer.rs`
+  - `git diff --check`
+- 注意：
+  - core `LoadFramePlan` 仍保留 bundle key 语义，desktop 层负责最终本地化；这贴近 Java `Core.bundle` 在 UI 渲染侧消费 key 的行为。Tech 字体缺字 fallback 仍未完成，是下一批高优先项。
+
 ## 1047. LoadingFragment 标题颜色语义对齐 Java
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 LoadingFragment 中央标题颜色一直硬编码白色、未镜像 Java `show()`/`setText()` 颜色语义的问题。
