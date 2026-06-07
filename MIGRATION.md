@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1067. JoinDialog community host 补 45f Java 顶栏
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 JoinDialog community/global 卡片分层对齐，先把 host 行恢复出 Java `addCommunityHost()` 的 45f `Tex.whiteui` 顶栏。
+- 本轮总体进度更新：约 **98.29%**，仍未达到完整可玩，不能宣告目标完成；后续继续 community group/header 与 host card 的完整尺寸/滚动精调，以及 Settings/Language/Controls/Data 子菜单。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java:532-551` 中 `addCommunityHost()` 先向 button 添加 `Table(Tex.whiteui).height(45f).growX()`，其中包含 `host.name + versionString` 和右侧 `Icon.add`；
+  - `buildServer(host, ..., false, false)` 再绘制下半部分 `Tex.whitePane` body；
+  - `addHeader(...)` 的 group header 只属于组，不应在第二个 host 行重复。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - community entry 高度从旧 88f 过渡到 164f，给 group header + host 45f 顶栏 + body 留出空间；
+    - 新增 `JOIN_COMMUNITY_GROUP_HEADER_HEIGHT`、`JOIN_COMMUNITY_HOST_HEADER_HEIGHT` 与 community host header/body rect helper；
+    - 首个 host 行在 group header 下额外绘制 45f `whiteui` host 顶栏；
+    - 非首 host 行不重复 group header，但用 45f `whiteui` host 顶栏作为 Java `addCommunityHost()` 标题条；
+    - add 按钮命中与渲染改到 host 顶栏右侧；
+    - community 回归测试新增首/非首 host 顶栏和 second host body 断言。
+  - `README.md`
+    - 迁移进度更新到 **98.29%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_scrolls_saved_servers_after_local_overflow_like_java -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 本轮先恢复 host 顶栏结构；后续仍需继续精确 Java `targetWidth()`、`padBottom(7)`、`padRight(4f)`、group header margin/pack 与多列 community 流式布局。
+
 ## 1066. font_jp 增量补字防止日文 placeholder 回退
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续字体/语言前端收口，重点守住 Java `font_jp` incremental 行为，避免 LanguageDialog 或后续 UI 新增非预烘焙日文/中日韩字符时退回 primitive placeholder。
