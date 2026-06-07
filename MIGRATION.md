@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1096. LanguageDialog 显示名接入真实 OpenGL 字体字形闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.62%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java:15-44`：语言按钮显示 `displayNames` 中的 native name；
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java:57-85`：每行是 `TextButton(getDisplayName(loc), Styles.flatTogglet)`；
+  - `core/src/mindustry/ui/Fonts.java:49-111`：LanguageDialog 使用 `Fonts.def` 真实字体；日文 locale 重启后通过 `loadExtraFonts()` 覆写 CJK 字形，不应退回 primitive/placeholder 绘制。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_language_dialog_display_names_reach_real_opengl_glyph_quads_like_java`；
+    - 对 `en` 与 `ja` 字体 locale 逐个检查 LanguageDialog 全量显示名，要求 `DrawText` 最终进入 `DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_KEY`；
+    - 逐字符断言 atlas 已预种子并输出精确 `font:Default:DrawText:U+....` quad，防止缺字时悄悄退回 `primitive:DrawText` 或 Java `Fonts.getGlyph` fallback。
+  - `README.md`
+    - 迁移进度更新到 **98.62%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_language_dialog_display_names_reach_real_opengl_glyph_quads_like_java --no-default-features`
+- 仍未完成：
+  - Settings/Language/Data/Controls 的内容区行高、按钮状态、ScrollPane knob、输入框焦点和移动端差异仍需继续按 Java 对齐；
+  - 其它子菜单中的可见 raw key、动态 CJK/泰语/西里尔 glyph、router locale 以及内容图标 atlas 仍需继续逐项审查；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1095. MapLocalesDialog 属性卡删除按钮接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
