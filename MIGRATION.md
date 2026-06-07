@@ -19,6 +19,45 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1079. 前端字体/语言与 MapLocalesDialog 模型收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮按用户当前优先级继续推进前端视觉、字体与语言缺口，吸收并行子代理对 MapLocales、LanguageDialog、Keybind、Join/Palette 与 Load/Save 的对照结果。
+- 本轮总体进度更新：约 **98.44%**，仍未达到完整可玩，不能宣告目标完成；后续继续把同名 dialog/fragment shell 接入真实 runtime，继续 UI 所有子菜单、主菜单、可玩主链路与 Java↔Rust 联机兼容。
+- Java 对照依据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java` / `core/src/mindustry/type/MapLocales.java`：`@editor.locales`、`cardWidth = 400f`、locale 行 edit/trash 50f、missing/same/correct 状态色、按 key/value 搜索与 showCorrect/showMissing/showSame 过滤；
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java:57-88`：`ScrollPane(langs)` 两侧 margin 24f，每个语言按钮 `400f x 50f`；
+  - `core/src/mindustry/Vars.java:486-563`：语言启动/回退应先落到最近可用 locale，再读 bundle，避免 raw locale 造成选中态或文案解析异常；
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java` 与 `PaletteDialog.java:14-35`：Join community search 是 Java TextField 背景/光标，不额外描边；PaletteDialog 使用空标题，只显示 color ImageButton 网格。
+- 主改动：
+  - `core/src/mindustry/ui/dialogs/map_locales_dialog.rs`
+    - 新增 Rust 版 `MapLocalesDialog` 前端模型闭环，覆盖 BaseDialog 标题、卡片宽度、locale 列表、状态色、搜索/过滤、列数公式、导入导出、回滚与 apply-to-all 变更模型；
+    - 补充 7 条 core 单元测试，锁住 Java UI/model 语义。
+  - `core/src/mindustry/ui/dialogs/mod.rs`
+    - 导出 `MapLocalesDialog`、locale row/property card/status/常量，作为后续桌面 UI 接入点。
+  - `desktop/src/lib.rs`
+    - 新增 `settings_current_locale_code_like_java()` 并让当前 bundle/mod bundle/format bundle text 使用 canonical locale；
+    - 补强 LanguageDialog 400x50 行、24f margin、clip 与无页码文本回归；
+    - 补强 Keybind 搜索：分类名不作为搜索目标，分类文字仍保持 Default font；
+    - Join community search 去掉 Rust-only 焦点 `StrokeRect`，保留 TextField 背景与光标；
+    - Host/Join PaletteDialog 移除 debug class-name 标题，并把测试改为禁止任何包含 `PaletteDialog` 的可见标题文本；
+    - Load/Save 保存槽标题与 preview sidecar 的 settings 回灌回归保持通过。
+  - `README.md`
+    - 迁移进度更新到 **98.44%**。
+- 已验证：
+  - `cargo test -p mindustry-core map_locales_dialog -- --nocapture`
+  - `cargo test -p mindustry-desktop language_helpers_canonicalize_raw_locale_codes_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop language_dialog_keeps_400x50_rows_and_margin_24_stable -- --nocapture`
+  - `cargo test -p mindustry-desktop settings_keybind_search_matches_localized_labels_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route_search_strips_colors_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route_renders_server_browser_skeleton -- --nocapture`
+  - `cargo test -p mindustry-desktop save_dialog_creates_and_overwrites_save_slots -- --nocapture`
+  - `cargo test -p mindustry-desktop load_game_route_supports_search_and_scroll_window -- --nocapture`
+- 仍未完成：
+  - `MapLocalesDialog` 目前是 core 前端模型，还需要接入 desktop/editor 实际 UI shell；
+  - 只读审查指出的较大结构缺口仍在：独立 `MenuFragment`、`SettingsMenuDialog`、`LanguageDialog`、`JoinDialog`、`LoadDialog`、`SaveDialog`、`ModsDialog` 同名 shell 与 Java 生命周期/scene 组件仍需持续拆出；
+  - 字体系统仍需继续收敛成 Java 风格 `loadFonts/loadExtraFonts/loadContentIcons/registerIcon` 一站式初始化路径，避免字体/图标/locale 分散导致 raw key、缺字或 placeholder 退化；
+  - 最终可玩、完整 UI 子菜单、真实渲染主链路和 Java↔Rust 联机兼容 smoke test 仍未完成，不能宣告目标完成。
+
 ## 1078. FullTextDialog 锁定默认 dialog shell 与居中正文语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮吸收并行 worker 的共享对话框小闭环，继续收紧前端弹窗基础视觉。

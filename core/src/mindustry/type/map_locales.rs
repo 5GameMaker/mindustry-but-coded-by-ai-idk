@@ -566,7 +566,10 @@ mod tests {
     fn map_locales_current_locale_parses_lang_like_runtime_fallback() {
         let parsed = MapLocales::current_locale_from_lang(Some("zh_CN.UTF-8"));
         assert_eq!(parsed, "zh_CN");
-        assert_eq!(MapLocales::current_locale_from_lang(Some("pt_BR.UTF-8")), "pt_BR");
+        assert_eq!(
+            MapLocales::current_locale_from_lang(Some("pt_BR.UTF-8")),
+            "pt_BR"
+        );
         assert_eq!(MapLocales::current_locale_from_lang(Some("")), "en");
         assert_eq!(MapLocales::current_locale_from_lang(None), "en");
         assert_eq!(
