@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1051. 前端裸 bundle key 收口到本地化 DrawText
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Database、TechTree、Save/Load、Weather 子弹窗中部分 `DrawText` 仍直接绘制 `@key` 字面量的问题。
+- 本轮总体进度更新：约 **98.14%**，仍未达到完整可玩，不能宣告目标完成；后续继续 LanguageDialog ScrollPane 几何、对话框级 chrome 统一、运行时菜单 bundle 文本路径与更多子菜单字体/本地化审查。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - Database 搜索占位、空结果、tag header 改为 `localize_bundle_markup_text(...)` 后再绘制；
+    - TechTree 全局物品标题与空状态改为本地化文案；
+    - Save/Load 的 saving overlay、rename 标题和 rename label 改为渲染前本地化；
+    - MapPlay/Pause Weather Add 空候选提示改为本地化 `@empty`；
+    - 更新对应回归断言，区分内部 state 可保留 raw key 与最终 DrawText 必须走 Java `Core.bundle` 可见文案。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_techtree_route_renders_research_dialog_shell_and_graph -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_techtree_items_display_renders_empty_state_when_no_global_items -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_custom_rules_weather_child_dialog_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_save_dialog_creates_and_overwrites_save_slots -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_pending_load_and_save_sync_loading_fragment_state -- --nocapture`
+- 注意：
+  - `loading_fragment_state.text`、route diagnostic lines 等内部状态仍可保留 raw `@key`，因为 Java 也是由 UI/bundle 渲染层消费 key；本轮只收最终可见 `DrawText`。
+
 ## 1050. Settings DataDialog 下层 chrome 复用 BaseDialog
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Settings 中打开 `PlanetDataDialog` 时下层 `dataDialog` 仍使用 Rust 自绘 `pane + stroke + 蓝白标题`，而 Java 两层都是 `new BaseDialog("@settings.data")` 的问题。
