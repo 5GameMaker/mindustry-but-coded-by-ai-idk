@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1102. LanguageDialog 滚动支持子行像素偏移
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.68%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java:69-72`：语言列表放入 Scene2D `ScrollPane`，只禁用横向滚动，纵向滚动是连续像素偏移；
+  - `LanguageDialog.java:77-85`：所有 `400f x 50f` 语言按钮连续添加到同一个 `Table`，滚动时应能出现半行/部分行，而不是只能整行跳转。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 保留 `settings_language_scroll_offset` 作为整行偏移，新增 `settings_language_scroll_subrow_offset` 记录子行像素偏移；
+    - 新增 `settings_language_scroll_parts_for_dialog(...)` / `settings_language_row_rect_with_subrow_offset(...)` 等共享 helper；
+    - LanguageDialog 渲染、滚动条 offset 和 click hit-test 全部使用同一组 `(row_offset, subrow_offset)`，避免视觉行与点击区域错位；
+    - 滚轮 `delta_y=-3` 仍等价 3 行，兼容既有状态；`delta_y=-0.5` 会保留 25px 半行偏移；
+    - resize clamp 会同时收敛整行偏移与子行偏移；
+    - 新增 `desktop_launcher_language_dialog_scrolls_by_subrow_pixels_like_java_scrollpane`，断言半行滚动后第一行文本/背景整体上移，且 hit-test 跟随上移后的位置。
+  - `README.md`
+    - 迁移进度更新到 **98.68%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib language_dialog_scrolls_by_subrow_pixels --no-default-features`
+  - `cargo test -p mindustry-desktop --lib language_dialog --no-default-features`
+- 仍未完成：
+  - KeybindDialog 与其它 Settings 子菜单仍有整数行滚动/Scrollbar knob/pressed disabled 状态等细节需要继续对齐；
+  - Settings 文本框和部分确认/子对话框 Rust-only 描边仍需继续清理；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1101. 去除 BaseDialog/Outline 字体 Rust-only 二次描边
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
