@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1054. LanguageDialog ScrollPane 高度脱离固定七行
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Settings → Language 子弹窗仍用 Rust 过渡期固定 7 行视口的问题。
+- 本轮总体进度更新：约 **98.17%**，仍未达到完整可玩，不能宣告目标完成；后续继续 LanguageDialog 视觉细节、字体 fallback、语言切换生命周期、Settings/Controls/Data 子菜单与 Java Scene2D 表现对齐。
+- Java 对照证据：
+  - `LanguageDialog.java` 创建 `BaseDialog("@settings.language")`，`langs.marginRight(24f).marginLeft(24f)`，每个 `TextButton` 为 `400f x 50f`；
+  - Java 使用 `ScrollPane(langs)` 承载完整语言列表，不存在 Rust 旧实现的固定 7 行分页上限或内联页码。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 LanguageDialog 专属 dialog rect，保留其他 Settings 子弹窗通用几何不变；
+    - `settings_language_scrollpane_rect(...)` 改为按语言列表总高度与当前 BaseDialog 内容区计算；
+    - 渲染、点击命中、滚轮滚动、resize clamp 都改用 `settings_language_visible_rows_for_dialog(...)`，避免显示行数和输入行数分离；
+    - 更新 Settings 结构化 shell 测试，区分 LanguageDialog rect 与 Controls/Data/PlanetData 通用 rect。
+  - `README.md`
+    - 迁移进度更新到 **98.17%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_uses_java_scrollpane_button_metrics -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_renders_every_display_name_with_default_font -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_resize_refreshes_scroll_focus_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_dialogs_render_basedialog_accent_line_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_dialog_back_buttons_use_java_basedialog_metrics -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_dialog_blocks_background_scroll_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_uses_fonts_def_shadow_not_outline_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_menu_buttons_use_fonts_def_shadow_not_outline_like_java -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 本轮只收 LanguageDialog 的 ScrollPane/dialog 几何和输入一致性；语言切换后的全局 bundle reload、CJK/日文/韩文字体 fallback、更多子菜单 pixel parity 仍需继续推进。
+
 ## 1053. 保留系统语言区域码
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续语言/本地化链路，修正系统 `LANG` fallback 中区域码被过早丢弃的问题。
