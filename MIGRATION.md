@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1089. MapLocalesDialog 三栏视觉与 Controls 复开滚动对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.55%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java:107-164`：主界面是左侧 locale `Tex.button` 列表、中间 search/apply-to-all/main 属性卡片、右侧 property add 面板；
+  - `core/src/mindustry/editor/MapLocalesDialog.java:175-201`：locale 行是 200f `Styles.flatTogglet` + 50f edit + 50f trash，末尾还有 `@add`；
+  - `core/src/mindustry/editor/MapLocalesDialog.java:203-313`：`buildMain()` 渲染排序后的多属性卡片，而不是只显示第一项；
+  - `core/src/mindustry/ui/dialogs/KeybindDialog.java`：`shown()` 清空 search 并聚焦，但不硬重置 ScrollPane 位置。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `MapLocalesDialog` overlay 宽度放开，补出 Java 三栏结构：左侧语言 pane、apply-to-all CheckBox、右侧新增属性 pane、collapse/filter/search 工具行；
+    - locale 行改为 Java 的 200 + 50 + 50 结构，渲染 edit/trash `Styles.flati` 图标按钮，并移除固定 `take(7)` 的硬截断；
+    - 中间属性卡从只渲染 `cards.first()` 改为按多属性卡内容序列渲染，保留 missing/same/correct 状态色和 value area；
+    - 新增 `ToggleEditorLocalesApplyToAll` / `ToggleEditorLocalesCollapsed` action，并接入 hit-test/dispatch；
+    - `OpenControlsDialog` 不再把 `settings_keybind_scroll_offset` 强制归零，只保留 Java `shown()` 的清空 search 与聚焦行为。
+  - `README.md`
+    - 迁移进度更新到 **98.55%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib map_locales --no-default-features`
+  - `cargo test -p mindustry-desktop --lib keybind --no-default-features`
+  - `cargo test -p mindustry-core --lib map_locales`
+- 仍未完成：
+  - MapLocalesDialog 的 property edit/delete/add 弹窗、addLocaleDialog 候选列表、apply/save/import/export 仍需继续按 Java 接入；
+  - 非英文 UI locale 的 `Locale.getDisplayName(Core.bundle.getLocale())` 完整显示名覆盖、外部/mod bundle fallback 与字体 atlas merge 语义仍需继续补；
+  - 前端所有子菜单、完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1088. 非 Windows 默认 locale 探测区分 POSIX system locale 与 fallback
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
