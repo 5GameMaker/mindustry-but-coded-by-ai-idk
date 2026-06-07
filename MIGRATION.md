@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1046. 对齐 Settings 主菜单 iconMed 与按钮字号
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Settings 主菜单图标与文字明显小于 Java 原版的问题。
+- 本轮总体进度更新：约 **98.09%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Settings Data 子弹窗 `BaseDialog` chrome、LanguageDialog ScrollPane 几何、LoadingFragment 本地化/Tech fallback 与完整 UI 子菜单对齐。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - `SETTINGS_MENU_BUTTON_ICON_SIZE` 从 Rust 旧值 `24.0` 调整为 Java `Vars.iconMed = 8*4f = 32.0`；
+    - Settings 主菜单 icon glyph 的实际 DrawText size 不再写死 `17.0`，改用 `SETTINGS_MENU_BUTTON_ICON_SIZE`；
+    - Settings 主菜单 label 的实际 DrawText size 不再写死 `14.0`，改用已集中化的 `settings_text_button_font_size("flatt")` / `SETTINGS_TEXT_BUTTON_FONT_SIZE`；
+    - 现有 Settings 菜单字体回归增加 label/icon size 断言，防止再次缩小成 Rust-only 视觉。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 移除上一轮 router 文案修补后在非测试编译下多余的 `upstream_menu_bundle_value_for_locale` import，保持警告面更干净。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_text_sizes_use_centralized_java_metrics -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_menu_buttons_use_fonts_def_shadow_not_outline_like_java -- --nocapture`
+  - `rustfmt --edition 2021 --check core/src/mindustry/graphics/menu_renderer.rs`
+  - `git diff --check`
+- 注意：
+  - 本轮只处理 Settings 主菜单中最显眼的 icon/label 尺寸；外层容器多余 stroke、Data 子弹窗 chrome 与 LanguageDialog 滚动视口仍需继续收口。
+
 ## 1045. Core 菜单 router locale 使用上游 glyph 文案
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 core 菜单计划在 `router` locale 下直用时没有走上游 router glyph 化 bundle 解析的问题。

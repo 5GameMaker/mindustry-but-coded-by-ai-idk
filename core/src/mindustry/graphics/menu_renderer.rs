@@ -10,9 +10,8 @@ use super::{
 };
 use crate::mindustry::ui::{
     upstream_bundle_en_value, upstream_image_button_style_skin,
-    upstream_menu_bundle_value_for_locale, upstream_menu_bundle_value_for_locale_owned,
-    upstream_text_button_style_skin, upstream_ui_drawable_alias, upstream_ui_icon_glyph_string,
-    UiDrawableAlias, UiDrawableTint,
+    upstream_menu_bundle_value_for_locale_owned, upstream_text_button_style_skin,
+    upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, UiDrawableAlias, UiDrawableTint,
 };
 
 pub const MENU_DARKNESS: f32 = 0.3;
@@ -3368,7 +3367,10 @@ fn menu_ui_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mindustry::ui::{upstream_ui_icon_glyph_string, UPSTREAM_ROUTER_LANGUAGE_GLYPH};
+    use crate::mindustry::ui::{
+        upstream_menu_bundle_value_for_locale, upstream_ui_icon_glyph_string,
+        UPSTREAM_ROUTER_LANGUAGE_GLYPH,
+    };
 
     #[test]
     fn menu_dimensions_match_upstream_mobile_branch() {
