@@ -228,6 +228,15 @@ pub struct UiScrollPaneStyleSkin {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiTreeStyleSkin {
+    pub java_name: &'static str,
+    pub plus: &'static str,
+    pub minus: &'static str,
+    pub background: &'static str,
+    pub over: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UiSliderStyleSkin {
     pub java_name: &'static str,
     pub background: &'static str,
@@ -1137,6 +1146,14 @@ pub const UPSTREAM_SCROLL_PANE_STYLE_SKINS: &[UiScrollPaneStyleSkin] = &[
     },
 ];
 
+pub const UPSTREAM_TREE_STYLE_SKINS: &[UiTreeStyleSkin] = &[UiTreeStyleSkin {
+    java_name: "defaultTree",
+    plus: "downOpen",
+    minus: "upOpen",
+    background: "black5",
+    over: "flatOver",
+}];
+
 pub const UPSTREAM_SLIDER_STYLE_SKINS: &[UiSliderStyleSkin] = &[UiSliderStyleSkin {
     java_name: "defaultSlider",
     background: "sliderBack",
@@ -1257,6 +1274,12 @@ pub fn upstream_image_button_style_skin(
 
 pub fn upstream_scroll_pane_style_skin(java_name: &str) -> Option<&'static UiScrollPaneStyleSkin> {
     UPSTREAM_SCROLL_PANE_STYLE_SKINS
+        .iter()
+        .find(|style| style.java_name == java_name)
+}
+
+pub fn upstream_tree_style_skin(java_name: &str) -> Option<&'static UiTreeStyleSkin> {
+    UPSTREAM_TREE_STYLE_SKINS
         .iter()
         .find(|style| style.java_name == java_name)
 }
@@ -1457,6 +1480,12 @@ mod tests {
         assert_eq!(horizontal.v_scroll_knob, Some("scrollKnobVerticalBlack"));
         assert_eq!(horizontal.h_scroll, Some("scrollHorizontal"));
         assert_eq!(horizontal.h_scroll_knob, Some("scrollKnobHorizontalBlack"));
+
+        let tree = upstream_tree_style_skin("defaultTree").unwrap();
+        assert_eq!(tree.plus, "downOpen");
+        assert_eq!(tree.minus, "upOpen");
+        assert_eq!(tree.background, "black5");
+        assert_eq!(tree.over, "flatOver");
 
         let slider = upstream_slider_style_skin("defaultSlider").unwrap();
         assert_eq!(slider.background, "sliderBack");

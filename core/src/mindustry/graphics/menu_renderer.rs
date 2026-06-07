@@ -8,11 +8,10 @@ use super::{
     RenderCamera, RenderCommand, RenderFontId, RenderPass, RenderPassKind, RenderPoint, RenderRect,
     RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderViewport,
 };
-#[cfg(test)]
-use crate::mindustry::ui::upstream_menu_bundle_value_for_locale;
 use crate::mindustry::ui::{
-    upstream_bundle_en_value, upstream_image_button_style_skin, upstream_text_button_style_skin,
-    upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, UiDrawableAlias, UiDrawableTint,
+    upstream_bundle_en_value, upstream_image_button_style_skin, upstream_menu_bundle_value_for_locale,
+    upstream_text_button_style_skin, upstream_ui_drawable_alias, upstream_ui_icon_glyph_string,
+    UiDrawableAlias, UiDrawableTint,
 };
 
 pub const MENU_DARKNESS: f32 = 0.3;
@@ -734,6 +733,13 @@ impl MenuButtonRole {
         }
     }
 
+    pub fn label_for_locale(self, locale: &str) -> String {
+        self.bundle_key()
+            .and_then(|key| upstream_menu_bundle_value_for_locale(locale, key))
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| self.label().to_string())
+    }
+
     pub const fn is_submenu(self) -> bool {
         matches!(
             self,
@@ -874,6 +880,7 @@ struct MenuUiLayoutCacheKey {
     graphics_height: f32,
     scene_margin_top: f32,
     scene_margin_bottom: f32,
+    locale: String,
     mobile: bool,
     desktop_workshop_enabled: bool,
     mobile_ios: bool,
@@ -1841,6 +1848,7 @@ pub struct MenuRendererState {
     pub flyer_rotation: f32,
     pub flyer_count: usize,
     pub flyer_type: &'static str,
+    pub locale: String,
     pub selected_root: MenuButtonRole,
     active_root: Option<MenuButtonRole>,
     submenu_root: Option<MenuButtonRole>,
@@ -1870,6 +1878,7 @@ impl MenuRendererState {
             flyer_rotation: 45.0,
             flyer_count,
             flyer_type,
+            locale: "en".to_string(),
             selected_root: MenuButtonRole::Play,
             active_root: None,
             submenu_root: None,
@@ -1884,6 +1893,13 @@ impl MenuRendererState {
             ui_render_command_cache_rebuilds: 0,
             static_world_render_command_cache: None,
             static_world_render_command_cache_rebuilds: 0,
+        }
+    }
+
+    pub fn set_locale(&mut self, locale: impl Into<String>) {
+        let locale = locale.into();
+        if self.locale != locale {
+            self.locale = locale;
         }
     }
 
@@ -2117,6 +2133,7 @@ impl MenuRendererState {
     pub fn ui_plan(&self, input: MenuFrameInput) -> MenuUiPlan {
         menu_ui_plan(
             input,
+            &self.locale,
             self.config.mobile,
             self.selected_root,
             self.active_root,
@@ -2142,6 +2159,7 @@ impl MenuRendererState {
             graphics_height: input.graphics_height,
             scene_margin_top: input.scene_margin_top,
             scene_margin_bottom: input.scene_margin_bottom,
+            locale: self.locale.clone(),
             mobile: self.config.mobile,
             desktop_workshop_enabled: self.config.desktop_workshop_enabled,
             mobile_ios: self.config.mobile_ios,
@@ -2162,6 +2180,7 @@ impl MenuRendererState {
             let layout_submenu_target_alpha = layout_submenu_alpha;
             let plan = menu_ui_plan(
                 input,
+                &key.locale,
                 self.config.mobile,
                 self.selected_root,
                 None,
@@ -2977,10 +2996,15 @@ fn flyer_draw_size(unit_name: &str) -> f32 {
     }
 }
 
-fn menu_button_plan(role: MenuButtonRole, rect: RenderRect, selected: bool) -> MenuButtonPlan {
+fn menu_button_plan(
+    role: MenuButtonRole,
+    rect: RenderRect,
+    selected: bool,
+    locale: &str,
+) -> MenuButtonPlan {
     MenuButtonPlan {
         role,
-        label: role.label().to_string(),
+        label: role.label_for_locale(locale),
         icon_name: None,
         rect,
         selected,
@@ -3033,10 +3057,11 @@ fn menu_mobile_button_plan(
     role: MenuButtonRole,
     rect: RenderRect,
     selected: bool,
+    locale: &str,
 ) -> MenuButtonPlan {
     MenuButtonPlan {
         role,
-        label: role.label().to_string(),
+        label: role.label_for_locale(locale),
         icon_name: None,
         rect,
         selected,
@@ -3048,6 +3073,7 @@ fn menu_mobile_button_plan(
 
 fn menu_desktop_ui_plan(
     input: MenuFrameInput,
+    locale: &str,
     selected_root: MenuButtonRole,
     active_root: Option<MenuButtonRole>,
     submenu_root: Option<MenuButtonRole>,
@@ -3125,6 +3151,7 @@ fn menu_desktop_ui_plan(
             role,
             RenderRect::new(left_x, main_button_y(index), button_width, button_height),
             active_root == Some(role),
+            locale,
         ));
     }
     for (custom_index, custom) in custom_buttons.iter().enumerate() {
@@ -3147,6 +3174,7 @@ fn menu_desktop_ui_plan(
             button_height,
         ),
         active_root == Some(MenuButtonRole::Quit),
+        locale,
     ));
     for (index, role) in submenu_roles.iter().copied().enumerate() {
         buttons.push(menu_button_plan(
@@ -3158,6 +3186,7 @@ fn menu_desktop_ui_plan(
                 button_height,
             ),
             false,
+            locale,
         ));
     }
     if let MenuButtonRole::Custom(root) = submenu_root {
@@ -3191,10 +3220,10 @@ struct MenuMobileEntry {
     icon_name: Option<String>,
 }
 
-fn menu_mobile_button_entry(role: MenuButtonRole) -> MenuMobileEntry {
+fn menu_mobile_button_entry(role: MenuButtonRole, locale: &str) -> MenuMobileEntry {
     MenuMobileEntry {
         role,
-        label: role.label().to_string(),
+        label: role.label_for_locale(locale),
         selected: false,
         icon_name: None,
     }
@@ -3211,6 +3240,7 @@ fn menu_mobile_custom_entry(index: usize, button: &MenuCustomButton) -> MenuMobi
 
 fn menu_mobile_ui_plan(
     input: MenuFrameInput,
+    locale: &str,
     custom_buttons: &[MenuCustomButton],
     mobile_ios: bool,
 ) -> MenuUiPlan {
@@ -3221,40 +3251,40 @@ fn menu_mobile_ui_plan(
     };
     let rows: Vec<Vec<MenuMobileEntry>> = if input.graphics_width > input.graphics_height {
         let mut first = vec![
-            menu_mobile_button_entry(MenuButtonRole::Campaign),
-            menu_mobile_button_entry(MenuButtonRole::Join),
-            menu_mobile_button_entry(MenuButtonRole::CustomGame),
-            menu_mobile_button_entry(MenuButtonRole::LoadGame),
+            menu_mobile_button_entry(MenuButtonRole::Campaign, locale),
+            menu_mobile_button_entry(MenuButtonRole::Join, locale),
+            menu_mobile_button_entry(MenuButtonRole::CustomGame, locale),
+            menu_mobile_button_entry(MenuButtonRole::LoadGame, locale),
         ];
         for index in (1..custom_buttons.len()).step_by(2) {
             first.push(menu_mobile_custom_entry(index, &custom_buttons[index]));
         }
         let mut second = vec![
-            menu_mobile_button_entry(MenuButtonRole::Editor),
-            menu_mobile_button_entry(MenuButtonRole::Settings),
-            menu_mobile_button_entry(MenuButtonRole::Mods),
+            menu_mobile_button_entry(MenuButtonRole::Editor, locale),
+            menu_mobile_button_entry(MenuButtonRole::Settings, locale),
+            menu_mobile_button_entry(MenuButtonRole::Mods, locale),
         ];
         for index in (0..custom_buttons.len()).step_by(2) {
             second.push(menu_mobile_custom_entry(index, &custom_buttons[index]));
         }
-        second.push(menu_mobile_button_entry(final_role));
+        second.push(menu_mobile_button_entry(final_role, locale));
         vec![first, second]
     } else {
         let mut rows = vec![
             vec![
-                menu_mobile_button_entry(MenuButtonRole::Campaign),
-                menu_mobile_button_entry(MenuButtonRole::LoadGame),
+                menu_mobile_button_entry(MenuButtonRole::Campaign, locale),
+                menu_mobile_button_entry(MenuButtonRole::LoadGame, locale),
             ],
             vec![
-                menu_mobile_button_entry(MenuButtonRole::CustomGame),
-                menu_mobile_button_entry(MenuButtonRole::Join),
+                menu_mobile_button_entry(MenuButtonRole::CustomGame, locale),
+                menu_mobile_button_entry(MenuButtonRole::Join, locale),
             ],
             vec![
-                menu_mobile_button_entry(MenuButtonRole::Editor),
-                menu_mobile_button_entry(MenuButtonRole::Settings),
+                menu_mobile_button_entry(MenuButtonRole::Editor, locale),
+                menu_mobile_button_entry(MenuButtonRole::Settings, locale),
             ],
         ];
-        let mut current = vec![menu_mobile_button_entry(MenuButtonRole::Mods)];
+        let mut current = vec![menu_mobile_button_entry(MenuButtonRole::Mods, locale)];
         for (index, custom) in custom_buttons.iter().enumerate() {
             current.push(menu_mobile_custom_entry(index, custom));
             if index % 2 == 0 {
@@ -3262,7 +3292,7 @@ fn menu_mobile_ui_plan(
                 current = Vec::new();
             }
         }
-        current.push(menu_mobile_button_entry(final_role));
+        current.push(menu_mobile_button_entry(final_role, locale));
         rows.push(current);
         rows
     };
@@ -3290,6 +3320,7 @@ fn menu_mobile_ui_plan(
                     button_size,
                 ),
                 entry.selected,
+                locale,
             );
             button.label = entry.label.clone();
             button.icon_name = entry.icon_name.clone();
@@ -3306,6 +3337,7 @@ fn menu_mobile_ui_plan(
 
 fn menu_ui_plan(
     input: MenuFrameInput,
+    locale: &str,
     mobile: bool,
     selected_root: MenuButtonRole,
     active_root: Option<MenuButtonRole>,
@@ -3317,10 +3349,11 @@ fn menu_ui_plan(
     custom_buttons: &[MenuCustomButton],
 ) -> MenuUiPlan {
     if mobile {
-        menu_mobile_ui_plan(input, custom_buttons, mobile_ios)
+        menu_mobile_ui_plan(input, locale, custom_buttons, mobile_ios)
     } else {
         menu_desktop_ui_plan(
             input,
+            locale,
             selected_root,
             active_root,
             submenu_root,
@@ -4201,6 +4234,45 @@ mod tests {
             .buttons
             .iter()
             .any(|button| button.role == MenuButtonRole::Campaign && button.hovered));
+    }
+
+    #[test]
+    fn menu_renderer_state_locale_changes_rebuild_ui_layout_cache_and_labels_like_java() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+        let input = MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
+            scl4: 4.0,
+            delta: 0.0,
+        };
+
+        let zh_cn_play = upstream_menu_bundle_value_for_locale("zh_CN", "play")
+            .expect("zh_CN bundle should provide Java menu play label");
+        let zh_tw_play = upstream_menu_bundle_value_for_locale("zh_TW", "play")
+            .expect("zh_TW bundle should provide Java menu play label");
+
+        state.set_locale("zh_CN");
+        let zh_cn = state.render_plan(input);
+        assert_eq!(state.ui_layout_cache_rebuilds, 1);
+        assert!(zh_cn
+            .ui
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Play && button.label == zh_cn_play));
+
+        state.set_locale("zh_TW");
+        let zh_tw = state.render_plan(input);
+        assert_eq!(
+            state.ui_layout_cache_rebuilds, 2,
+            "locale is part of the retained Java-like menu layout key so labels cannot reuse stale English/CJK text"
+        );
+        assert!(zh_tw
+            .ui
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Play && button.label == zh_tw_play));
     }
 
     #[test]

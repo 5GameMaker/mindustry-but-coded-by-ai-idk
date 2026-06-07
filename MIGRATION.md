@@ -33535,3 +33535,40 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings 键位名与其它 editor/search/filter fallback 仍需继续按 Java bundle 链路处理；
   - Settings/Language/Load-Save/Join-Host/Mods Browser 的行高、按钮皮肤、空态和所有子菜单视觉细节仍需继续收口；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1052. 菜单 locale 下沉、defaultTree 与 Host friends-only 收口
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.94%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `MenuFragment` 的按钮文本使用 `@play` / `@joingame` / `@database.button` 等 bundle key，实际文案由运行时 bundle/locale 决定；
+  - `Styles.defaultTree` 定义 `plus = Icon.downOpen`、`minus = Icon.upOpen`、`background = black5`、`over = flatOver`；
+  - `HostDialog` 的 `@steam.friendsonly` 是 checkbox 行并通过 hover desc tooltip 展示说明，不应把整行空白都做成按钮命中区；
+  - `PlanetDialog` 的 Back 栈会先处理 new presets/selected sector，再关闭 Campaign route。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuRendererState` 新增 locale 状态与 `set_locale()`；
+    - `MenuUiLayoutCacheKey` 纳入 locale，避免语言切换后复用旧 label cache；
+    - desktop/mobile 菜单按钮生成改用 `MenuButtonRole::label_for_locale()`，不再只靠 English-first label；
+    - 补 locale 切换重建 cache 与中文/繁中文案测试。
+  - `desktop/src/lib.rs`
+    - 菜单渲染入口在构建 core menu plan 前同步 `settings_locale`；
+    - HostDialog steam friends-only 收敛为 checkbox/label 命中区，右侧空白不再触发 action/tooltip；
+    - Pal 颜色改动收口为 `[r, g, b, a]` 数组，修复 `DecalColor` 无 `.rgba()` 的编译阻塞；
+    - 菜单 back 测试按 Campaign PlanetDialog 的 Java back-stack 语义补足多次 Back。
+  - `core/src/mindustry/ui/styles.rs` / `core/src/mindustry/ui/mod.rs`
+    - 新增并导出 `UiTreeStyleSkin`、`UPSTREAM_TREE_STYLE_SKINS`、`upstream_tree_style_skin()`；
+    - 补 `defaultTree` registry 测试。Java/Rust 当前都没有真实 Tree widget 消费点，后续若迁移 Tree widget 必须接入该 registry。
+  - `README.md`
+    - 迁移进度更新到 **97.94%**。
+- 已验证：
+  - `cargo test -p mindustry-core menu_renderer::tests -- --nocapture`
+  - `cargo test -p mindustry-core upstream_widget_style_skins_match_java_scroll_slider_check_and_field_names -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_host_steam_friends_only_tooltip_is_not_persistent_like_java -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Java `UI.formatIcons()` 的整段文本图标替换链尚未统一接入 Rust 通用文本管道，聊天、消息块、说明正文等路径中的 `:play:` / `:alphachan:` 等 token 仍需后续收口；
+  - `defaultTree` 目前只是样式契约 registry，后续若出现 Tree widget/Scene2D Tree 等价组件，必须接入真实 runtime；
+  - Settings/Language/Load-Save/Join-Host/Mods Browser 的行高、按钮皮肤、空态和所有子菜单视觉细节仍需继续收口；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
