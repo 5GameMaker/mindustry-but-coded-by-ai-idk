@@ -19,6 +19,21 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1030. Mod metadata 严格 UTF-8 读取
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续字体/语言与乱码处理缺口，落实“乱码优先 UTF-8，再尝试读取”的迁移约束。
+- 本轮总体进度更新：约 **97.73%**，仍未达到完整可玩，不能宣告目标完成；后续继续 UI 所有子菜单、JP/CJK outline、可玩性 runtime 与 Java↔Rust 联机兼容。
+- 主改动：
+  - `core/src/mindustry/modsys/mod.rs`
+    - `ModMetadata::from_directory(...)` 从 `String::from_utf8_lossy` 改为严格 `String::from_utf8(...)`，坏字节返回 `io::ErrorKind::InvalidData`；
+    - zip/jar 内 `mod.hjson` / `mod.json` / `plugin.hjson` / `plugin.json` metadata 从 lossy 解码改为 `std::str::from_utf8(...)`；
+    - 补目录 metadata 与 archive metadata 两条 invalid UTF-8 回归，避免 U+FFFD replacement character 进入 UI 文案/语言链。
+- 已验证：
+  - `cargo test -p mindustry-core invalid_utf8 -- --nocapture`
+  - `cargo test -p mindustry-core mod_metadata -- --nocapture`
+- 注意：
+  - 本轮只收 mod metadata 文本入口；properties parser 公共化与 modsys 其他潜在文本入口仍可继续拆小闭环推进。
+
 ## 1029. Fonts.outline shadowOffsetY 视觉收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续字体/前端视觉缺口，对照 `Fonts.java` 中 `fontParameter()` 的 `shadowColor = Color.darkGray` 与 `shadowOffsetY = 2`。

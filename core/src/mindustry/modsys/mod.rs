@@ -53,11 +53,16 @@ impl ModMetadata {
             }
 
             let bytes = fs::read(&path)?;
-            let source = String::from_utf8_lossy(&bytes);
+            let source = String::from_utf8(bytes).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{file_name} is not valid UTF-8"),
+                )
+            })?;
             return Ok(Self::from_source_text(
                 fallback_name,
                 Some(file_name),
-                source.as_ref(),
+                source.as_str(),
             ));
         }
 
@@ -311,11 +316,16 @@ fn mod_metadata_from_archive_entries(
             .iter()
             .find(|entry| !entry.directory && entry.name == full_name)
         {
-            let source = String::from_utf8_lossy(&entry.data);
+            let source = std::str::from_utf8(&entry.data).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{file_name} is not valid UTF-8"),
+                )
+            })?;
             return Ok(ModMetadata::from_source_text(
                 fallback_name,
                 Some(file_name),
-                source.as_ref(),
+                source,
             ));
         }
     }
@@ -1978,6 +1988,44 @@ mod tests {
         test_zip_push_u32(&mut out, central_offset);
         test_zip_push_u16(&mut out, 0);
         out
+    }
+
+    #[test]
+    fn mod_metadata_from_directory_rejects_invalid_utf8_like_java() {
+        let root = temp_mod_root("mod-metadata-invalid-utf8");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("mod.hjson"), b"name: broken\nbad: \xff\n").unwrap();
+
+        let error = ModMetadata::from_directory("broken", &root).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(
+            error.to_string().contains("not valid UTF-8"),
+            "mod metadata should reject invalid UTF-8 instead of replacing bad bytes with U+FFFD"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mod_metadata_from_archive_rejects_invalid_utf8_like_java() {
+        let root = temp_mod_root("mod-archive-metadata-invalid-utf8");
+        std::fs::create_dir_all(&root).unwrap();
+        let archive = root.join("broken.zip");
+        std::fs::write(
+            &archive,
+            stored_zip_bytes(&[("mod.hjson", b"name: broken-zip\nbad: \xff\n")]),
+        )
+        .unwrap();
+        let entries = read_mod_archive_entries(&archive).expect("stored zip fixture should decode");
+
+        let error = mod_metadata_from_archive_entries("broken-zip", &entries).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(
+            error.to_string().contains("not valid UTF-8"),
+            "zip mod metadata should reject invalid UTF-8 instead of lossy decoding"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
