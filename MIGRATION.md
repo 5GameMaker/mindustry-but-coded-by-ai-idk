@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1095. MapLocalesDialog 属性卡删除按钮接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.61%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java:275-286`：属性卡 `Icon.trash` 点击后，`applytoall` 为真时从所有 locale 删除该 key，否则只从当前 `props` 删除，随后 `saved = false` 并 `buildMain()`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `RemoveEditorLocalesProperty(usize)` action，并为属性卡 collapse/key/trash/edit 拆出一致的几何 helper；
+    - `MapLocalesDialog` 主属性卡 trash 图标接入 hit-test/dispatch，调用 core `MapLocalesDialog::remove_property(...)`；
+    - hit-test 顺序按可见层级处理，属性卡覆盖右侧输入 pane 时优先命中最上层 trash 按钮，避免点击被底层 property value 文本框吞掉；
+    - 新增 `desktop_launcher_editor_map_locales_property_trash_removes_selected_or_all_like_java`，覆盖 apply-to-all 与 selected-locale 两种删除语义。
+  - `README.md`
+    - 迁移进度更新到 **98.61%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_editor_map_locales_property_trash_removes_selected_or_all_like_java --no-default-features`
+  - `cargo test -p mindustry-desktop --lib map_locales --no-default-features`
+  - `cargo test -p mindustry-core --lib map_locales_dialog`
+- 仍未完成：
+  - MapLocalesDialog 的 property edit dialog、locale edit/import/export、apply/save 的完整 Java 路径仍需继续接入；
+  - 前端字体/语言全量显示名、菜单 chrome、所有子菜单视觉与完整可玩/联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1094. MapLocalesDialog 右侧新增属性输入接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
