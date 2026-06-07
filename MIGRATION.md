@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1071. JoinDialog hidden tooltip 改用 Java black6 chrome
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉细节收口，先把 JoinDialog community hidden/eye tooltip 从 Rust-only chrome 改回 Java Tooltip 风格。
+- 本轮总体进度更新：约 **98.33%**，仍未达到完整可玩，不能宣告目标完成；后续继续 JoinDialog header line/padding、多列 community host、Settings/Data 与剩余字体/语言子菜单。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java:497` 中 community group hidden eye 使用 `new Tooltip(t -> t.background(Styles.black6).margin(4).label(...))`；
+  - Java tooltip 背景是 `Styles.black6`，margin 为 4f，不额外画 Rust-only button/stroke chrome；
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java:364` 的全局 showHidden 也是标准 tooltip 路径，不能继续使用蓝灰描边式自绘提示框。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - `push_join_route_hover_tooltip()` 改为 `settings_drawable_symbol_and_tint("black6", 1.0)` 背景；
+    - tooltip margin 改为 4f，并移除旧的 `StrokeRect`；
+    - tooltip label 去掉额外 outline，保持更接近 Java default label/font shadow 语义；
+    - 扩展 `desktop_launcher_join_route_tracks_community_groups_like_java_server_group`：hover hidden eye 时断言文本存在、tooltip 使用 black6 symbol/tint、且同 rect 不出现 Rust-only stroke。
+  - `README.md`
+    - 迁移进度更新到 **98.33%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+- 仍未完成：
+  - JoinDialog `section()`/community header 的 3f line、pad(5)/padLeft(10)/padRight(10) 与 community host 多列 wrap 仍需继续精调；
+  - 前端所有子菜单、字体/语言、完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1070. LanguageDialog 补 checked 行与 restart 信息条视觉回归
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉/语言设置闭环，补一条专项回归锁住最容易回退的 LanguageDialog 视觉语义。
