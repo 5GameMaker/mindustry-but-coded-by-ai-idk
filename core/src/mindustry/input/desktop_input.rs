@@ -520,6 +520,18 @@ mod tests {
 
         assert!(input.show_hint(&frame, &settings));
 
+        let mut hidden_hud = frame;
+        hidden_hud.hud_shown = false;
+        assert!(!input.show_hint(&hidden_hud, &settings));
+
+        let mut disabled_hints = settings;
+        disabled_hints.hints = false;
+        assert!(!input.show_hint(&frame, &disabled_hints));
+
+        let mut dead_player = frame;
+        dead_player.player_dead = true;
+        assert!(!input.show_hint(&dead_player, &settings));
+
         input.select_plans_empty = false;
         assert!(!input.show_hint(&frame, &settings));
 

@@ -33667,3 +33667,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - ChatFragment、MessageBlock、HintsFragment、PlanetDialog 等所有 Java `UI.formatIcons()` 调用点仍需逐个对照，确认是否已经通过当前 desktop 文本出口覆盖；未覆盖处需要继续接入；
   - 字体 fallback / 增量字形 / CJK 与 content icon glyph 图集动态补字仍需继续收口；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1054. HintsFragment 前端提示 UI 接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.99%**，仍未达到完整可玩；当前继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/ui/fragments/HintsFragment.java::display()` 在 HUD/UI fragment 中绘制提示，不属于世界 Overlay；
+  - 提示文本框使用 `Styles.black5`、`cont.margin(6f)`、桌面文本宽 `400f`、移动端文本宽 `270f`、左对齐并 wrap；
+  - Skip 按钮使用 `@hint.skip`、`Styles.nonet`、尺寸 `112f x 40f`；
+  - `Hint.text()` 顺序为先取 bundle 文本，桌面端再做 `tap/Tap -> click/Click`，最后执行 `UI.formatIcons(text)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `active_desktop_hint_name` 与 `completed_desktop_hints`，让 hint overlay 成为真实 launcher/UI 状态，而不是孤立 helper；
+    - 新增 `show_desktop_hint_like_java()`、`hide_desktop_hint_like_java()`、`complete_desktop_hint_like_java()`、`desktop_hint_shown_like_java()`；
+    - 新增 `desktop_hint_text_like_java()`，按 Java 顺序处理 locale bundle、桌面 tap/click 替换和 `UI.formatIcons()`；
+    - `desktop_ui_render_pass()` 在 `RenderPassKind::Ui` 中绘制 HintsFragment 面板、black5 文本框、400/270 wrap 宽度和 `@hint.skip` nonet 文本按钮。
+  - `core/src/mindustry/input/desktop_input.rs`
+    - 补充 `show_hint()` 门控测试，锁定 `hud_shown`、`settings.hints`、`player_dead`、`select_plans_empty` 与 building guard 行为。
+  - `README.md`
+    - 迁移进度更新到 **97.99%**。
+- 已验证：
+  - `cargo test -p mindustry-core show_hint_follows_hud_settings_player_and_building_guards -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_game_hints_overlay_renders_hint_bundle_text_and_skip_button -- --nocapture`
+- 仍未完成：
+  - `HintsFragment.checkNext()` 的完整 hint 排序、完成/隐藏事件、playtime、cutscene、state/game 和 tutorial/事件触发链仍需继续接入真实 runtime；
+  - `MessageBlock.drawSelect()`、PlanetDialog/Database/Mods/Settings 等剩余 UI.formatIcons 与文本渲染入口仍需逐个对照；
+  - 前端各子菜单视觉、字体 fallback、语言切换持久化、完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
