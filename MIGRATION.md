@@ -33310,3 +33310,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `RenderFontId::Outline` 仍需按 Java `Fonts.loadDefaultFont()` 的 `spaceX -= borderWidth` 做 advance / line width 收紧；
   - Settings/Language/Load-Save/Join-Host/Mods Browser 的行高、按钮皮肤、空态和各子菜单视觉细节仍需继续收口；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1048. Outline 字体 spaceX 收紧对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.80%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `Fonts.loadDefaultFont()` 在资源名以 `outline` 结尾时设置 `borderWidth = Scl.scl(2f)`；
+  - 同一路径还执行 `spaceX -= borderWidth`，因此 Java outline 字体的多字符布局宽度会按每个 glyph 收紧，而不只是额外绘制描边。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `opengl_backend_real_font_layout_advance()`；
+    - `opengl_backend_real_font_text_line_width()` 与 `opengl_backend_text_real_font_quads_without_outline()` 改用布局 advance；
+    - 仅 `RenderFontId::Outline` 减去 `DESKTOP_OUTLINE_FONT_BORDER_WIDTH`，不影响 Default/Icon/IconLarge，也不把普通 `style.outline=true` 混成 Java outline 字体资源语义；
+    - 补 `desktop_graphics_opengl_backend_outline_font_matches_java_space_x_adjustment`，锁定多字符 outline line width 与居中 foreground glyph 起点收紧行为。
+- 已验证：
+  - `cargo test -p mindustry-desktop outline_font_matches_java_space_x_adjustment -- --nocapture`
+  - `cargo test -p mindustry-desktop outline_font_uses_java_border_width -- --nocapture`
+  - `cargo test -p mindustry-desktop outline_font_applies_java_shadow -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Settings/Language/Load-Save/Join-Host/Mods Browser 的行高、按钮皮肤、空态和所有子菜单视觉细节仍需继续收口；
+  - Join 状态条、Join 重连兜底、Host 非 address-in-use 异常主文案、Settings Back fallback 与键位名仍需继续按 Java bundle 链路处理；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
