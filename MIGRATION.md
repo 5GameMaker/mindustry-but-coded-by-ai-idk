@@ -33381,3 +33381,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings Back fallback 与键位名仍需继续按 Java bundle 链路处理；
   - Settings/Language/Load-Save/Join-Host/Mods Browser 的行高、按钮皮肤、空态和所有子菜单视觉细节仍需继续收口；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1051. Settings/Editor Back fallback 收口
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.83%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `BaseDialog.addCloseButton()`、`SettingsMenuDialog`、`MapListDialog` 等返回按钮均使用 `@back` bundle key；
+  - Java 不在这些子页面返回按钮上保留硬编码英文 `"Back"` fallback。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Settings 子页面底部返回按钮改为 `localize_bundle_markup_text("@back")`；
+    - MapList / MapCard / Schematic info/filter 等子页面返回按钮同样改为直接使用 `@back`；
+    - 相关测试断言里的 back label 也改为 `localize_bundle_markup_text("@back")`，避免测试继续认可英文 fallback。
+- 已验证：
+  - `cargo test -p mindustry-desktop settings_child_pages_render_reset_and_back_buttons -- --nocapture`
+  - `cargo test -p mindustry-desktop language_dialog -- --nocapture`
+  - `cargo test -p mindustry-desktop map_list -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Settings 键位名与其它 editor/search/filter fallback 仍需继续按 Java bundle 链路处理；
+  - Settings/Language/Load-Save/Join-Host/Mods Browser 的行高、按钮皮肤、空态和所有子菜单视觉细节仍需继续收口；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
