@@ -19,6 +19,47 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1073. Settings PlanetData chooser 阻止背景输入穿透回归
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮吸收并行 worker 的 Settings/PlanetData 小闭环，补强子模态交互语义。
+- 本轮总体进度更新：约 **98.35%**，仍未达到完整可玩，不能宣告目标完成；后续继续前端字体/语言、所有子菜单与可玩主链路。
+- Java 对照依据：
+  - `SettingsMenuDialog` 的 `dataDialog` / `planetDataDialog` / planet chooser 都是 `BaseDialog` 层级；
+  - chooser 打开后应作为上层 modal 阻止下层 Data/PlanetData 点击与滚轮穿透。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_settings_planet_chooser_blocks_background_scroll_like_java`；
+    - 验证 PlanetData chooser 打开后，下层 Data 区域点击不命中导出/清除等背景 action；
+    - 验证同一点位滚轮不会改变底层状态，chooser 保持打开，已选 planet 不被误改。
+  - `README.md`
+    - 迁移进度更新到 **98.35%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_planet_chooser_blocks_background_scroll_like_java -- --nocapture`
+- 仍未完成：
+  - Settings 其他子菜单的 Java widget 树视觉、字体/语言完整性、完整可玩与联机兼容仍需继续推进。
+
+## 1072. JoinDialog community group header 补 Java 3f 横线
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端 JoinDialog 视觉收口，优先修正 community group header 与 Java `addHeader(...)` 的差异。
+- 本轮总体进度更新：约 **98.34%**，仍未达到完整可玩，不能宣告目标完成；后续继续字体/语言、所有子菜单与可玩主链路。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java:462-501` 的 `addHeader(...)` 在 group name 后使用 `head.image().height(3f).growX().color(col)`；
+  - 该 header 是透明布局中的 label + 3f divider + 两个 40f icon button，不是整块 `whiteui` header 背景；
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java:507-547` 的 host header 仍是 45f `Tex.whiteui`，因此不能误改 host header 高度。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_route_community_group_header_line_rect(...)`，按 group label 与 favorite button 之间的剩余区域生成 3f 横线；
+    - community group 第一行保留下方 `whitePane` host/card body，但移除 Rust-only 的整块 group header `whiteui` 背景；
+    - 在 group label 后绘制 `whiteui` 3f divider，并沿用 prioritized/favorite group color；
+    - 扩展 `desktop_launcher_join_route_tracks_community_groups_like_java_server_group`，断言透明 group header、不出现整块 whiteui、存在 3f divider、且 host header 45f 仍保留。
+  - `README.md`
+    - 迁移进度更新到 **98.34%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+- 仍未完成：
+  - JoinDialog section pad、多列 community host、字体/语言、所有子菜单视觉与完整可玩主链路仍需继续推进；
+  - Rust 客户端与 Java 服务端/客户端联机兼容 smoke test 仍未完成，不能宣告目标完成。
+
 ## 1071. JoinDialog hidden tooltip 改用 Java black6 chrome
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉细节收口，先把 JoinDialog community hidden/eye tooltip 从 Rust-only chrome 改回 Java Tooltip 风格。
