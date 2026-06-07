@@ -33161,3 +33161,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Text/AreaText tooltip、Reset/Back/Data 等按钮已保持 Default 非 outline，但仍需逐页补全断言；
   - Join/LoadSave/About/Database/Editor 等子菜单仍需继续逐项做像素与交互回归；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1042. LanguageDialog 字体覆盖重启语义
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.74%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `Vars.loadSettings()` 在创建 bundle 后调用 `Locale.setDefault(locale)`，随后才 `app.post(Fonts::loadExtraFonts)`；
+  - `Fonts.loadExtraFonts()` 的 `font_jp` / `font_jp_outline` 覆盖只由启动/加载后的 `Locale.getDefault().getLanguage().equals("ja")` 门控；
+  - `LanguageDialog` 点击语言只写 `Core.settings.put("locale", ...)`、`player.locale = ...` 并显示 `@language.restart`，不会在当前运行时热切字体覆盖。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增独立 `font_locale`，把字体上传计划与 `settings_locale` 的运行时选择状态解耦；
+    - `font_glyph_upload_plan()` 与 `font_glyph_upload_plan_cache_key()` 改为使用 `font_locale`，只在初始化/`load_settings_locale_from_settings()` 这类加载设置路径刷新；
+    - `set_settings_locale(...)` 保持 Java `LanguageDialog` 行为：更新待重启 locale、`player_locale` 和 restart 提示，但不立即切换已加载 bundle/font locale；
+    - 补 `desktop_launcher_language_switch_keeps_font_override_until_restart_like_java`，锁定点击日语不会热切 `font_jp`，模拟重启加载后才重建字体上传计划。
+- 已验证：
+  - `cargo test -p mindustry-desktop language_switch_keeps_font_override -- --nocapture`
+  - `cargo test -p mindustry-desktop font_glyph_upload_plan -- --nocapture`
+  - `cargo test -p mindustry-desktop font_atlas_loads_font_jp -- --nocapture`
+  - `cargo test -p mindustry-desktop language -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Settings/Language 仍需继续逐项核对实际截图中的字号、阴影、UI scale 与按钮皮肤细节；
+  - MapLocalesDialog、地图本地化属性编辑、外部 bundle 更复杂 fallback 与其它子菜单语言链路仍需继续迁移；
+  - 前端完整还原、完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
