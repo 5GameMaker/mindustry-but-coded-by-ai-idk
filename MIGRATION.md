@@ -33764,3 +33764,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - placeholder 字体路径、wrap 后的 markup 分段、更多 Arc color names 与嵌套/异常 tag 行为仍需继续对照；
   - UI 文本 markup 的逐菜单视觉审查仍需继续，尤其是 Join/Host/Database/Planet/Mods/ContentInfo 等大量 `[accent]` 文本；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1058. Placeholder 字体路径接入 UI markup 前景色
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **98.03%**，仍未达到完整可玩；继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- Java 对照证据：
+  - Java `Fonts.def` / `Fonts.outline` 的 markupEnabled 是字体行为，不应只在真实 atlas 成功时生效；
+  - Rust placeholder/fallback 字体路径若仍把 `[accent]` 后文本画成单一 base color，会在资源缺失、字形缺失或测试 fallback 路径中暴露与 Java 不一致的前端色彩表现。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `opengl_backend_text_placeholder_quads()` 复用 OpenGL markup parser；
+    - placeholder outline pass 保持暗色，foreground pass 按 per-char markup color 绘制；
+    - `opengl_backend_text_placeholder_quads_without_outline()` 接收 char color slice，空格、图标 placeholder 和普通像素字形都推进同一 char index；
+    - 补 `desktop_graphics_opengl_backend_markup_colors_placeholder_font_like_java`。
+  - `README.md`
+    - 迁移进度更新到 **98.03%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_markup_colors_real_font_foreground_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_markup_colors_placeholder_font_like_java -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - wrap 后的 markup 分段、更多 Arc color names、嵌套 tag 与非法 tag 的精确 Arc 行为仍需继续对照；
+  - UI 文本 markup 的逐菜单视觉审查仍需继续，尤其是 Join/Host/Database/Planet/Mods/ContentInfo 等大量 `[accent]` 文本；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
