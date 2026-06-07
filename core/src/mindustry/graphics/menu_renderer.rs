@@ -4698,6 +4698,129 @@ mod tests {
     }
 
     #[test]
+    fn menu_desktop_submenu_panels_keep_java_black6_layering_and_alpha() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+        assert!(state.select_desktop_root(MenuButtonRole::Play));
+
+        let half_fade_in_input = MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
+            scl4: 4.0,
+            delta: MENU_SUBMENU_FADE_IN_SECONDS * 0.5,
+        };
+        let play_plan = state.render_plan(half_fade_in_input);
+        let play_alpha = play_plan.ui.submenu_alpha;
+        assert!(play_alpha > 0.0 && play_alpha < 1.0);
+
+        fn is_black6_panel_command(
+            command: &RenderCommand,
+            rect: RenderRect,
+            alpha_scale: f32,
+        ) -> bool {
+            match command {
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect: sprite_rect,
+                    tint,
+                    layer,
+                    ..
+                } => {
+                    symbol == "whiteui"
+                        && *sprite_rect == rect
+                        && (tint[3] - UiDrawableTint::Black6.rgba()[3] * alpha_scale).abs() < 0.0001
+                        && (*layer - MENU_DESKTOP_BACKGROUND_LAYER).abs() < f32::EPSILON
+                }
+                RenderCommand::FillRect {
+                    rect: fill_rect,
+                    color,
+                    layer,
+                } => {
+                    *fill_rect == rect
+                        && color[0] == 0.0
+                        && color[1] == 0.0
+                        && color[2] == 0.0
+                        && (color[3] - UiDrawableTint::Black6.rgba()[3] * alpha_scale).abs()
+                            < 0.0001
+                        && (*layer - MENU_DESKTOP_BACKGROUND_LAYER).abs() < f32::EPSILON
+                }
+                _ => false,
+            }
+        }
+
+        let play_commands = play_plan.ui.to_render_commands();
+        assert!(play_commands.len() >= 2);
+        assert!(is_black6_panel_command(
+            &play_commands[0],
+            RenderRect::new(128.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
+            1.0,
+        ));
+        assert!(is_black6_panel_command(
+            &play_commands[1],
+            RenderRect::new(358.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
+            play_alpha,
+        ));
+        assert!(play_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, .. } if text == "Campaign"
+        )));
+
+        assert!(state.select_desktop_root(MenuButtonRole::Database));
+        assert_eq!(state.active_root, Some(MenuButtonRole::Database));
+        assert_eq!(state.submenu_target_alpha, 1.0);
+        assert!(
+            (state.submenu_alpha - play_alpha).abs() < 0.0001,
+            "Java click-switching from Play to Database keeps the submenu table alpha instead of resetting it"
+        );
+
+        let database_plan = state.render_plan(MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
+            scl4: 4.0,
+            delta: 0.0,
+        });
+        assert_eq!(database_plan.ui.submenu_alpha, play_alpha);
+
+        let database_root = database_plan
+            .ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Database)
+            .expect("database root should remain visible after switching roots");
+        assert!(database_root.selected);
+        assert!(database_plan
+            .ui
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Schematics));
+        assert!(database_plan
+            .ui
+            .buttons
+            .iter()
+            .all(|button| button.role != MenuButtonRole::Campaign));
+
+        let database_commands = database_plan.ui.to_render_commands();
+        assert!(database_commands.len() >= 2);
+        assert!(is_black6_panel_command(
+            &database_commands[0],
+            RenderRect::new(128.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
+            1.0,
+        ));
+        assert!(is_black6_panel_command(
+            &database_commands[1],
+            RenderRect::new(358.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
+            play_alpha,
+        ));
+        assert!(database_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, .. } if text == "Schematics"
+        )));
+    }
+
+    #[test]
     fn menu_ui_plan_desktop_emits_black6_panels_before_button_draws_like_java_layering() {
         let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
         assert!(state.select_desktop_root(MenuButtonRole::Database));

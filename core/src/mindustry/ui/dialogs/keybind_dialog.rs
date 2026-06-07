@@ -2,11 +2,34 @@ use std::collections::BTreeMap;
 
 use crate::mindustry::input::{Binding, KeyBindingInput, KeyBindingSpec, KeyCode};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeybindDialogButtonSize {
+    pub width: u16,
+    pub height: u16,
+}
+
+const CATEGORY_DIVIDER_HEIGHT: u16 = 3;
+const ACTION_BUTTON_SIZE: KeybindDialogButtonSize = KeybindDialogButtonSize {
+    width: 140,
+    height: 40,
+};
+const RESET_ALL_MIN_WIDTH: u16 = 200;
+const RESET_ALL_HEIGHT: u16 = 50;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeybindDialogRow {
     Category(&'static str),
-    Binding(KeyBindingSpec),
-    ResetAll,
+    CategoryDivider {
+        height: u16,
+    },
+    Binding {
+        spec: KeyBindingSpec,
+        button_size: KeybindDialogButtonSize,
+    },
+    ResetAll {
+        min_width: u16,
+        height: u16,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,7 +114,7 @@ impl KeybindDialog {
     where
         F: FnMut(&str) -> String,
     {
-        let needle = self.search_text.trim().to_lowercase();
+        let needle = self.search_text.to_lowercase();
         let mut rows = Vec::new();
         let mut last_category = None;
         for spec in Binding::defaults(self.android) {
@@ -101,11 +124,20 @@ impl KeybindDialog {
             }
             if last_category != Some(spec.category) {
                 rows.push(KeybindDialogRow::Category(spec.category));
+                rows.push(KeybindDialogRow::CategoryDivider {
+                    height: CATEGORY_DIVIDER_HEIGHT,
+                });
                 last_category = Some(spec.category);
             }
-            rows.push(KeybindDialogRow::Binding(spec));
+            rows.push(KeybindDialogRow::Binding {
+                spec,
+                button_size: ACTION_BUTTON_SIZE,
+            });
         }
-        rows.push(KeybindDialogRow::ResetAll);
+        rows.push(KeybindDialogRow::ResetAll {
+            min_width: RESET_ALL_MIN_WIDTH,
+            height: RESET_ALL_HEIGHT,
+        });
         rows
     }
 
@@ -204,13 +236,62 @@ mod tests {
         });
 
         assert_eq!(rows.first(), Some(&KeybindDialogRow::Category("general")));
-        assert!(rows
-            .iter()
-            .any(|row| matches!(row, KeybindDialogRow::Binding(spec) if spec.name == "move_x")));
-        assert_eq!(rows.last(), Some(&KeybindDialogRow::ResetAll));
-        assert!(!rows
-            .iter()
-            .any(|row| matches!(row, KeybindDialogRow::Binding(spec) if spec.name == "move_y")));
+        assert_eq!(
+            rows.get(1),
+            Some(&KeybindDialogRow::CategoryDivider {
+                height: CATEGORY_DIVIDER_HEIGHT
+            })
+        );
+        if let Some(KeybindDialogRow::Binding { spec, button_size }) = rows.get(2) {
+            assert_eq!(spec.name, "move_x");
+            assert_eq!(*button_size, ACTION_BUTTON_SIZE);
+        } else {
+            panic!("expected move_x binding row");
+        }
+        assert_eq!(
+            rows.last(),
+            Some(&KeybindDialogRow::ResetAll {
+                min_width: RESET_ALL_MIN_WIDTH,
+                height: RESET_ALL_HEIGHT
+            })
+        );
+        assert!(!rows.iter().any(
+            |row| matches!(row, KeybindDialogRow::Binding { spec, .. } if spec.name == "move_y")
+        ));
+    }
+
+    #[test]
+    fn keybind_dialog_rows_keep_java_category_dividers_and_button_sizes() {
+        let mut dialog = KeybindDialog::new(false);
+        dialog.set_search_text("strafe");
+
+        let rows = dialog.visible_rows(|name| match name {
+            "move_x" => "Strafe".into(),
+            other => other.into(),
+        });
+
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows[0], KeybindDialogRow::Category("general"));
+        assert_eq!(
+            rows[1],
+            KeybindDialogRow::CategoryDivider {
+                height: CATEGORY_DIVIDER_HEIGHT
+            }
+        );
+        match &rows[2] {
+            KeybindDialogRow::Binding { spec, button_size } => {
+                assert_eq!(spec.name, "move_x");
+                assert_eq!(*button_size, ACTION_BUTTON_SIZE);
+            }
+            other => panic!("expected binding row, got {other:?}"),
+        }
+        assert_eq!(
+            rows[3],
+            KeybindDialogRow::ResetAll {
+                min_width: RESET_ALL_MIN_WIDTH,
+                height: RESET_ALL_HEIGHT
+            }
+        );
     }
 
     #[test]

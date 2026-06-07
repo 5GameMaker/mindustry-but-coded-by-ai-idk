@@ -19,6 +19,48 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1076. MainMenu 桌面 submenu black6 层级与 fade 回归
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮吸收并行 worker 的 MainMenu 回归，继续锁第一屏前端视觉行为。
+- 本轮总体进度更新：约 **98.38%**，仍未达到完整可玩，不能宣告目标完成；后续继续字体/语言、所有子菜单与可玩主链路。
+- Java 对照依据：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:196-294` 的桌面 submenu 保留同一 submenu table，并通过 alpha/fade 切换；
+  - main panel 与 submenu panel 使用 Java `black6` 层级语义，root 从 Play 切到 Database 时不应重置 submenu alpha。
+- 主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增 `menu_desktop_submenu_panels_keep_java_black6_layering_and_alpha`；
+    - 锁定 Play/Database submenu 的 black6 panel 层级、alpha 保留、root 切换后 submenu 内容切换但 fade 值不归零。
+- 已验证：
+  - `cargo test -p mindustry-core menu_desktop_submenu_panels_keep_java_black6_layering_and_alpha -- --nocapture`
+
+## 1075. KeybindDialog 分类 divider 与按钮尺寸对齐 Java
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮吸收并行 worker 的 Controls/Keybind 小闭环，继续补齐前端子菜单视觉模型。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/KeybindDialog.java:41-125` 的搜索栏不会 trim 搜索文本；
+  - `rebuildBinds()` 在分类标题后绘制 `height(3)` divider；
+  - 行内 rebind/reset 按钮使用 `140f x 40f`，底部 Reset All 使用 `minWidth(200f)` 与 `height(50f)`。
+- 主改动：
+  - `core/src/mindustry/ui/dialogs/keybind_dialog.rs`
+    - `KeybindDialogRow` 增加 `CategoryDivider`、带尺寸的 `Binding`、带 minWidth/height 的 `ResetAll`；
+    - `visible_rows()` 分类后插入 3f divider，并保留 Java 不 trim 搜索文本的行为；
+    - 新增 `keybind_dialog_rows_keep_java_category_dividers_and_button_sizes`。
+- 已验证：
+  - `cargo test -p mindustry-core keybind_dialog -- --nocapture`
+
+## 1074. font_jp / font_jp_outline 日文 locale 覆盖回归
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续字体/语言缺口收口，先锁最容易回退的日文字体覆盖路径。
+- Java 对照依据：
+  - `core/src/mindustry/ui/Fonts.java:64-118` 里日文 locale 才加载 `font_jp` / `font_jp_outline` 作为额外覆盖；
+  - 该覆盖应同时作用于 Default 与 Outline，而非只替换普通字体。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_graphics_font_atlas_loads_font_jp_only_for_japanese_locale_and_overrides_default_and_outline`；
+    - 断言 `en/zh/ko/id` 不引入 `font_jp.woff`，`ja/ja_JP/ja-JP.UTF-8` 同时生成 Default 与 Outline 两个 override source，且共享同一日文字形 seed。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_loads_font_jp_only_for_japanese_locale_and_overrides_default_and_outline -- --nocapture`
+
 ## 1073. Settings PlanetData chooser 阻止背景输入穿透回归
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮吸收并行 worker 的 Settings/PlanetData 小闭环，补强子模态交互语义。
