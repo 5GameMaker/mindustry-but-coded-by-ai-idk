@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1028. Mod bundle 本地化 overlay 与字体 seed 接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端字体/语言缺口收口，对照 `Mods.java:614-652` 的 `bundles/*.properties` 合并语义。
+- 本轮总体进度更新：约 **97.71%**，仍未达到完整可玩，不能宣告目标完成；后续继续 UI 所有子菜单、JP/CJK outline、可玩性 runtime 与 Java↔Rust 联机兼容。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 mod bundle 文件名识别、locale chain 与 overlay 收集 helper；
+    - launcher 新增 `last_mods_directory_bundle_values`，在合并 mod 目录、清空、启用/禁用、删除、文件导入、GitHub 下载安装后刷新；
+    - `bundle_value_for_current_locale(...)` 接入 mod overlay，使 `localize_bundle_markup_text(...)` 与 `format_bundle_text(...)` 能命中 mod `bundles/bundle*.properties`；
+    - overlay 收集时复用严格 UTF-8 `.properties` parser，并把 mod bundle values 注册进 dynamic font seed，使新增 CJK/PUA 字符触发 font glyph upload plan cache rebuild；
+    - lookup 顺序按当前最小 Java 等价实现：global 仍保持既有最高优先级；随后 mod overlay；再 external/internal/upstream fallback。mod overlay 内部按当前 locale exact → language → root 查询，enabled mods 后读覆盖先读。
+- 已验证：
+  - `cargo test -p mindustry-desktop mod_bundle -- --nocapture`
+  - `cargo test -p mindustry-desktop external_bundle -- --nocapture`
+- 注意：
+  - 本轮先在 desktop launcher UI 文本链路接入 mod bundle overlay，尚未把 parser 抽到 core 公共 helper，也尚未把 `core/src/mindustry/modsys/mod.rs` 的 lossy 文本入口整体改成严格 UTF-8；
+  - JP/CJK outline 的真实 FreeType border/shadow 等价仍是下一批字体视觉缺口。
+
 ## 1027. ModsDialog 空态与 Browser 空结果视觉对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端第一优先级，专门对照 `ModsDialog.java` 收口 Mods 主列表空态与 Mods Browser 过滤空结果。
