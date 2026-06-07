@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1057. Host/Join 颜色按钮改回 Java ImageButton
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉对齐，处理 HostDialog 和 JoinDialog 的玩家颜色按钮仍是 Rust-only `FillRect + StrokeRect` 的问题。
+- 本轮总体进度更新：约 **98.20%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Settings footer/dynamic icon、字体 CJK/router glyph 落点和更多子菜单视觉细节。
+- Java 对照证据：
+  - `JoinDialog.setup()` 中玩家颜色入口为 `t.button(Tex.whiteui, Styles.squarei, 40, ...) .size(54f)`，并在 update 中设置 `imageUpColor = player.color()`；
+  - `HostDialog` 同类颜色入口也应是 `ImageButton(Tex.whiteui, Styles.squarei)` 的按钮皮肤，而不是裸矩形。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `player_color_button_swatch_rect(...)`、`player_color_button_tint(...)` 和 `push_player_color_image_button(...)`；
+    - Join 顶部玩家颜色按钮与 HostDialog 颜色按钮统一改成 `squarei` 背景 + 40f `whiteui` 色块，并移除原 `FillRect + StrokeRect`；
+    - Join/Host 回归测试断言颜色入口不再是裸 `FillRect`，而是 Java `Styles.squarei` + `Tex.whiteui imageUpColor` 语义。
+  - `README.md`
+    - 迁移进度更新到 **98.20%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_opens_host_dialog_route -- --nocapture`
+- 注意：
+  - 本轮只收颜色按钮可见 chrome；PaletteDialog 内部色板、Host/Join 其他控件和所有子菜单仍需继续按 Java 对齐。
+
 ## 1056. Settings 首页移除 Rust-only 容器描边
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉对齐，处理 Settings 首页主菜单外层还多画 Rust-only 青色描边的问题。
