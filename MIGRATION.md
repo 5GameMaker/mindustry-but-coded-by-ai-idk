@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1105. content icon 字形补 packed UI atlas 裁剪来源
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.71%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `Fonts.loadContentIcons()` 读取 `icons/icons.properties` 后通过 `Core.atlas.find(texture)` 取得 atlas region，而不是只依赖独立 `sprites/ui/*.png` 文件。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 packed atlas region 读取与 RGBA 裁剪路径；
+    - content icon bitmap glyph 生成保留旧的独立 PNG 快路径，失败后回退到 `sprites.aatls` UI page region 裁剪，贴近 Java `Core.atlas.find(texture)` 语义；
+    - 新增回归测试，用临时 `icons.properties` 指向 packed UI atlas region，锁定 atlas-backed content icon 仍能生成可见 bitmap glyph。
+  - `README.md`
+    - 迁移进度更新到 **98.71%**。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_content_icon_bitmap_glyphs_crop_from_packed_ui_atlas_like_java --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_font_rasterization_plan_bridges_fonts_icons_and_texture_atlas --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_font_glyph_upload_plan_emits_runtime_texture_upload_when_ready --no-default-features`
+
 ## 1104. ImageButton 状态色接入 Java image color
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
