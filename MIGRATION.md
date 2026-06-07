@@ -33738,3 +33738,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings/Language/Data/Controls 的内容区行高、按钮状态、ScrollPane knob、输入框焦点和移动端差异仍需继续按 Java 对齐；
   - 字体 fallback、CJK/多语言 atlas 动态补字、UI 文本 markup 渲染和所有子菜单视觉仍需继续收口；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1057. OpenGL 真实字体接入 UI markup 前景色
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **98.02%**，仍未达到完整可玩；继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/core/UI.java` 将 `Fonts.def` / `Fonts.outline` 的 `markupEnabled` 设为 true；
+  - Java 前端大量 bundle 与 UI 文本使用 `[accent]`、`[lightgray]`、`[scarlet]` 等 markup，不应在 Rust 前端中被纯文本化后全部使用同一颜色；
+  - 默认字体 shadow/outline 仍应保留暗色，不随前景 markup 变色。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 OpenGL markup 解析结构，保留既有 plain text 去标签行为，同时为每个 plain char 记录前景色；
+    - 支持 `[accent]`、`[white]`、`[lightgray]`、`[gray]`、`[darkgray]`、`[scarlet]`、`[orange]`、`[cyan]`、`[green]`、`[yellow]` 与 `[#RRGGBB]`；
+    - `opengl_backend_text_real_font_quads_without_outline()` 新增 per-char color 输入，真实字体前景 glyph quad 按 markup 标签着色；
+    - shadow/outline pass 保持 Java 的暗色处理，不被前景 markup 覆盖；
+    - 补 `desktop_graphics_opengl_backend_markup_colors_real_font_foreground_like_java`。
+  - `README.md`
+    - 迁移进度更新到 **98.02%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_markup_colors_real_font_foreground_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_default_applies_java_font_shadow -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - placeholder 字体路径、wrap 后的 markup 分段、更多 Arc color names 与嵌套/异常 tag 行为仍需继续对照；
+  - UI 文本 markup 的逐菜单视觉审查仍需继续，尤其是 Join/Host/Database/Planet/Mods/ContentInfo 等大量 `[accent]` 文本；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
