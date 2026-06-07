@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1052. 主菜单移除 Rust-only 中文 label sprite
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理主菜单仍保留 Rust-only `menu-label-zh-*` 预渲染中文字牌资源的问题。
+- 本轮总体进度更新：约 **98.15%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Settings/Language/Data/Controls 子菜单、字体 fallback、语言切换、ScrollPane 和 BaseDialog 细节对齐。
+- Java 对照证据：
+  - `MenuFragment.java` 的桌面菜单通过 `t.button(b.text, b.icon, Styles.flatToggleMenut, ...)` 渲染，按钮文字来自 runtime `Core.bundle` 文本；
+  - Java 原版没有把中文菜单标签预渲染成 `menu-label-zh-*` sprite 的路径。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 删除 `desktop_menu_label_sprite_virtual_source_paths()` 并从 `default_desktop_texture_atlas(...)` 默认资源链移除；
+    - 收紧主菜单测试，要求菜单标签由 `DrawText`/真实字体 glyph 绘制，禁止 `menu-label-zh-*` sprite 进入菜单渲染路径；
+    - 兼容真实字体 atlas 下 `font:Default:DrawText:U+...` 的文字 quad，不再只接受 placeholder 的 `primitive:DrawText`。
+  - `core/assets/sprites/ui/menu-label-zh-*.png`
+    - 删除过渡期生成的中文菜单 label sprite，避免和 Java runtime 文本渲染语义冲突。
+  - `README.md`
+    - 迁移进度更新到 **98.15%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_without_world -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_locale_bundle_covers_tw_and_fallback_paths -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_frame_for_render_uses_menu_payload_without_world_bundle -- --nocapture`
+- 注意：
+  - 这次只移除 Rust-only 菜单文字图片，菜单 icon sprite 仍保留并继续对照 Java 图标表现；前端整体视觉和所有子菜单仍需继续逐项收口。
+
 ## 1051. 前端裸 bundle key 收口到本地化 DrawText
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Database、TechTree、Save/Load、Weather 子弹窗中部分 `DrawText` 仍直接绘制 `@key` 字面量的问题。
