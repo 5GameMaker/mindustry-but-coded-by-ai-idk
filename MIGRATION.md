@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1061. Host/Join 玩家调色板收紧为 Java 48f 网格
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 PaletteDialog 视觉收口，把上一轮去掉标题/返回按钮后的空白大面板进一步缩到 Java 玩家颜色网格表现。
+- 本轮总体进度更新：约 **98.23%**，仍未达到完整可玩，不能宣告目标完成；后续继续所有前端子菜单、字体语言与 Java Scene2D 表现对齐。
+- Java 对照证据：
+  - `PaletteDialog.build()` 中每个颜色项是 `ImageButton(Tex.whiteui, Styles.squareTogglei, 34, ...) .size(48)`；
+  - `PaletteDialog` 内容只有 `playerColors` 4 列网格，行满 4 个后 `table.row()`。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 Host/Join 玩家调色板专用 `player_palette_dialog_rect_for_panel(...)` 与 `player_palette_color_rect_for_dialog(...)`；
+    - Host/Join color picker 渲染与点击命中改用紧凑 248×152 面板和 4×2 个 48×48 色块；
+    - 删除已经不用的旧 `host_route_palette_dialog_rect_for_panel(...)`，保留共享 ambient-light palette 的旧 swatch helper 不动；
+    - Host/Join 回归测试新增 48×48 色块尺寸断言。
+  - `README.md`
+    - 迁移进度更新到 **98.23%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_opens_host_dialog_route -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 后续如果继续精确对齐 Java `Dialog` skin，可再处理 player palette 的背景九宫格、dialog padding、Esc/back 键关闭行为；本轮没有改 ambient-light 自定义 palette。
+
 ## 1060. PaletteDialog 去掉占位标题并改回色块 ImageButton
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉对齐，处理 HostDialog/JoinDialog 打开玩家颜色选择器时仍显示 Rust-only `PaletteDialog` 标题、可见 `@back` 按钮和裸矩形色块的问题。
