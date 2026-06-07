@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1081. LanguageDialog 滚动状态按 Java 单例行为保留
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.47%**，仍未达到完整可玩；继续优先前端/UI、字体、语言与所有子菜单贴近 Java 原版，最终仍必须是整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java`：`UI.language` 是持久 dialog，`setup()` 构建 locale 列表和 `ScrollPane`，打开/关闭路径没有每次强制把 scroll 归零；
+  - `core/src/mindustry/core/UI.java`：语言对话框作为 UI 单例复用，滚动状态应像 Java `ScrollPane` 一样在同一实例上保留，只在 resize/可见范围变化时 clamp。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 移除 `BackToMain`、`OpenDataDialog`、`OpenLanguageDialog`、`CloseChildDialog` 路径中对 `settings_language_scroll_offset = 0` 的硬重置；
+    - 继续保留 resize/frame refresh 的 clamp，避免窗口尺寸变化后 offset 越界；
+    - 新增 `desktop_settings_language_dialog_preserves_scroll_offset_between_openings_like_java`，覆盖关闭语言弹窗、打开其他子弹窗、重新打开语言弹窗后仍按原 offset 渲染第一行。
+  - `README.md`
+    - 迁移进度更新到 **98.47%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_settings_language_dialog_preserves_scroll_offset_between_openings_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop language_dialog -- --nocapture`
+- 仍未完成：
+  - 字体/语言下一步继续补：外部 bundle/mod bundle 的字体 seed → atlas、日文 `font_jp` override 精度、缺 glyph 回退到 Java `Fonts.getGlyph()` 的 `'F'` 语义；
+  - 前端所有子菜单逐控件对齐、完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1080. Editor map info 接入 MapLocalesDialog overlay/search 闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认不是 UTF-8 后再尝试其他编码。
