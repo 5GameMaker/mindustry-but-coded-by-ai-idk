@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1066. font_jp 增量补字防止日文 placeholder 回退
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续字体/语言前端收口，重点守住 Java `font_jp` incremental 行为，避免 LanguageDialog 或后续 UI 新增非预烘焙日文/中日韩字符时退回 primitive placeholder。
+- 本轮总体进度更新：约 **98.28%**，仍未达到完整可玩，不能宣告目标完成；后续继续 community host 分层、Settings/Language/Controls/Data 子菜单与更多字体首帧风险。
+- Java 对照证据：
+  - `core/src/mindustry/ui/Fonts.java:101-118` 中 `font_jp` / `font_jp_outline` 都是 `incremental = true`；
+  - Java 的日文字体 override 不只依赖预先列出的语言名/Bundle seed，遇到后续字符也应能补字。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_graphics_font_atlas_japanese_override_adds_late_non_ascii_glyphs_without_placeholder` 回归测试；
+    - 测试从真实 `fonts/font_jp.woff` 中寻找一个当前 seed 未覆盖但 font_jp 支持的 CJK/kana 字符；
+    - 断言 `ja` locale 首次 DrawText 后该字符会进入 external font seed、重建后的真实 atlas 包含 glyph，并且渲染 quad 走 `font:Default:DrawText:U+...` 而不是 primitive placeholder。
+  - `README.md`
+    - 迁移进度更新到 **98.28%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_japanese_override_adds_late_non_ascii_glyphs_without_placeholder -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_loads_font_jp_only_for_japanese_locale_and_overrides -- --nocapture`
+- 注意：
+  - 本轮是防回归测试闭环，当前实现已能通过；后续仍需关注首帧 atlas 未就绪时 UI 是否可见渲染 placeholder。
+
 ## 1065. LanguageDialog 语言排序改为 Java CASE_INSENSITIVE_ORDER
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续字体/语言前端收口，处理 LanguageDialog 语言列表排序逻辑与 Java `String.CASE_INSENSITIVE_ORDER` 不完全同源的问题。
