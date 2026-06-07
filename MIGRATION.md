@@ -33206,3 +33206,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `load_game_slot_lines()` 中 `save slots:`、`search:`、`hidden modes:` 等 shell 摘要仍需继续按 Java 可见 UI 收口；
   - Load/Save pending status 里的 `| slot ...` / `| name ...` 细节仍需拆下一个小闭环处理；
   - Mods/Join 的 Rust-only cache/scanned 诊断、其它子菜单视觉与完整可玩性仍需继续推进，不能宣告目标完成。
+
+## 1044. Mods/Join route 诊断文案收口
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.76%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `ModsDialog` 可见 UI 只暴露正常按钮、列表、空态和详情文本，不显示扫描计数；
+  - `JoinDialog`/server cache 属于内部缓存行为，可见 UI 不显示 `server_list.json` 路径、cache loaded/fetched 状态或 cache error 前缀。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `mods_route_lines()` 移除默认可见的 `mods scanned: {count}` route-shell 诊断；
+    - `DesktopMenuRoute::Join` route-shell 移除默认可见的 `community-cache: loaded... path...` 与 `community-cache-error: ...`；
+    - 保留 mod 扫描、community cache 读取/禁用/坏缓存恢复等功能本体，只收口前端可见文案；
+    - 补/更新 Mods 与 Join 回归，锁定 scan/cache 诊断不进入可见 route-shell。
+- 已验证：
+  - `cargo test -p mindustry-desktop mods_route_renders_scanned_mod_cards -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route_loads_community_server_cache -- --nocapture`
+  - `cargo test -p mindustry-desktop community_cache -- --nocapture`
+  - `cargo test -p mindustry-desktop mods_route_empty_state -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Load/Save 其它 route-shell 摘要与 pending status detail 仍需继续收口；
+  - Mods Browser / Join / Host / Database / Editor 等子菜单仍需继续逐页和 Java 视觉表现对齐；
+  - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
