@@ -19,6 +19,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1043. 集中 Settings 前端字号入口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Settings/Language 局部字号散落在 `desktop/src/lib.rs` 调用点的问题，先做低风险集中化，避免后续逐页对齐时继续漂移。
+- 本轮总体进度更新：约 **98.06%**，仍未达到完整可玩，不能宣告目标完成；后续继续 UI 子菜单 Scene2D 几何/滚动节奏、更多字号/行距元数据化、菜单 fast/cull 诊断路径与完整可玩性。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `SETTINGS_TEXT_BUTTON_FONT_SIZE`、`SETTINGS_PREF_LABEL_FONT_SIZE`、`SETTINGS_PREF_VALUE_FONT_SIZE`、`SETTINGS_PREF_TOOLTIP_FONT_SIZE`；
+    - 新增 `settings_text_button_font_size(...)`、`settings_label_style_font_size(...)`、`settings_pref_value_font_size()`、`settings_pref_tooltip_font_size()`，Settings/Language 文本渲染改从统一入口读取；
+    - LanguageDialog 语言按钮、Settings slider label/value、Text/TextArea/TextField 与 tooltip chrome 均不再直接散落 `15.0/12.0/11.0/10.0` 字号字面量；
+    - 新增回归 `desktop_launcher_settings_text_sizes_use_centralized_java_metrics`，防止后续改回硬编码散点。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_text_sizes_use_centralized_java_metrics -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_renders_every_display_name_with_default_font -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 本轮不改变实际可见字号，只把入口集中；这是为后续按 Java Scene2D/TextButton/Label 行距和像素截图逐页收口做准备。
+
 ## 1042. 接入 Java 字体级 markupEnabled 门禁
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Rust `RenderTextStyle::default().markup=true` 导致 Tech/Logic/Monospace/Icon 等非 Java markup 字体也可能误解析 `[red]` / `[accent]` 的问题。
