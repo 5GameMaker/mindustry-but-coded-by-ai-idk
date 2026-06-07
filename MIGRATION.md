@@ -19,6 +19,21 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1040. NetClient UI 文本进入桌面渲染层
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端文字/语言运行链路，补齐 `NetClientState` 中 HUD/toast/info/announce 文本到桌面 UI RenderPass 的真实显示出口。
+- 本轮总体进度更新：约 **97.98%**，仍未达到完整可玩，不能宣告目标完成；后续继续完整 HintsFragment 序列、MessageBlock 选中显示、更多子菜单视觉与完整可玩性。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - `desktop_ui_render_pass(...)` 不再只依赖连接状态条；当 `last_hud_text`、`last_toast_message`、`last_info_message` 或 `last_announcement` 存在时，也会生成 `RenderPassKind::Ui`；
+    - HUD、toast、info、announce 文本在绘制前统一走 `format_icons_like_java(...)`，把上一轮补到 packet/state 层的文本进一步接入真实桌面渲染出口；
+    - 新增回归 `desktop_launcher_desktop_ui_render_pass_draws_net_client_ui_text`，覆盖 UI pass 创建、HUD/toast/info/announce 文本绘制与 icon token 替换。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_desktop_ui_render_pass_draws_net_client_ui_text -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 这不是完整 HintsFragment；它只把已有 NetClient UI packet state 接到桌面渲染层。完整 `hint.*` 队列、`@hint.skip` 按钮和 hint 完成/持久化仍待实现。
+
 ## 1039. Controls 重绑弹窗与 ping 文本图标替换收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉/字体/语言缺口，处理 Keybind 重绑弹窗 chrome 与 ping 文本 `UI.formatIcons()` 运行点。
