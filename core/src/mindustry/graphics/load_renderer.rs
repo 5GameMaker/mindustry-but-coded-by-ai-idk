@@ -35,6 +35,7 @@ const LOAD_FRAGMENT_BAR_TOP_PAD: f32 = 6.0;
 const LOAD_FRAGMENT_CANCEL_WIDTH: f32 = 250.0;
 const LOAD_FRAGMENT_CANCEL_HEIGHT: f32 = 70.0;
 const LOAD_FRAGMENT_CANCEL_PAD: f32 = 20.0;
+const LOAD_FRAGMENT_LABEL_WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoadStage {
@@ -252,6 +253,7 @@ impl LoadRendererState {
             top_warning: fragment_layout.top_warning,
             bottom_warning: fragment_layout.bottom_warning,
             label: fragment_label_text,
+            label_color: input.fragment_label_color,
             label_center: (
                 center_x,
                 fragment_layout.label.y + fragment_layout.label.height * 0.5,
@@ -322,6 +324,7 @@ pub struct LoadFrameInput {
     pub error: Option<String>,
     pub completion: Option<String>,
     pub cancelable: bool,
+    pub fragment_label_color: [f32; 4],
 }
 
 impl LoadFrameInput {
@@ -345,6 +348,7 @@ impl LoadFrameInput {
             error: None,
             completion: None,
             cancelable: false,
+            fragment_label_color: LOAD_FRAGMENT_LABEL_WHITE,
         }
     }
 }
@@ -356,6 +360,7 @@ pub struct LoadingFragmentState {
     pub progress: f32,
     pub progress_visible: bool,
     pub text: String,
+    pub label_color: [f32; 4],
     pub error: Option<String>,
     pub completion: Option<String>,
     pub cancelable: bool,
@@ -369,6 +374,7 @@ impl Default for LoadingFragmentState {
             progress: 0.0,
             progress_visible: false,
             text: "@loading".to_string(),
+            label_color: LOAD_FRAGMENT_LABEL_WHITE,
             error: None,
             completion: None,
             cancelable: false,
@@ -393,6 +399,7 @@ impl LoadingFragmentState {
         self.error = None;
         self.completion = None;
         self.text = text.into();
+        self.label_color = LOAD_FRAGMENT_LABEL_WHITE;
     }
 
     pub fn hide(&mut self) {
@@ -422,6 +429,7 @@ impl LoadingFragmentState {
 
     pub fn set_text(&mut self, text: impl Into<String>) {
         self.text = text.into();
+        self.label_color = loading_fragment_accent_color();
     }
 
     pub fn fail(&mut self, message: impl Into<String>) {
@@ -466,6 +474,7 @@ impl LoadingFragmentState {
         input.error = self.error.clone();
         input.completion = self.completion.clone();
         input.cancelable = self.cancelable;
+        input.fragment_label_color = self.label_color;
         Some(input)
     }
 }
@@ -593,6 +602,7 @@ pub enum LoadRenderCommand {
         top_warning: LoadRect,
         bottom_warning: LoadRect,
         label: String,
+        label_color: [f32; 4],
         label_center: (f32, f32),
         cancel_button: Option<LoadRect>,
         overlay_color: [f32; 4],
@@ -778,6 +788,7 @@ impl LoadRenderCommand {
                 top_warning,
                 bottom_warning,
                 label,
+                label_color,
                 label_center,
                 cancel_button,
                 overlay_color,
@@ -792,7 +803,7 @@ impl LoadRenderCommand {
                 commands.push(RenderCommand::draw_text(
                     label,
                     RenderPoint::new(label_center.0, label_center.1),
-                    [0.98, 0.98, 0.98, 1.0],
+                    label_color,
                     22.0,
                     0.0,
                     RenderTextAlign::Center,
@@ -1060,6 +1071,10 @@ fn progress_percent_text(progress: f32) -> String {
     format!("{}%", (clamp_progress(progress) * 100.0) as i32)
 }
 
+fn loading_fragment_accent_color() -> [f32; 4] {
+    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, Pal::ACCENT.a]
+}
+
 fn clamp_progress(progress: f32) -> f32 {
     if progress.is_finite() {
         progress.clamp(0.0, 1.0)
@@ -1137,6 +1152,7 @@ mod tests {
             error: None,
             completion: None,
             cancelable: false,
+            fragment_label_color: LOAD_FRAGMENT_LABEL_WHITE,
         });
 
         assert_eq!(plan.stage, LoadStage::LoadingContent);
@@ -1344,6 +1360,72 @@ mod tests {
 
         fragment.hide();
         assert_eq!(fragment.frame_input(1280.0, 720.0, 1.0, 0.0), None);
+    }
+
+    #[test]
+    fn loading_fragment_show_uses_white_and_set_text_uses_accent_like_java() {
+        let mut fragment = LoadingFragmentState::new();
+        fragment.show_text("@loading");
+        assert_eq!(
+            fragment.label_color, LOAD_FRAGMENT_LABEL_WHITE,
+            "Java LoadingFragment.show(text) resets nameLabel color to Color.white"
+        );
+
+        fragment.set_text("@saving");
+        assert_eq!(
+            fragment.label_color,
+            loading_fragment_accent_color(),
+            "Java LoadingFragment.setText(text) changes nameLabel color to Pal.accent"
+        );
+
+        let mut renderer = LoadRendererState::default();
+        let plan = renderer.build_plan(
+            fragment
+                .frame_input(1280.0, 720.0, 1.0, 0.0)
+                .expect("visible LoadingFragment should produce frame input"),
+        );
+
+        match plan
+            .commands
+            .iter()
+            .find(|command| matches!(command, LoadRenderCommand::LoadingFragment { .. }))
+            .expect("load plan should include LoadingFragment")
+        {
+            LoadRenderCommand::LoadingFragment {
+                label, label_color, ..
+            } => {
+                assert_eq!(label, "@saving");
+                assert_eq!(*label_color, loading_fragment_accent_color());
+            }
+            other => panic!("expected LoadingFragment command, got {other:?}"),
+        }
+
+        let pass = plan
+            .to_render_pass()
+            .expect("accent LoadingFragment should render");
+        assert!(pass.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, color, layer, .. }
+                if text == "@saving"
+                    && *color == loading_fragment_accent_color()
+                    && (*layer - LOAD_FRAGMENT_LABEL_LAYER).abs() < f32::EPSILON
+        )));
+
+        fragment.show_text("@loading");
+        assert_eq!(
+            fragment.label_color, LOAD_FRAGMENT_LABEL_WHITE,
+            "show(text) should reset the accent state before the next loading screen"
+        );
+    }
+
+    #[test]
+    fn loading_fragment_progress_percent_matches_java_integer_truncation() {
+        assert_eq!(progress_percent_text(0.0), "0%");
+        assert_eq!(progress_percent_text(0.429), "42%");
+        assert_eq!(progress_percent_text(0.999), "99%");
+        assert_eq!(progress_percent_text(1.5), "100%");
+        assert_eq!(progress_percent_text(-0.25), "0%");
+        assert_eq!(progress_percent_text(f32::NAN), "0%");
     }
 
     #[test]

@@ -19,6 +19,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1047. LoadingFragment 标题颜色语义对齐 Java
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 LoadingFragment 中央标题颜色一直硬编码白色、未镜像 Java `show()`/`setText()` 颜色语义的问题。
+- 本轮总体进度更新：约 **98.10%**，仍未达到完整可玩，不能宣告目标完成；后续继续 LoadingFragment 文案本地化、Tech→Default 字体 fallback、Settings Data 子弹窗 chrome、LanguageDialog ScrollPane 几何与完整 UI 子菜单对齐。
+- 主改动：
+  - `core/src/mindustry/graphics/load_renderer.rs`
+    - `LoadingFragmentState` 新增 `label_color`，默认与 `show_text(...)` 均为 `Color.white`；
+    - `set_text(...)` 将 `label_color` 改为 `Pal.accent`，对齐 Java `LoadingFragment.setText(String)`；
+    - `LoadFrameInput` 与 `LoadRenderCommand::LoadingFragment` 传递 `fragment_label_color/label_color`，`into_render_commands(...)` 不再把标题色硬编码为 `[0.98, 0.98, 0.98, 1.0]`；
+    - 新增 `loading_fragment_show_uses_white_and_set_text_uses_accent_like_java`，验证 state、plan、render command 三层颜色一致；
+    - 新增 `loading_fragment_progress_percent_matches_java_integer_truncation`，锁定 Java `((int)(progress * 100) + "%")` 的截断行为。
+- 已验证：
+  - `cargo test -p mindustry-core loading_fragment_show_uses_white_and_set_text_uses_accent_like_java -- --nocapture`
+  - `cargo test -p mindustry-core loading_fragment_progress_percent_matches_java_integer_truncation -- --nocapture`
+  - `rustfmt --edition 2021 --check core/src/mindustry/graphics/load_renderer.rs`
+  - `git diff --check`
+- 注意：
+  - 本轮不处理 `@loading/@cancel` 的桌面端本地化替换，也不处理 `Fonts.tech` 缺字回退；这两项仍是 LoadingFragment 前端视觉/语言高优先缺口。
+
 ## 1046. 对齐 Settings 主菜单 iconMed 与按钮字号
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Settings 主菜单图标与文字明显小于 Java 原版的问题。
