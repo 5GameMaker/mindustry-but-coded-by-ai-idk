@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1087. MapLocales `getProperty` / `getFormatted` fallback 语义拆分
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.53%**，仍未达到完整可玩；当前仍优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/type/MapLocales.java:47-62`：public `getProperty(key)` 路径是当前 locale → 英文 map → `Core.bundle` → missing；private `getProperty(locale, key)` 路径是指定 locale → 英文 map → missing；
+  - `core/src/mindustry/type/MapLocales.java:73-93`：`getFormatted(...)` 只在 map locale/英文 map 内 fallback，不回 `Core.bundle`。
+- 本轮主改动：
+  - `core/src/mindustry/type/map_locales.rs`
+    - 新增 `get_property_for_locale(locale, key)`，明确表示 Java private helper 语义：只走 map locale/英文 map，不走 global bundle；
+    - `get_property_for_locale_or_global(...)` 继续表示 Java public `getProperty(key)` 语义；
+    - `get_formatted_for(...)` 改用 locale-only helper，防止格式化路径意外读取 `Core.bundle` 文案。
+  - `README.md`
+    - 迁移进度更新到 **98.53%**。
+- 已验证：
+  - `cargo test -p mindustry-core map_locales_get_property_for_setting_falls_back_to_global_bundle_like_java -- --nocapture`
+  - `cargo test -p mindustry-core map_locales_formatted_replaces_at_placeholders_in_order -- --nocapture`
+  - `cargo test -p mindustry-core map_locales_dialog -- --nocapture`
+- 仍未完成：
+  - MapLocalesDialog 非英文 UI locale 的显示名仍需继续扩展完整 Java `Locale.getDisplayName(Core.bundle.getLocale())` 覆盖；
+  - 非 Windows/default locale 探测仍需继续对齐 Java `Locale.getDefault()`；
+  - 前端所有子菜单、完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1086. `settings.locale=default` 加载阶段保留 sentinel
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

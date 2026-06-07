@@ -181,6 +181,12 @@ impl MapLocales {
         self.get_property_for_locale_or_global(&locale, key)
     }
 
+    pub fn get_property_for_locale(&self, locale: &str, key: &str) -> String {
+        self.get_property_for(locale, key)
+            .or_else(|| self.get_property_for("en", key))
+            .unwrap_or_else(|| format!("???{key}???"))
+    }
+
     pub fn get_property_for_locale_or_global(&self, locale: &str, key: &str) -> String {
         self.get_property_for(locale, key)
             .or_else(|| self.get_property_for("en", key))
@@ -199,10 +205,7 @@ impl MapLocales {
     }
 
     pub fn get_formatted_for(&self, locale: &str, key: &str, args: &[String]) -> String {
-        let mut result = self
-            .get_property_for(locale, key)
-            .or_else(|| self.get_property_for("en", key))
-            .unwrap_or_else(|| format!("???{key}???"));
+        let mut result = self.get_property_for_locale(locale, key);
 
         for arg in args {
             if let Some(index) = result.find('@') {
@@ -616,6 +619,16 @@ mod tests {
             locales.get_property_for_locale_or_global("fr", "editor"),
             "Éditeur",
             "Java MapLocales.getProperty falls back to the active Core.bundle locale when map locale and English map bundle miss"
+        );
+        assert_eq!(
+            locales.get_property_for_locale("fr", "editor"),
+            "???editor???",
+            "Java's private getProperty(locale, key) helper does not fall back to Core.bundle; only public getProperty(key) does"
+        );
+        assert_eq!(
+            locales.get_formatted_for("fr", "editor", &[]),
+            "???editor???",
+            "Java MapLocales.getFormatted only falls back through the map English locale, not Core.bundle"
         );
         assert_eq!(
             locales.get_property_for_locale_or_global("fr", "definitely.missing.map.locale.key"),
