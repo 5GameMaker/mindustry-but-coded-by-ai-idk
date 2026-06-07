@@ -19,6 +19,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1044. BaseDialog 标题字号进入样式元数据
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，先收口所有基于 `BaseDialog` 外壳的标题字号来源，避免 Settings/Language/Join/Host/Database/Mods 等子菜单继续各自散落标题字号。
+- 本轮总体进度更新：约 **98.07%**，仍未达到完整可玩，不能宣告目标完成；后续继续 UI 子菜单 Scene2D 几何/滚动节奏、LoadingFragment 字体/本地化、菜单 locale-aware 生产路径、HintsFragment runtime/render 入口与完整可玩性。
+- 主改动：
+  - `core/src/mindustry/ui/dialogs/base_dialog.rs`
+    - `DialogTitleStyle` 新增 `font_size: Option<f32>`，把 Java `DialogStyle.titleFont`/`titleFontColor` 同一层的标题字号元数据集中到样式对象；
+    - `DialogStyle::default_dialog()` 与 `DialogStyle::full_dialog()` 均记录 `font_size = Some(24.0)`，保持现有 Java 外壳观感；
+    - `BaseDialog::shell_render_commands(...)` 优先使用 `self.style.title.font_size`，没有样式字号时才回退到 `DialogShellLayout.title_font_size`，保留裸/custom dialog 的过渡兼容。
+- 已验证：
+  - `cargo test -p mindustry-core base_dialog -- --nocapture`
+  - `rustfmt --edition 2021 --check core/src/mindustry/ui/dialogs/base_dialog.rs`
+  - `git diff --check`
+- 注意：
+  - 本轮只移动标题字号来源，不改变实际可见字号；后续仍要继续处理具体子菜单内容区、按钮、滚动列表、tooltip、LoadingFragment 与本地化链路。
+
 ## 1043. 集中 Settings 前端字号入口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Settings/Language 局部字号散落在 `desktop/src/lib.rs` 调用点的问题，先做低风险集中化，避免后续逐页对齐时继续漂移。

@@ -120,6 +120,7 @@ impl DialogColorRef {
 pub struct DialogTitleStyle {
     pub font: Option<&'static str>,
     pub color: Option<DialogColorRef>,
+    pub font_size: Option<f32>,
 }
 
 impl Default for DialogTitleStyle {
@@ -127,6 +128,7 @@ impl Default for DialogTitleStyle {
         Self {
             font: None,
             color: None,
+            font_size: None,
         }
     }
 }
@@ -175,6 +177,7 @@ impl DialogStyle {
             title: DialogTitleStyle {
                 font: Some("Fonts.def"),
                 color: Some(DialogColorRef::named("accent")),
+                font_size: Some(24.0),
             },
             accent_line: Some(DialogAccentLineStyle {
                 drawable: DialogDrawableRef::named("whiteui"),
@@ -435,7 +438,7 @@ impl BaseDialog {
                         .color
                         .map(DialogColorRef::rgba)
                         .unwrap_or([1.0, 1.0, 1.0, 1.0]),
-                    layout.title_font_size,
+                    self.style.title.font_size.unwrap_or(layout.title_font_size),
                     0.0,
                     RenderTextStyle::new(RenderTextAlign::Center)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -468,6 +471,7 @@ mod tests {
         );
         assert_eq!(style.title.font, Some("Fonts.def"));
         assert_eq!(style.title.color, Some(DialogColorRef::named("accent")));
+        assert_eq!(style.title.font_size, Some(24.0));
         assert_eq!(
             style.accent_line,
             Some(DialogAccentLineStyle {
@@ -494,6 +498,7 @@ mod tests {
         );
         assert_eq!(style.title.font, Some("Fonts.def"));
         assert_eq!(style.title.color, Some(DialogColorRef::named("accent")));
+        assert_eq!(style.title.font_size, Some(24.0));
         assert_eq!(
             style.accent_line,
             Some(DialogAccentLineStyle {
@@ -503,6 +508,24 @@ mod tests {
                 pad: 4.0,
             })
         );
+    }
+
+    #[test]
+    fn dialog_style_default_carries_java_title_font_size() {
+        let style = DialogStyle::default();
+
+        assert_eq!(
+            style.title.font_size,
+            Some(24.0),
+            "Arc Dialog title Label uses the default Fonts.def scale; the Rust shell keeps that Java-sized value in the title style metadata instead of scattering it in render code"
+        );
+    }
+
+    #[test]
+    fn dialog_style_full_carries_java_title_font_size() {
+        let style = DialogStyle::full_dialog();
+
+        assert_eq!(style.title.font_size, Some(24.0));
     }
 
     #[test]
@@ -597,6 +620,29 @@ mod tests {
             assert_eq!(drawable.ui_tint(), tint, "{name}");
             assert_eq!(drawable.default_tint(), rgba, "{name}");
         }
+    }
+
+    #[test]
+    fn base_dialog_shell_commands_use_title_font_size_from_style() {
+        let mut style = DialogStyle::default();
+        style.title.font_size = Some(31.0);
+        let dialog = BaseDialog::with_style("@title", style);
+        let mut layout = DialogShellLayout::from_stage_and_panel(
+            RenderRect::new(0.0, 0.0, 800.0, 600.0),
+            RenderRect::new(140.0, 160.0, 520.0, 220.0),
+        );
+        layout.title_font_size = 11.0;
+
+        let commands = dialog.shell_render_commands(layout);
+
+        let title_size = commands
+            .iter()
+            .find_map(|command| match command {
+                RenderCommand::DrawText { text, size, .. } if text == "@title" => Some(*size),
+                _ => None,
+            })
+            .expect("dialog title should render");
+        assert_eq!(title_size, 31.0);
     }
 
     #[test]
