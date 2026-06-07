@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1069. MapLocales default 语言键改为 Java getLanguage()
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续语言/本地化闭环，修正地图本地化在默认语言设置下的 locale key 选择。
+- 本轮总体进度更新：约 **98.31%**，仍未达到完整可玩，不能宣告目标完成；后续继续补 `MapLocalesDialog` UI、LanguageDialog 视觉回归、字体 glyph/atlas 与前端所有子菜单。
+- Java 对照证据：
+  - `core/src/mindustry/type/MapLocales.java:96-103` 中 `currentLocale()` 在 `settings.getString("locale") == "default"` 时返回 `Locale.getDefault().getLanguage()`；
+  - 也就是说默认语言路径只保留语言段，如 `ja_JP` 对应 map locale key `ja`，而不是 `ja_JP`；
+  - public `getProperty(...)` 在 map locale 和 `en` map bundle 都缺失时回落到当前 `Core.bundle`，因此指定 `fr` 时应回落到法语 `editor = Éditeur`。
+- 主改动：
+  - `core/src/mindustry/type/map_locales.rs`
+    - 新增 `current_language_from_lang(...)`，复用原 `LANG` 解析后只取 `_` 前语言段；
+    - `current_locale()` 与 `current_locale_from_setting("default", ...)` 改为返回 Java `Locale.getDefault().getLanguage()` 等价值；
+    - 更新 MapLocales 回归断言，锁住 `zh_CN.UTF-8 -> zh`、`default + ja_JP.UTF-8 -> ja`；
+    - 修正 Core.bundle fallback 断言，指定 `fr` 时期待法语 `Éditeur` 而不是英文 `Editor`。
+  - `README.md`
+    - 迁移进度更新到 **98.31%**。
+- 已验证：
+  - `cargo test -p mindustry-core map_locales -- --nocapture`
+- 仍未完成：
+  - Java `MapLocalesDialog` 的完整 UI（语言列表、属性卡、过滤、apply/edit/add/help）仍需接入桌面前端；
+  - LanguageDialog 还需补更强的视觉回归，确保 ScrollPane、选中态和 restart 信息条不会回退；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1068. Controls 重绑捕获弹窗改回 Java Dialog(prompt) 语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端/UI 子菜单视觉对齐，先收口 Controls/Keybind 的重绑捕获弹窗。

@@ -102,7 +102,7 @@ impl MapLocales {
     }
 
     pub fn current_locale() -> String {
-        Self::current_locale_from_lang(std::env::var("LANG").ok().as_deref())
+        Self::current_language_from_lang(std::env::var("LANG").ok().as_deref())
     }
 
     pub fn current_locale_from_game_setting(locale: &str) -> String {
@@ -112,9 +112,18 @@ impl MapLocales {
     pub fn current_locale_from_setting(locale: &str, system_lang: Option<&str>) -> String {
         let locale = locale.trim();
         if locale.is_empty() || locale == "default" {
-            return Self::current_locale_from_lang(system_lang);
+            return Self::current_language_from_lang(system_lang);
         }
         locale.replace('-', "_")
+    }
+
+    pub fn current_language_from_lang(lang: Option<&str>) -> String {
+        Self::current_locale_from_lang(lang)
+            .split('_')
+            .next()
+            .filter(|language| !language.is_empty())
+            .unwrap_or("en")
+            .to_string()
     }
 
     pub fn current_locale_from_lang(lang: Option<&str>) -> String {
@@ -560,6 +569,11 @@ mod tests {
         assert_eq!(MapLocales::current_locale_from_lang(Some("pt_BR.UTF-8")), "pt_BR");
         assert_eq!(MapLocales::current_locale_from_lang(Some("")), "en");
         assert_eq!(MapLocales::current_locale_from_lang(None), "en");
+        assert_eq!(
+            MapLocales::current_language_from_lang(Some("zh_CN.UTF-8")),
+            "zh",
+            "Java MapLocales.currentLocale() uses Locale.getDefault().getLanguage() for default settings, so country is stripped"
+        );
     }
 
     #[test]
@@ -576,8 +590,8 @@ mod tests {
         );
         assert_eq!(
             MapLocales::current_locale_from_setting("default", Some("ja_JP.UTF-8")),
-            "ja_JP",
-            "Java Vars loads the default locale as a full Locale, so region codes should survive the LANG fallback"
+            "ja",
+            "Java MapLocales.currentLocale() returns Locale.getDefault().getLanguage() when settings.locale is default"
         );
     }
 
@@ -597,8 +611,8 @@ mod tests {
         );
         assert_eq!(
             locales.get_property_for_locale_or_global("fr", "editor"),
-            "Editor",
-            "Java MapLocales.getProperty falls back to Core.bundle when map locale and English map bundle miss"
+            "Éditeur",
+            "Java MapLocales.getProperty falls back to the active Core.bundle locale when map locale and English map bundle miss"
         );
         assert_eq!(
             locales.get_property_for_locale_or_global("fr", "definitely.missing.map.locale.key"),
