@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1098. Router locale 主菜单文本进入真实 OpenGL 字体闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.64%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/Vars.java` / `loadSettings()` 的 router 语言彩蛋会把普通 bundle 文本中的非空白字符替换为 `Iconc.blockRouter`；
+  - `core/src/mindustry/ui/Fonts.java` 的 icon 注册路径把 router 图标作为真实字体 glyph 注入默认 UI 字体，最终应走字体 atlas，而不是 primitive 占位绘制。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_router_locale_menu_draw_text_reaches_real_font_quads_like_java`；
+    - 构造 `settings_locale/player_locale/font_locale = router` 的主菜单 frame，断言最终 `RenderCommand::DrawText` 已显示 router 化 `@play` 文本，不泄漏英文 `Play` 或裸 `@play`；
+    - 将同一 frame 转换为 `DesktopGraphicsOpenGlBackendFramePlan` 并驱动 executor，断言 backend 字体 locale 保持 `router`，且 `Iconc.blockRouter` 进入 `DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_KEY` 对应的 `font:Default:DrawText:U+F88E` quad，不退回 `primitive:DrawText`。
+  - `README.md`
+    - 迁移进度更新到 **98.64%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib router_locale_menu_draw_text --no-default-features`
+- 仍未完成：
+  - Settings/Language/Data/Controls 的内容区行高、ScrollPane、按钮状态、输入焦点、动态字体补字和更多 locale 仍需继续按 Java 原版细抠；
+  - 所有子菜单中的可见 raw key、content icon、team emoji、iconLarge 与最终 OpenGL quads 仍需继续审查；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1097. KeybindDialog 列表顶部 spacer 对齐 Java
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
