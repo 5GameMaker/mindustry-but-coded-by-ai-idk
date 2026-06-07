@@ -19,6 +19,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1045. Core 菜单 router locale 使用上游 glyph 文案
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 core 菜单计划在 `router` locale 下直用时没有走上游 router glyph 化 bundle 解析的问题。
+- 本轮总体进度更新：约 **98.08%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Settings 主菜单 iconMed/字号、Data 子弹窗 `BaseDialog` chrome、LoadingFragment 本地化/Tech fallback、HintsFragment runtime/render 与完整可玩性。
+- 主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuButtonRole::label_for_locale(...)` 从借用版 `upstream_menu_bundle_value_for_locale(...)` 改为 owned 版 `upstream_menu_bundle_value_for_locale_owned(...)`，让 core 层也继承 `router` locale 的 Java 风格 glyph 化文本；
+    - 保留英文 fallback 与普通 locale 行为不变，桌面生产路径继续由当前 locale 重写按钮文案；
+    - 新增 `menu_button_role_label_for_locale_router_uses_routerized_text` 与 `menu_ui_plan_desktop_router_locale_draws_routerized_builtin_labels`，防止 `router` 回退成英文或裸 `@key`。
+- 已验证：
+  - `cargo test -p mindustry-core menu_button_role_label_for_locale_router_uses_routerized_text -- --nocapture`
+  - `cargo test -p mindustry-core menu_ui_plan_desktop_router_locale_draws_routerized_builtin_labels -- --nocapture`
+  - `rustfmt --edition 2021 --check core/src/mindustry/graphics/menu_renderer.rs`
+  - `git diff --check`
+- 注意：
+  - 本轮是语言/字体种子链路的低风险修补，不代表所有菜单视觉像素已对齐；Settings 主菜单图标与字号仍需继续按 Java `iconMed = 32f` 与 `Styles.flatt` 收口。
+
 ## 1044. BaseDialog 标题字号进入样式元数据
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，先收口所有基于 `BaseDialog` 外壳的标题字号来源，避免 Settings/Language/Join/Host/Database/Mods 等子菜单继续各自散落标题字号。

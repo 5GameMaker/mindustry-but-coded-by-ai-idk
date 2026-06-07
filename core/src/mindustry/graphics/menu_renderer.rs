@@ -9,7 +9,8 @@ use super::{
     RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderViewport,
 };
 use crate::mindustry::ui::{
-    upstream_bundle_en_value, upstream_image_button_style_skin, upstream_menu_bundle_value_for_locale,
+    upstream_bundle_en_value, upstream_image_button_style_skin,
+    upstream_menu_bundle_value_for_locale, upstream_menu_bundle_value_for_locale_owned,
     upstream_text_button_style_skin, upstream_ui_drawable_alias, upstream_ui_icon_glyph_string,
     UiDrawableAlias, UiDrawableTint,
 };
@@ -735,8 +736,7 @@ impl MenuButtonRole {
 
     pub fn label_for_locale(self, locale: &str) -> String {
         self.bundle_key()
-            .and_then(|key| upstream_menu_bundle_value_for_locale(locale, key))
-            .map(ToOwned::to_owned)
+            .and_then(|key| upstream_menu_bundle_value_for_locale_owned(locale, key))
             .unwrap_or_else(|| self.label().to_string())
     }
 
@@ -3368,7 +3368,7 @@ fn menu_ui_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mindustry::ui::upstream_ui_icon_glyph_string;
+    use crate::mindustry::ui::{upstream_ui_icon_glyph_string, UPSTREAM_ROUTER_LANGUAGE_GLYPH};
 
     #[test]
     fn menu_dimensions_match_upstream_mobile_branch() {
@@ -5719,6 +5719,62 @@ mod tests {
         assert!(!commands.iter().any(|command| matches!(
             command,
             RenderCommand::DrawSprite { symbol, .. } if symbol == "menu-label-zh-play"
+        )));
+    }
+
+    #[test]
+    fn menu_button_role_label_for_locale_router_uses_routerized_text() {
+        let play = MenuButtonRole::Play.label_for_locale("router");
+        let settings = MenuButtonRole::Settings.label_for_locale("router");
+
+        assert_ne!(play, MenuButtonRole::Play.label());
+        assert_ne!(settings, MenuButtonRole::Settings.label());
+        assert!(!play.starts_with('@'));
+        assert!(!settings.starts_with('@'));
+        assert_eq!(
+            play.chars().count(),
+            MenuButtonRole::Play.label().chars().count()
+        );
+        assert_eq!(
+            settings.chars().count(),
+            MenuButtonRole::Settings.label().chars().count()
+        );
+        assert!(play.chars().all(|ch| ch == UPSTREAM_ROUTER_LANGUAGE_GLYPH));
+        assert!(settings
+            .chars()
+            .all(|ch| ch == UPSTREAM_ROUTER_LANGUAGE_GLYPH));
+    }
+
+    #[test]
+    fn menu_ui_plan_desktop_router_locale_draws_routerized_builtin_labels() {
+        let plan = menu_ui_plan(
+            MenuFrameInput::new(1280.0, 720.0, 4.0, 1.0 / 60.0),
+            "router",
+            false,
+            MenuButtonRole::Play,
+            Some(MenuButtonRole::Play),
+            Some(MenuButtonRole::Play),
+            1.0,
+            1.0,
+            false,
+            false,
+            &[],
+        );
+        let expected = MenuButtonRole::Play.label_for_locale("router");
+
+        assert!(plan.buttons.iter().any(|button| button.label == expected));
+        assert!(!plan
+            .buttons
+            .iter()
+            .any(|button| button.label == MenuButtonRole::Play.label()));
+
+        let commands = plan.to_render_commands();
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, style, .. }
+                if text == &expected
+                    && style.font == RenderFontId::Default
+                    && style.markup
         )));
     }
 
