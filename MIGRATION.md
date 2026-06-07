@@ -19,6 +19,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1031. Controls 键位显示词表与 Unset 颜色对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉与字体/语言缺口，先收口 Settings → Controls 中肉眼可见的键位显示漂移。
+- 本轮总体进度更新：约 **97.84%**，仍未达到完整可玩，不能宣告目标完成；后续继续所有子菜单视觉、label/textfield/checkbox 样式模型、字体元数据、可玩性 runtime 与 Java↔Rust 联机兼容。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - Controls 默认键位显示改用 Java/Arc `KeyCode.getName()` 词表：`L-Shift`、`L-Ctrl`、`L-Alt`、`Scrollwheel`、`,`、`.`；
+    - Java settings ordinal 读写同时保留旧别名，避免已保存的 `Shift Left` / `Ctrl Left` / `Scroll` 等 Rust 旧值无法回读；
+    - `KeyCode.unset` 对应的 `Unset` 行按 Java `Color.darkGray` 渲染，不再走普通蓝色 key value；
+    - 重绑输入显示同步修正 `shiftLeft/controlLeft/altLeft/scroll/comma/period`。
+- 已验证：
+  - `cargo test -p mindustry-desktop keybind -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 本轮只处理 Controls 键位值显示与 Unset 颜色；axis 中间斜杠的富文本红色表现、LabelStyle/TextField message/Checkbox 字体样式、tooltip chrome 与更多子菜单视觉仍需继续拆闭环。
+
 ## 1030. Mod metadata 严格 UTF-8 读取
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续字体/语言与乱码处理缺口，落实“乱码优先 UTF-8，再尝试读取”的迁移约束。
