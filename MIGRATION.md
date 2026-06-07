@@ -33333,3 +33333,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings/Language/Load-Save/Join-Host/Mods Browser 的行高、按钮皮肤、空态和所有子菜单视觉细节仍需继续收口；
   - Join 状态条、Join 重连兜底、Host 非 address-in-use 异常主文案、Settings Back fallback 与键位名仍需继续按 Java bundle 链路处理；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1049. Join 状态条诊断文案收口
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.81%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `JoinDialog` 连接中使用 `ui.loadfrag.show("@connecting")`；
+  - world data 阶段对应 bundle key `@connecting.data`；
+  - 连接错误走 `@disconnect.error`、具体错误 key 或 Join/Host 弹窗，不会在前端显示 `connect error:`、`client sync`、`client ready` 这类内部诊断。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `desktop_ui_status_bar_model()` 的连接中 label 改为本地化 `@connecting`；
+    - 连接错误不再拼接 `connect error: ...`，若错误是 bundle key 则直接本地化，否则回退 `@disconnect.error`；
+    - 已连接但 world/client 尚未 ready 时显示 `@connecting.data`，不再显示 `client sync {ready}/{total}`；
+    - 完全 ready 后不再显示 `client ready` 状态条；
+    - 更新 status bar 与 connected UI render 回归，锁定不再渲染 Rust-only 诊断文案。
+- 已验证：
+  - `cargo test -p mindustry-desktop status_bar -- --nocapture`
+  - `cargo test -p mindustry-desktop graphics_frame_includes_connected_client_ui_status_pass -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Join 重连兜底、Host 非 address-in-use 异常主文案、Settings Back fallback 与键位名仍需继续按 Java bundle 链路处理；
+  - Settings/Language/Load-Save/Join-Host/Mods Browser 的行高、按钮皮肤、空态和所有子菜单视觉细节仍需继续收口；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
