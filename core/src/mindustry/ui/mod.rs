@@ -131,6 +131,22 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("customgame", "Custom Game"),
     ("savegame", "Save Game"),
     ("loadgame", "Load Game"),
+    ("load.sound", "Sounds"),
+    ("load.map", "Maps"),
+    ("load.image", "Images"),
+    ("load.content", "Content"),
+    ("load.system", "System"),
+    ("load.mod", "Mods"),
+    ("load.scripts", "Scripts"),
+    ("save.quit", "Save & Quit"),
+    ("maps.browse", "Browse Maps"),
+    ("hosting", "[accent]Opening server..."),
+    ("save.export", "Export Save"),
+    ("save.export.fail", "[scarlet]Failed to export save: [accent]{0}"),
+    ("selectslot", "Select a save."),
+    ("save.corrupted", "Save file corrupted or invalid!"),
+    ("save.mode", "Gamemode: {0}"),
+    ("settings.clear.confirm", "Are you sure you want to clear this data?\\nWhat is done cannot be undone!"),
     ("database.button", "Database"),
     ("database", "Core Database"),
     ("schematics", "Schematics"),
@@ -2112,6 +2128,41 @@ mod tests {
             Some("[scarlet]Failed to import save: [accent]broken.msav")
         );
         assert_eq!(upstream_bundle_en_value("missing.menu.key"), None);
+    }
+
+    #[test]
+    fn upstream_menu_bundle_entries_cover_load_save_settings_keys_like_java() {
+        for (key, expected) in [
+            ("load.sound", "Sounds"),
+            ("load.map", "Maps"),
+            ("load.image", "Images"),
+            ("load.content", "Content"),
+            ("load.system", "System"),
+            ("load.mod", "Mods"),
+            ("load.scripts", "Scripts"),
+            ("save.quit", "Save & Quit"),
+            ("save.export", "Export Save"),
+            (
+                "save.export.fail",
+                "[scarlet]Failed to export save: [accent]{0}",
+            ),
+            ("save.mode", "Gamemode: {0}"),
+            ("save.corrupted", "Save file corrupted or invalid!"),
+            ("selectslot", "Select a save."),
+            ("maps.browse", "Browse Maps"),
+            ("hosting", "[accent]Opening server..."),
+            (
+                "settings.clear.confirm",
+                "Are you sure you want to clear this data?\\nWhat is done cannot be undone!",
+            ),
+        ] {
+            assert_eq!(
+                upstream_bundle_value_from_entries(UPSTREAM_MENU_BUNDLE_ENTRIES, key),
+                Some(expected),
+                "UPSTREAM_MENU_BUNDLE_ENTRIES should mirror Java core/assets/bundles/bundle.properties for {key}"
+            );
+            assert_eq!(upstream_bundle_en_value(key), Some(expected));
+        }
     }
 
     #[test]

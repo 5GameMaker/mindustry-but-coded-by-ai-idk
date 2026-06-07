@@ -33283,3 +33283,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Join 状态条仍有 `connect error:` / `connecting` / `client ready` / `client sync ...` 等 Rust-only 英文诊断需要收口；
   - Join 重连兜底、Host 非 address-in-use 异常主文案、Settings Back fallback 与键位名仍需按 Java bundle 链路继续处理；
   - `IconLarge` 真实 atlas 描边和 outline 字体 spacing 补偿仍需继续修，前端视觉、字体、语言和完整可玩性仍未宣告完成。
+
+## 1047. IconLarge 字体描边与 Load/Save 语言 key 补齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.79%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `Fonts.loadFonts()` 中 `iconLarge` 使用 `fonts/icon.ttf`、`size = 48`、`borderWidth = 5f`、`borderColor = Color.darkGray`；
+  - `core/assets/bundles/bundle.properties` 中存在 `load.sound` / `load.map` / `load.image` / `load.content` / `load.system` / `load.mod` / `load.scripts`、`save.quit`、`save.export`、`save.export.fail`、`save.mode`、`save.corrupted`、`selectslot`、`maps.browse`、`hosting`、`settings.clear.confirm` 等前端可见 key。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopRealFontAtlasSource` 与 `DesktopRealFontGlyphPlacement` 增加 `border_width` / `border_color`；
+    - `RenderFontId::IconLarge` 源接入 Java 的 `borderWidth=5` 与 dark gray border color；
+    - font atlas cache key 纳入 border 元数据，避免有描边/无描边 atlas 复用；
+    - `desktop_build_real_font_atlas()` 在 glyph bounds 规划和像素写入阶段真实生成 border，先绘制 dark gray 偏移描边，再绘制白色前景；
+    - 补 `desktop_graphics_font_atlas_icon_large_uses_java_border_width`，对比带描边与无描边 IconLarge glyph 的宽高、offset、advance 与像素颜色。
+  - `core/src/mindustry/ui/mod.rs`
+    - 补齐 Load/Save/Settings/Maps/Hosting 相关英文 bundle 镜像项；
+    - 补 `upstream_menu_bundle_entries_cover_load_save_settings_keys_like_java`，锁定这些 key 与 Java bundle.properties 一致。
+- 已验证：
+  - `cargo test -p mindustry-core upstream_menu_bundle_entries_cover_load_save_settings_keys_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop icon_large_uses_java_border_width -- --nocapture`
+  - `cargo test -p mindustry-desktop font_rasterization_plan_bridges_fonts_icons_and_texture_atlas -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - `RenderFontId::Outline` 仍需按 Java `Fonts.loadDefaultFont()` 的 `spaceX -= borderWidth` 做 advance / line width 收紧；
+  - Settings/Language/Load-Save/Join-Host/Mods Browser 的行高、按钮皮肤、空态和各子菜单视觉细节仍需继续收口；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
