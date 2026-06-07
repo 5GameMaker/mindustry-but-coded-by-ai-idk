@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1100. Settings/Language 字号改回 Java Fonts 基准
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.66%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/Fonts.java`：`Fonts.def` / `Fonts.outline` 默认 FreeType size 为 `18`，`Fonts.monospace` 为 `16`；
+  - `core/src/mindustry/ui/Styles.java`：`flatt`/`flatTogglet` 使用 `Fonts.def`，`outlineLabel` 使用 `Fonts.outline`；
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java` 与 `SettingsMenuDialog.java` 均依赖这些 style/font，而不是 Rust-only 小字号。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `SETTINGS_TEXT_BUTTON_FONT_SIZE`、`SETTINGS_PREF_LABEL_FONT_SIZE`、`SETTINGS_PREF_VALUE_FONT_SIZE` 改回 Java 默认 UI 字体基准 `18.0`；
+    - 新增 `settings_java_font_role_for_static_name(...)` / `settings_java_font_size_for_static_name(...)`，由 `Fonts.*` 静态名映射到 `UpstreamFontRole` 与上游 font asset size；
+    - `settings_text_button_font_size(...)` 与 `settings_label_style_font_size(...)` 不再无视 style.font，而是按 `Fonts.def`/`Fonts.outline`/`Fonts.monospace` 等 Java 字体尺寸返回；
+    - `settings_pref_value_font_size()` 改为跟 `outlineLabel` 一致；
+    - AreaText 文本值移除 Rust-only `11.0`，改用 `defaultLabel` 字体尺寸；
+    - 扩展 `desktop_launcher_settings_text_sizes_use_centralized_java_metrics`，锁定 `monoLabel` 使用 `Fonts.monospace=16`，防止再次退回全局小号常量。
+  - `README.md`
+    - 迁移进度更新到 **98.66%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib settings_text_sizes --no-default-features`
+  - `cargo test -p mindustry-desktop --lib language_dialog --no-default-features`
+  - `cargo test -p mindustry-desktop --lib settings_text --no-default-features`
+- 仍未完成：
+  - Outline 预描边字形与 runtime outline pass 的“双重描边”风险仍需继续修正；
+  - LanguageDialog/Settings 子菜单仍需补像素级滚动、Scrollbar、pressed/disabled/hover 与 Rust-only 描边差异；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1099. LanguageDialog 可见行最终进入真实 OpenGL 字体闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
