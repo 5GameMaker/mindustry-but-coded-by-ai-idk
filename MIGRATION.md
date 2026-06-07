@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1062. JoinDialog 卡片人数/ping 与 Java 规则对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉和语言/字体相关页面的肉眼差异收口，先处理 JoinDialog saved/local server cards 的 Java `buildServer()` 指标显示规则。
+- 本轮总体进度更新：约 **98.24%**，仍未达到完整可玩，不能宣告目标完成；后续继续 JoinDialog community 分层、Settings/Language/Controls/Data 子菜单、字体 atlas 退化路径与完整前端还原。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java:298-305` 中人数为 0 时使用 `[lightgray]`，非 0 才用 `[accent]`；
+  - `JoinDialog.buildServer()` 只有 `host.ping > 0` 时才添加 `Iconc.chartBar + " " + host.ping + "ms"`；
+  - saved/local 卡片依赖 `Tex.whiteui` / `Tex.whitePane` 背景分层，不额外画 Rust-only 外圈描边。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_join_players_value_markup_like_java(...)`、`desktop_join_snapshot_players_value_markup_like_java(...)` 与 `desktop_join_ping_ms_like_java(...)`；
+    - local/saved server card 渲染移除额外 `stroke_rect(card, ...)`；
+    - local/saved server card 的 0 人数改为灰色，`ping <= 0` 和 `--ms` 占位不再渲染；
+    - JoinDialog 相关测试修正为当前版本同版本隐藏版本号的 Java 语义，并新增 0 人数/ping 回归测试。
+  - `README.md`
+    - 迁移进度更新到 **98.24%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_server_metrics_match_java_zero_player_and_ping_rules -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_drive_server_cards_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_polls_local_discovery_hosts_like_java_refresh_local -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+- 注意：
+  - saved refreshing/failed 卡片仍可继续精确对齐 Java 单行 `server.refreshing...` / `host.invalid` content；community/global 卡片分层和 70f 搜索行仍是下一批肉眼差异重点。
+
 ## 1061. Host/Join 玩家调色板收紧为 Java 48f 网格
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 PaletteDialog 视觉收口，把上一轮去掉标题/返回按钮后的空白大面板进一步缩到 Java 玩家颜色网格表现。
