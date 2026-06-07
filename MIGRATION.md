@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1092. MapLocalesDialog 添加语言子对话框接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.58%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java:175-201`：左侧语言表最后追加 `@add` 行；
+  - `core/src/mindustry/editor/MapLocalesDialog.java:350-374`：`addLocaleDialog()` 打开 `@add` BaseDialog，列出尚未存在的 `Vars.locales`，点击后新增空 locale、选中它、标记 dirty 并隐藏子对话框。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `OpenEditorLocalesAddLocaleChooser`、`CloseEditorLocalesAddLocaleChooser`、`AddEditorLocalesLocale` action，并把左侧 `MapLocalesDialogLocaleEntry::Add` 从纯渲染接入实际 hit-test/dispatch；
+    - 新增 `editor_map_locales_add_locale_open` 与滚动 offset，渲染独立 `@add` BaseDialog 子弹窗，候选语言使用 `map_locales_display_name_for_code(..., Core.bundle locale)` 语义显示；
+    - 选择候选后调用 core `MapLocalesDialog::add_locale(...)`，保持 MapLocalesDialog 打开、选中新 locale、标记未保存，并阻断背景 MapLocales 主面板点击；
+    - 新增回归测试 `desktop_launcher_editor_map_locales_add_locale_button_opens_picker_and_inserts_locale_like_java`。
+  - `README.md`
+    - 迁移进度更新到 **98.58%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_editor_map_locales_add_locale_button_opens_picker_and_inserts_locale_like_java --no-default-features`
+  - `cargo test -p mindustry-desktop --lib map_locales --no-default-features`
+  - `cargo test -p mindustry-core --lib map_locales_dialog`
+- 仍未完成：
+  - MapLocalesDialog 的 property add 输入提交、property edit/delete、locale edit/import/export、apply/save 的完整 Java 路径仍需继续接入；
+  - 前端字体/语言全量显示名、菜单 chrome、所有子菜单视觉与完整可玩/联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1091. MapLocalesDialog 删除最后 locale 保留 raw settings locale
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
