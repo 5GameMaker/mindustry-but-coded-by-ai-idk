@@ -72,6 +72,7 @@ pub struct UpstreamFontAsset {
     pub scaled: bool,
     pub border_width: Option<u16>,
     pub shadow_offset_y: Option<i16>,
+    pub markup_enabled: bool,
     pub characters: Option<&'static str>,
     pub fallback_java_static_name: Option<&'static str>,
 }
@@ -92,6 +93,7 @@ pub const UPSTREAM_FONT_ASSETS: &[UpstreamFontAsset] = &[
         scaled: true,
         border_width: Some(2),
         shadow_offset_y: None,
+        markup_enabled: true,
         characters: None,
         fallback_java_static_name: None,
     },
@@ -104,6 +106,7 @@ pub const UPSTREAM_FONT_ASSETS: &[UpstreamFontAsset] = &[
         scaled: true,
         border_width: None,
         shadow_offset_y: None,
+        markup_enabled: false,
         characters: None,
         fallback_java_static_name: None,
     },
@@ -116,6 +119,7 @@ pub const UPSTREAM_FONT_ASSETS: &[UpstreamFontAsset] = &[
         scaled: true,
         border_width: None,
         shadow_offset_y: Some(2),
+        markup_enabled: true,
         characters: None,
         fallback_java_static_name: None,
     },
@@ -128,6 +132,7 @@ pub const UPSTREAM_FONT_ASSETS: &[UpstreamFontAsset] = &[
         scaled: true,
         border_width: None,
         shadow_offset_y: None,
+        markup_enabled: false,
         characters: Some("\0 "),
         fallback_java_static_name: Some("Fonts.def"),
     },
@@ -140,6 +145,7 @@ pub const UPSTREAM_FONT_ASSETS: &[UpstreamFontAsset] = &[
         scaled: true,
         border_width: None,
         shadow_offset_y: None,
+        markup_enabled: false,
         characters: Some("\0"),
         fallback_java_static_name: None,
     },
@@ -152,6 +158,7 @@ pub const UPSTREAM_FONT_ASSETS: &[UpstreamFontAsset] = &[
         scaled: false,
         border_width: Some(5),
         shadow_offset_y: None,
+        markup_enabled: false,
         characters: None,
         fallback_java_static_name: None,
     },
@@ -164,6 +171,7 @@ pub const UPSTREAM_FONT_ASSETS: &[UpstreamFontAsset] = &[
         scaled: false,
         border_width: None,
         shadow_offset_y: None,
+        markup_enabled: false,
         characters: Some(UPSTREAM_LOGIC_FONT_CHARACTERS),
         fallback_java_static_name: None,
     },
@@ -176,6 +184,7 @@ pub const UPSTREAM_FONT_ASSETS: &[UpstreamFontAsset] = &[
         scaled: true,
         border_width: None,
         shadow_offset_y: Some(2),
+        markup_enabled: true,
         characters: Some("\0 "),
         fallback_java_static_name: None,
     },
@@ -188,6 +197,7 @@ pub const UPSTREAM_FONT_ASSETS: &[UpstreamFontAsset] = &[
         scaled: true,
         border_width: Some(2),
         shadow_offset_y: None,
+        markup_enabled: true,
         characters: Some("\0 "),
         fallback_java_static_name: None,
     },
@@ -205,6 +215,13 @@ pub fn upstream_font_asset_by_name(asset_name: &str) -> Option<&'static Upstream
     UPSTREAM_FONT_ASSETS
         .iter()
         .find(|asset| asset.asset_name == asset_name)
+}
+
+pub fn upstream_font_markup_enabled(font: RenderFontId) -> bool {
+    UPSTREAM_FONT_ASSETS
+        .iter()
+        .find(|asset| asset.render_font_id() == Some(font))
+        .is_some_and(|asset| asset.markup_enabled)
 }
 
 pub fn upstream_font_source_paths() -> impl Iterator<Item = &'static str> {
@@ -1011,18 +1028,21 @@ mod tests {
         assert_eq!(default.size, 18);
         assert!(default.incremental);
         assert_eq!(default.shadow_offset_y, Some(2));
+        assert!(default.markup_enabled);
         assert_eq!(default.render_font_id(), Some(RenderFontId::Default));
 
         let outline = upstream_font_asset_by_name("outline").unwrap();
         assert_eq!(outline.role, UpstreamFontRole::Outline);
         assert_eq!(outline.source_path, "fonts/font.woff");
         assert_eq!(outline.border_width, Some(2));
+        assert!(outline.markup_enabled);
         assert_eq!(outline.render_font_id(), Some(RenderFontId::Outline));
 
         let logic = upstream_font_asset(UpstreamFontRole::Logic).unwrap();
         assert_eq!(logic.source_path, "fonts/logic.ttf");
         assert!(!logic.incremental);
         assert!(!logic.scaled);
+        assert!(!logic.markup_enabled);
         assert_eq!(logic.characters, Some(UPSTREAM_LOGIC_FONT_CHARACTERS));
         assert_eq!(logic.render_font_id(), Some(RenderFontId::Logic));
     }
@@ -1045,10 +1065,12 @@ mod tests {
         let monospace = upstream_font_asset_by_name("monospace").unwrap();
         assert_eq!(monospace.source_path, "fonts/monospace.woff");
         assert_eq!(monospace.fallback_java_static_name, Some("Fonts.def"));
+        assert!(!monospace.markup_enabled);
         assert_eq!(monospace.render_font_id(), Some(RenderFontId::Monospace));
 
         let tech = upstream_font_asset_by_name("tech").unwrap();
         assert_eq!(tech.source_path, "fonts/tech.ttf");
+        assert!(!tech.markup_enabled);
         assert_eq!(tech.render_font_id(), Some(RenderFontId::Tech));
 
         let paths = upstream_font_source_paths().collect::<Vec<_>>();
@@ -1060,6 +1082,28 @@ mod tests {
         assert!(paths.contains(&"fonts/tech.ttf"));
         assert!(paths.contains(&"icons/icons.properties"));
         assert!(paths.contains(&"fontgen/config.json"));
+    }
+
+    #[test]
+    fn upstream_font_markup_enabled_matches_java_ui_font_data_flags() {
+        assert!(upstream_font_markup_enabled(RenderFontId::Default));
+        assert!(upstream_font_markup_enabled(RenderFontId::Outline));
+        assert!(!upstream_font_markup_enabled(RenderFontId::Icon));
+        assert!(!upstream_font_markup_enabled(RenderFontId::IconLarge));
+        assert!(!upstream_font_markup_enabled(RenderFontId::Logic));
+        assert!(!upstream_font_markup_enabled(RenderFontId::Tech));
+        assert!(!upstream_font_markup_enabled(RenderFontId::Monospace));
+
+        assert!(
+            upstream_font_asset(UpstreamFontRole::JapaneseDefaultOverride)
+                .is_some_and(|asset| asset.markup_enabled),
+            "Java font_jp overrides Fonts.def data, inheriting the markup-enabled default font role"
+        );
+        assert!(
+            upstream_font_asset(UpstreamFontRole::JapaneseOutlineOverride)
+                .is_some_and(|asset| asset.markup_enabled),
+            "Java font_jp_outline overrides Fonts.outline data, inheriting the markup-enabled outline font role"
+        );
     }
 
     #[test]

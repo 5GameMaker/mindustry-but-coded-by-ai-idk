@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1042. 接入 Java 字体级 markupEnabled 门禁
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Rust `RenderTextStyle::default().markup=true` 导致 Tech/Logic/Monospace/Icon 等非 Java markup 字体也可能误解析 `[red]` / `[accent]` 的问题。
+- 本轮总体进度更新：约 **98.05%**，仍未达到完整可玩，不能宣告目标完成；后续继续 UI 子菜单 Scene2D 几何/滚动节奏、字体字号元数据化、菜单 fast/cull 诊断路径与完整可玩性。
+- 主改动：
+  - `core/src/mindustry/ui/fonts.rs`
+    - `UpstreamFontAsset` 增加 `markup_enabled` 字段，显式镜像 Java `UI.init()` 中只有 `Fonts.outline.getData().markupEnabled = true` 与 `Fonts.def.getData().markupEnabled = true`；
+    - 新增 `upstream_font_markup_enabled(RenderFontId)`，Default/Outline 为 true，Icon/IconLarge/Logic/Tech/Monospace 为 false，日文字体 override 继承 Default/Outline 语义；
+    - 新增回归 `upstream_font_markup_enabled_matches_java_ui_font_data_flags`，并扩展字体 registry 测试断言。
+  - `core/src/mindustry/ui/mod.rs`
+    - re-export `upstream_font_markup_enabled(...)`，供桌面渲染层使用。
+  - `desktop/src/lib.rs`
+    - 新增 `opengl_backend_text_markup_enabled(...)`，真实字体与 placeholder 字体路径均改为 `style.markup && upstream_font_markup_enabled(style.font)` 才解析 markup；
+    - 新增回归 `desktop_graphics_opengl_backend_markup_respects_java_font_markup_enabled_flags`，覆盖 Default/Outline 正向解析与 Tech 等非 markup 字体保持字面 bracket 文本。
+- 已验证：
+  - `cargo test -p mindustry-core upstream_font_markup_enabled_matches_java_ui_font_data_flags -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_markup_respects_java_font_markup_enabled_flags -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_markup_colors_real_font_foreground_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_markup_colors_placeholder_font_like_java -- --nocapture`
+  - `cargo test -p mindustry-core upstream_font_registry -- --nocapture`
+  - `rustfmt --edition 2021 --check core/src/mindustry/ui/fonts.rs core/src/mindustry/ui/mod.rs`
+  - `git diff --check`
+- 注意：
+  - `RenderTextStyle.markup` 仍保留为调用点请求标志；本轮只在 backend 增加 Java 字体数据门禁。后续更高收益是继续把字号/文字大小从 `desktop/src/lib.rs` 的散点常量收进样式/字体元数据。
+
 ## 1041. 补齐前端 markup 颜色名覆盖
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Rust OpenGL 文字 markup 只识别少数颜色名导致 credits/mods/database/stats/hints 等界面掉色的问题。
