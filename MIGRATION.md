@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1082. 真实字体缺 glyph 回退 Java `Fonts.getGlyph` 的 `F`
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.48%**，仍未达到完整可玩；当前第一优先级仍是前端视觉、字体、语言/本地化和所有子菜单尽量贴近 Java 原版，第二优先级是继续把可玩主链路、整体化模块与 Java↔Rust 联机兼容补全。
+- Java 对照依据：
+  - `core/src/mindustry/ui/Fonts.java:315-320`：`Fonts.getGlyph(Font font, char glyph)` 在目标 glyph 缺失时记录 warn，并回退到 `font.getData().getGlyph('F')`，避免 UI 图标/字符缺失时落到完全不可见或 primitive placeholder。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DESKTOP_REAL_FONT_MISSING_GLYPH_FALLBACK = 'F'`；
+    - 将真实字体 glyph 查找拆成 `opengl_backend_real_font_glyph_for_character_exact(...)` 与带 Java `F` 回退的 `opengl_backend_real_font_glyph_for_character(...)`；
+    - `opengl_backend_real_font_missing_incremental_characters(...)` 继续使用精确查找，避免把“字体支持但还没增量注册”的字符误判为已由 `F` 覆盖，从而保护 Java FreeType incremental 语义；
+    - glyph quad symbol 改为记录实际绘制的 `key.character`，缺字回退时会显示 `U+0046`，避免调试/测试中把 fallback quad 误标成原缺失字符。
+  - `README.md`
+    - 迁移进度更新到 **98.48%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_missing_glyph_falls_back_to_fonts_def_f_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_default_uses_real_font_atlas_not_placeholder -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_registers_incremental_real_font_glyphs_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_covers_language_dialog_display_names_like_java -- --nocapture`
+- 仍未完成：
+  - 字体/语言仍需继续补齐外部 bundle/mod bundle 文案字体 seed 精度、各语言选中/重启提示与本地化缺失项；
+  - 前端所有子菜单仍需逐控件对齐 Java 原版视觉，完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1081. LanguageDialog 滚动状态按 Java 单例行为保留
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
