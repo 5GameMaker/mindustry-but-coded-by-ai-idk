@@ -796,6 +796,51 @@ pub fn upstream_ui_icon_glyph_string(name: &str) -> Option<String> {
     upstream_ui_icon_glyph(name).and_then(|glyph| glyph.glyph_string())
 }
 
+pub fn format_icon_tokens_like_java_with<F>(text: &str, mut string_icon: F) -> String
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    if !text.contains(':') {
+        return text.to_string();
+    }
+
+    let mut tokens = text.split(':').collect::<Vec<_>>();
+    while tokens.last().is_some_and(|token| token.is_empty()) {
+        tokens.pop();
+    }
+
+    let mut formatted = String::with_capacity(text.len());
+    let mut changed = false;
+    let mut check_icon = false;
+
+    for token in tokens {
+        if check_icon {
+            if let Some(glyph) = upstream_ui_icon_glyph_string(token).or_else(|| string_icon(token))
+            {
+                formatted.push_str(&glyph);
+                changed = true;
+                check_icon = false;
+            } else {
+                formatted.push(':');
+                formatted.push_str(token);
+            }
+        } else {
+            formatted.push_str(token);
+            check_icon = true;
+        }
+    }
+
+    if changed {
+        formatted
+    } else {
+        text.to_string()
+    }
+}
+
+pub fn format_icon_tokens_like_java(text: &str) -> String {
+    format_icon_tokens_like_java_with(text, |_| None)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UpstreamContentIcon {
     pub unicode: u32,
@@ -1080,6 +1125,35 @@ mod tests {
         );
         assert_eq!(upstream_ui_icon_glyph_char("missing-icon"), None);
         assert_eq!(upstream_ui_icon_glyph_string("missing-icon"), None);
+    }
+
+    #[test]
+    fn format_icon_tokens_like_java_matches_ui_format_icons_for_iconc_and_string_icons() {
+        let play = upstream_ui_icon_glyph_string("play").expect("Icon.play glyph should exist");
+        let right =
+            upstream_ui_icon_glyph_string("rightOpenOut").expect("Icon.rightOpenOut should exist");
+        let alpha = "\u{f8ff}".to_string();
+
+        assert_eq!(format_icon_tokens_like_java(":play:"), play);
+        assert_eq!(
+            format_icon_tokens_like_java_with("tap :play: then :rightOpenOut:", |_| None),
+            format!("tap {play} then {right}")
+        );
+        assert_eq!(
+            format_icon_tokens_like_java_with("team :alphachan:", |name| {
+                (name == "alphachan").then_some(alpha.clone())
+            }),
+            format!("team {alpha}")
+        );
+        assert_eq!(
+            format_icon_tokens_like_java("keep :missing: raw"),
+            "keep :missing: raw"
+        );
+        assert_eq!(
+            format_icon_tokens_like_java("server 127.0.0.1:6567"),
+            "server 127.0.0.1:6567",
+            "Java UI.formatIcons returns the original string when no token is replaced"
+        );
     }
 
     #[test]

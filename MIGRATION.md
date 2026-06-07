@@ -33572,3 +33572,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `defaultTree` 目前只是样式契约 registry，后续若出现 Tree widget/Scene2D Tree 等价组件，必须接入真实 runtime；
   - Settings/Language/Load-Save/Join-Host/Mods Browser 的行高、按钮皮肤、空态和所有子菜单视觉细节仍需继续收口；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1053. UI.formatIcons 文本图标替换链接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.95%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/core/UI.java::formatIcons()` 查找整段文本中的 `:name:` token；
+  - 命中 `Iconc.codes` 时替换为 UI icon glyph，命中 `Fonts.hasUnicodeStr()` / `Fonts.stringIcons` 时替换为 content/team icon glyph；
+  - 未命中 token 或普通冒号文本保持原样，避免服务器地址等普通文本被破坏。
+- 本轮主改动：
+  - `core/src/mindustry/ui/fonts.rs`
+    - 新增 `format_icon_tokens_like_java_with()` 和 `format_icon_tokens_like_java()`；
+    - 按 Java `String.split(":")` / `changed` 语义处理 icon token；
+    - 补 UI icon、`alphachan` string icon、missing token 与普通 `127.0.0.1:6567` 冒号文本测试。
+  - `core/src/mindustry/ui/mod.rs`
+    - 导出 formatter，供 desktop/runtime 文本链路复用。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLauncher::format_icons_like_java()`，把 `DesktopContentIconGlyphRegistry` 的 `alphachan` 等 string icon alias 接入通用替换；
+    - `localize_bundle_markup_text()` 与 `format_bundle_text()` 出口统一套用 icon formatter；
+    - 补 desktop 回归，确认 `:play:` / `:alphachan:` 被替换，`:missing:` 与服务器地址保持原样。
+  - `README.md`
+    - 迁移进度更新到 **97.95%**。
+- 已验证：
+  - `cargo test -p mindustry-core format_icon_tokens_like_java_matches_ui_format_icons_for_iconc_and_string_icons -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_localized_text_formats_icon_tokens_like_java_ui_format_icons -- --nocapture`
+  - `cargo test -p mindustry-desktop external_bundle -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu -- --nocapture`
+- 仍未完成：
+  - ChatFragment、MessageBlock、HintsFragment、PlanetDialog 等所有 Java `UI.formatIcons()` 调用点仍需逐个对照，确认是否已经通过当前 desktop 文本出口覆盖；未覆盖处需要继续接入；
+  - 字体 fallback / 增量字形 / CJK 与 content icon glyph 图集动态补字仍需继续收口；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。

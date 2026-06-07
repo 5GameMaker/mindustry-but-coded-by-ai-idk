@@ -1955,6 +1955,7 @@ pub use bar::{
 pub use dialogs::BaseDialog;
 pub use displayable::{DisplayTable, Displayable};
 pub use fonts::{
+    format_icon_tokens_like_java, format_icon_tokens_like_java_with,
     parse_upstream_icon_properties,
     populate_base_team_emojis_from_headless_content_icons_like_java,
     upstream_content_icon_headless_registry_like_java, upstream_font_asset,
