@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1056. Settings 首页移除 Rust-only 容器描边
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉对齐，处理 Settings 首页主菜单外层还多画 Rust-only 青色描边的问题。
+- 本轮总体进度更新：约 **98.19%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Settings Back/footer、动态分类 icon、字体 CJK/router glyph 落点，以及其他子菜单视觉对齐。
+- Java 对照证据：
+  - `SettingsMenuDialog.java` 构造中 `menu = new Table(Tex.button)`，主菜单每行 `menu.button(..., Styles.flatt, iconMed, ...)`；
+  - Java 只给菜单 table 设置 `Tex.button` 背景，并没有额外对整个 Settings 首页按钮容器再画一圈 Rust-only cyan stroke。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_main_menu_buttons(...)` 保留 Java `Tex.button` 容器背景，移除单独 `StrokeRect`；
+    - `desktop_launcher_settings_main_page_renders_upstream_menu_buttons` 增加断言，禁止 Settings 首页 menu container 出现额外描边。
+  - `README.md`
+    - 迁移进度更新到 **98.19%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_main_page_renders_upstream_menu_buttons -- --nocapture`
+- 注意：
+  - 本轮只收一个肉眼可见的 Settings 首页 chrome 差异；Back/footer 层级、动态分类真实 drawable icon、更多子菜单仍需继续推进。
+
 ## 1055. 收紧 Join 图标按钮与字体 raw 资源链
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体和语言链路，优先处理 JoinDialog 可见按钮壳、router 语言文案和 HUD 图标 token 裸露问题。
