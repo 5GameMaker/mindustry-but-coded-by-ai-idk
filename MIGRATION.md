@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1070. LanguageDialog 补 checked 行与 restart 信息条视觉回归
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉/语言设置闭环，补一条专项回归锁住最容易回退的 LanguageDialog 视觉语义。
+- 本轮总体进度更新：约 **98.32%**，仍未达到完整可玩，不能宣告目标完成；后续继续补 `MapLocalesDialog` UI、更多字体/语言首帧 glyph、Settings/Data 与 JoinDialog 细节。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java:57-88` 使用 `super("@settings.language")`、`addCloseButton()`、`ScrollPane(langs)` 与 `TextButton(..., Styles.flatTogglet)`；
+  - `button.update(t -> t.setChecked(loc.equals(getLocale())))` 表明当前语言行由 ButtonGroup/checked 状态驱动；
+  - `button.clicked(...)` 中 `ui.showInfo("@language.restart")` 表明重启提示是外层 info banner，不是注入语言列表或 ScrollPane 内容。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_language_dialog_checked_row_and_restart_notice_match_java_visuals`；
+    - 断言 hovered 的当前语言行仍绘制 `Styles.flatTogglet.checked` 对应的 checked drawable/tint，而不是 hover-only 背景；
+    - 断言语言行文本位于 Java 400x50 TextButton row 内；
+    - 点击 `zh_CN` 后断言 `last_menu_info_message == "@language.restart"`；
+    - 断言 restart 文本通过 menu info banner 渲染，且不落入 LanguageDialog ScrollPane/list clip。
+  - `README.md`
+    - 迁移进度更新到 **98.32%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_checked_row_and_restart_notice_match_java_visuals -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_uses_java_scrollpane_button_metrics -- --nocapture`
+- 仍未完成：
+  - LanguageDialog 已有布局/交互回归更强，但 `MapLocalesDialog` UI 仍未完整接入；
+  - 前端字体、所有子菜单、JoinDialog header/tooltip/多列卡片仍需继续逐项对齐；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1069. MapLocales default 语言键改为 Java getLanguage()
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续语言/本地化闭环，修正地图本地化在默认语言设置下的 locale key 选择。
