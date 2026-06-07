@@ -171,9 +171,14 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("players", "{0} players"),
     ("players.single", "{0} player"),
     ("save.map", "Map: {0}"),
+    ("server.outdated", "[scarlet]Outdated Server![]"),
+    ("server.outdated.client", "[scarlet]Outdated Client![]"),
     ("server.version", "[gray]v{0} {1}"),
+    ("server.custombuild", "[accent]Custom Build"),
     ("server.versions", "Your version:[accent] {0}[]\\nServer version:[accent] {1}[]"),
     ("server.refreshing", "Refreshing server"),
+    ("server.error.addressinuse", "[scarlet]Failed to open server on port 6567.[]\\n\\nMake sure no other Mindustry servers are running on your device or network!"),
+    ("server.error", "[scarlet]Error hosting server."),
     ("server.kicked.kick", "You have been kicked from the server!"),
     ("server.kicked.whitelist", "You are not whitelisted here."),
     ("server.kicked.serverClose", "Server closed."),
@@ -2332,6 +2337,22 @@ mod tests {
             upstream_menu_bundle_format_for_locale("en", "server.versions", &["158", "157"])
                 .as_deref(),
             Some("Your version:[accent] 158[]\\nServer version:[accent] 157[]")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("en", "server.outdated"),
+            Some("[scarlet]Outdated Server![]")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("en", "server.outdated.client"),
+            Some("[scarlet]Outdated Client![]")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("en", "server.custombuild"),
+            Some("[accent]Custom Build")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("en", "server.error"),
+            Some("[scarlet]Error hosting server.")
         );
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "server.kicked.serverOutdated"),

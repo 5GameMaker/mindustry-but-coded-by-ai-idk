@@ -33254,3 +33254,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Load/Save route-shell 中 `save slots:`、`search:`、`hidden modes:` 等摘要仍需继续按 Java 可见 UI 逐步收口；
   - Join/Host 的服务器状态 bundle key 与版本错误文案仍需补齐；
   - 前端视觉、字体、语言、所有子菜单与完整可玩性仍需继续推进，不能宣告目标完成。
+
+## 1046. Join/Host 服务器版本文案对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.78%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `JoinDialog.getVersionString(Host host)` 对 `host.version == -1` 使用 `server.version(server.custombuild, "")`；
+  - `host.version == 0` 使用 `@server.outdated`；
+  - 旧服务端显示 `@server.outdated` + `@server.version`，新客户端不匹配显示 `@server.outdated.client` + `@server.version`；
+  - 同 build 且 `Version.type` 相同时返回空字符串，不额外渲染版本行；
+  - `HostDialog.runHost()` 的异常标题使用 `@server.error` / `@server.error.addressinuse`。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 补入 Java Join/Host 直接使用的 `server.outdated`、`server.outdated.client`、`server.custombuild`、`server.error`、`server.error.addressinuse` 英文 bundle 镜像项；
+    - 扩展 bundle 回归，锁定这些 key 通过 Rust 的 upstream bundle 镜像可解析。
+  - `desktop/src/lib.rs`
+    - 新增 `join_server_version_text_like_java()` / `join_server_card_title_like_java()`，把本地/社区/已保存服务器卡片版本文本统一到 Java `JoinDialog.getVersionString()` 语义；
+    - 已保存服务器 snapshot 增加 `version_type`，Resolved host 会保留真实 `version_type` 用于版本文本和搜索词；
+    - 当前 build + 当前 type 的服务器卡片不再强行显示 `v158 official`，避免和 Java 原版同版本服务器空版本行行为偏离；
+    - 补 `desktop_launcher_join_and_host_server_status_strings_match_java`，同时覆盖当前 bundle 语言下的 custom build、outdated、outdated client/server 和 host error key。
+- 已验证：
+  - `cargo test -p mindustry-core upstream_menu_bundle_locale_entries_cover_chinese_menu_fragment_buttons -- --nocapture`
+  - `cargo test -p mindustry-desktop join_and_host_server_status_strings_match_java -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route_blocks_version_mismatch -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Join 状态条仍有 `connect error:` / `connecting` / `client ready` / `client sync ...` 等 Rust-only 英文诊断需要收口；
+  - Join 重连兜底、Host 非 address-in-use 异常主文案、Settings Back fallback 与键位名仍需按 Java bundle 链路继续处理；
+  - `IconLarge` 真实 atlas 描边和 outline 字体 spacing 补偿仍需继续修，前端视觉、字体、语言和完整可玩性仍未宣告完成。
