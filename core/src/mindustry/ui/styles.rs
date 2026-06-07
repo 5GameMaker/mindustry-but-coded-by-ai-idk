@@ -125,6 +125,11 @@ pub struct UiTextButtonStyleSkin {
     pub checked: Option<&'static str>,
     pub disabled: Option<&'static str>,
     pub font: &'static str,
+    pub font_color: UiStyleColor,
+    pub disabled_font_color: UiStyleColor,
+    pub over_font_color: Option<UiStyleColor>,
+    pub checked_font_color: Option<UiStyleColor>,
+    pub down_font_color: Option<UiStyleColor>,
 }
 
 impl UiTextButtonStyleSkin {
@@ -137,6 +142,11 @@ impl UiTextButtonStyleSkin {
             checked: None,
             disabled: None,
             font,
+            font_color: UiStyleColor::White,
+            disabled_font_color: UiStyleColor::Gray,
+            over_font_color: None,
+            checked_font_color: None,
+            down_font_color: None,
         }
     }
 
@@ -162,6 +172,31 @@ impl UiTextButtonStyleSkin {
 
     pub const fn disabled(mut self, drawable: &'static str) -> Self {
         self.disabled = Some(drawable);
+        self
+    }
+
+    pub const fn font_color(mut self, color: UiStyleColor) -> Self {
+        self.font_color = color;
+        self
+    }
+
+    pub const fn disabled_font_color(mut self, color: UiStyleColor) -> Self {
+        self.disabled_font_color = color;
+        self
+    }
+
+    pub const fn over_font_color(mut self, color: UiStyleColor) -> Self {
+        self.over_font_color = Some(color);
+        self
+    }
+
+    pub const fn checked_font_color(mut self, color: UiStyleColor) -> Self {
+        self.checked_font_color = Some(color);
+        self
+    }
+
+    pub const fn down_font_color(mut self, color: UiStyleColor) -> Self {
+        self.down_font_color = Some(color);
         self
     }
 }
@@ -890,7 +925,10 @@ pub const UPSTREAM_TEXT_BUTTON_STYLE_SKINS: &[UiTextButtonStyleSkin] = &[
         .up("pane")
         .down("flatOver")
         .over("flatDownBase"),
-    UiTextButtonStyleSkin::new("nonet", "Fonts.outline").up("none"),
+    UiTextButtonStyleSkin::new("nonet", "Fonts.outline")
+        .font_color(UiStyleColor::LightGray)
+        .over_font_color(UiStyleColor::PalAccent)
+        .up("none"),
     UiTextButtonStyleSkin::new("logicTogglet", "Fonts.outline")
         .up("black")
         .down("accentDrawable")
@@ -1349,6 +1387,28 @@ mod tests {
         assert_eq!(defaultt.down, Some("buttonDown"));
         assert_eq!(defaultt.over, Some("buttonOver"));
         assert_eq!(defaultt.disabled, Some("buttonDisabled"));
+        assert_eq!(defaultt.font_color, UiStyleColor::White);
+        assert_eq!(defaultt.disabled_font_color, UiStyleColor::Gray);
+        assert_eq!(defaultt.over_font_color, None);
+        assert_eq!(defaultt.checked_font_color, None);
+        assert_eq!(defaultt.down_font_color, None);
+
+        let nonet = upstream_text_button_style_skin("nonet").unwrap();
+        assert_eq!(nonet.font, "Fonts.outline");
+        assert_eq!(nonet.font_color, UiStyleColor::LightGray);
+        assert_eq!(
+            nonet.font_color.rgba(),
+            [0.749_019_6, 0.749_019_6, 0.749_019_6, 1.0]
+        );
+        assert_eq!(nonet.disabled_font_color, UiStyleColor::Gray);
+        assert_eq!(nonet.over_font_color, Some(UiStyleColor::PalAccent));
+        assert_eq!(
+            nonet
+                .over_font_color
+                .expect("nonet should have an over font color")
+                .rgba(),
+            [1.0, 0.827_450_98, 0.498_039_22, 1.0]
+        );
 
         for name in [
             "nonet",
@@ -1384,6 +1444,10 @@ mod tests {
         assert_eq!(menu.checked, Some("flatDown"));
         assert_eq!(menu.over, Some("flatOver"));
         assert_eq!(menu.disabled, Some("black"));
+        assert_eq!(menu.font_color, UiStyleColor::White);
+        assert_eq!(menu.disabled_font_color, UiStyleColor::Gray);
+        assert_eq!(menu.checked_font_color, None);
+        assert_eq!(menu.down_font_color, None);
     }
 
     #[test]

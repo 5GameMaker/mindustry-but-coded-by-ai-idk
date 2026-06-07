@@ -19,6 +19,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1034. TextButtonStyle 字体颜色元数据补齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉/字体缺口，对照 `Styles.java` 中 `TextButtonStyle` 的字体颜色状态。
+- 本轮总体进度更新：约 **97.87%**，仍未达到完整可玩，不能宣告目标完成；后续继续把 desktop 按钮渲染接入这些 style 字体颜色，并推进 tooltip/loading/所有子菜单视觉。
+- 主改动：
+  - `core/src/mindustry/ui/styles.rs`
+    - `UiTextButtonStyleSkin` 增加 `font_color`、`disabled_font_color`、`over_font_color`、`checked_font_color`、`down_font_color`；
+    - 构造器默认对应 Java 大多数 TextButtonStyle 的 `Color.white` / `Color.gray`；
+    - `nonet` 补 `fontColor = Color.lightGray` 与 `overFontColor = Pal.accent`；
+    - 测试锁定 `defaultt`、`nonet` 与 `flatToggleMenut` 的字体颜色状态，避免后续 desktop 渲染继续硬编码漂移。
+- 已验证：
+  - `cargo test -p mindustry-core style_skins -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 本轮只补 core TextButtonStyle 元数据；`desktop/src/lib.rs` 中 Settings 按钮文本/icon 颜色仍需下一闭环接入。
+
 ## 1033. Settings 控件文字颜色接入 Java Styles 元数据
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉/字体缺口，把上一轮补齐的 core style 元数据接入 Settings 子菜单实际渲染。
