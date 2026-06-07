@@ -19,6 +19,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1035. Settings 文本按钮字体颜色接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉/字体缺口，把 TextButtonStyle 字体颜色元数据接入 desktop Settings 共享文本按钮渲染入口。
+- 本轮总体进度更新：约 **97.88%**，仍未达到完整可玩，不能宣告目标完成；后续继续 tooltip/loading/更多子菜单按钮与图标颜色对齐，以及完整可玩性 runtime。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_text_button_font_color(...)`，按 Java/libGDX TextButton 状态顺序解析：disabled → down → checked → over → base；
+    - `push_settings_text_button_enabled_with_style(...)` 的按钮文本和图标颜色改为读取 `UiTextButtonStyleSkin`，不再使用旧的蓝白硬编码；
+    - 回归覆盖 `defaultt`、`nonet` 的 enabled/disabled/hovered 字体颜色，以及 Controls 中 disabled `resetKey` 实际渲染为 `Styles.grayt.disabledFontColor`。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_text_button_checked_state_uses_java_checked_drawable -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 本轮只接共享 Settings 文本按钮入口；仍有数据库/地图/联机等其它 route 内部自绘文字颜色待继续统一，tooltip chrome 与 loading fragment 仍是下一批前端视觉重点。
+
 ## 1034. TextButtonStyle 字体颜色元数据补齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉/字体缺口，对照 `Styles.java` 中 `TextButtonStyle` 的字体颜色状态。
