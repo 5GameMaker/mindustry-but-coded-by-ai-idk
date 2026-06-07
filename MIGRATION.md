@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1041. 补齐前端 markup 颜色名覆盖
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Rust OpenGL 文字 markup 只识别少数颜色名导致 credits/mods/database/stats/hints 等界面掉色的问题。
+- 本轮总体进度更新：约 **98.04%**，仍未达到完整可玩，不能宣告目标完成；后续继续 UI 子菜单 Scene2D 几何/滚动节奏、完整字体 fallback、语言切换刷新链与完整可玩性。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - `opengl_backend_markup_named_color(...)` 补齐 Java `UI.init()` 注册的 `[accent]`、`[unlaunched]`、`[highlight]`、`[stat]`、`[negstat]`；
+    - 补齐 Arc/Color 常用 markup 名：`red`、`crimson`、`royal`、`sky`、`blue`、`tan`、`slate`、`purple`、`lightGray/LIGHT_GRAY` 等，降低多语言 bundle、credits、mod 警告、统计文本的颜色丢失；
+    - 允许 `logic-world` 这类 Java/Pal 风格颜色名归一化到 Rust `Pal::ALL`，但保留 `gray/lightgray/darkgray` 优先走 Arc Color 语义，避免误用 `Pal.gray`。
+  - 新增回归 `desktop_graphics_opengl_backend_markup_named_colors_cover_java_ui_registry`，覆盖 Java UI 自定义颜色、Arc 大小写/下划线颜色名、credits 颜色与 Pal 风格名称。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_markup_named_colors_cover_java_ui_registry -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_markup_colors_real_font_foreground_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_markup_colors_placeholder_font_like_java -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 本轮只补 markup 颜色解析，不代表所有前端子菜单已经像素级对齐；后台审查指出 `ContentInfo`、`Database`、`Mods`、`Settings/Language` 仍主要残留自绘布局与 Java Scene2D `ScrollPane/Table` 的几何、滚动、卡片 chrome 差异。
+
 ## 1040. NetClient UI 文本进入桌面渲染层
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端文字/语言运行链路，补齐 `NetClientState` 中 HUD/toast/info/announce 文本到桌面 UI RenderPass 的真实显示出口。
