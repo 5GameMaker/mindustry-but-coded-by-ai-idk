@@ -19,6 +19,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1049. Tech 字体缺字回退到 Default
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Java `LoadingFragment.text()` 在 `Fonts.tech` 缺字时切回 `Styles.defaultLabel` 的字体回退语义。
+- 本轮总体进度更新：约 **98.12%**，仍未达到完整可玩，不能宣告目标完成；后续继续 Settings Data 子弹窗 `BaseDialog` chrome、LanguageDialog ScrollPane 几何、HintsFragment runtime/render 与完整 UI 子菜单对齐。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - `opengl_backend_real_font_fallback_chain(RenderFontId::Tech)` 从仅 `Tech` 改为 `Tech -> Default`；
+    - 新增 `desktop_graphics_opengl_backend_tech_falls_back_to_default_like_loading_fragment_java`，验证 ASCII glyph 仍来自 `Fonts.tech`，而 Tech 缺失的 CJK glyph 通过 `Fonts.def` / Default 字体链绘制；
+    - 保持 `Fonts.tech` 的 markup disabled 与 tech line-height/down scale 语义不变。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_tech_falls_back_to_default_like_loading_fragment_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_tech_and_monospace_fonts_use_real_font_atlas -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 这是渲染后端 fallback 链路修补；core `LoadRenderer` 仍只描述 text/style 数据，最终 glyph 选择由 desktop real font atlas 完成。
+
 ## 1048. LoadingFragment 桌面文案进入本地化链路
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 desktop load payload 与 LoadGame loading overlay 直接渲染 `@loading/@cancel` 等 bundle key 的问题。
