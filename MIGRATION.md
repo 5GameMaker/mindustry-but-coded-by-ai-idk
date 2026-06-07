@@ -19,6 +19,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1050. Settings DataDialog 下层 chrome 复用 BaseDialog
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Settings 中打开 `PlanetDataDialog` 时下层 `dataDialog` 仍使用 Rust 自绘 `pane + stroke + 蓝白标题`，而 Java 两层都是 `new BaseDialog("@settings.data")` 的问题。
+- 本轮总体进度更新：约 **98.13%**，仍未达到完整可玩，不能宣告目标完成；后续继续 LanguageDialog ScrollPane 几何、HintsFragment runtime/render、更多 Settings 子页细节与完整 UI 子菜单对齐。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_data_dialog_backdrop(...)` 改为构造 `BaseDialog::new("@settings.data")` 并调用 `shell_render_commands(...)`；
+    - 下层 dataDialog 保持原先较低 layer 区间，避免盖住上层 PlanetDataDialog，同时获得 `black9` stage background、`window-empty.9` panel、`Pal.accent` title 与 accent divider；
+    - 移除该路径旧的手工 `StrokeRect` 蓝色边框与偏蓝白标题色；
+    - 扩展 `desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell`，断言下层 dataDialog 使用 BaseDialog window/background/title/accent 语义且不再出现旧蓝色 stroke。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - DataDialog 的 action table 仍保留 Java `Tex.button` + `Styles.flatt` + `280x60` 列布局；本轮只收下层 modal shell/chrome。
+
 ## 1049. Tech 字体缺字回退到 Default
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Java `LoadingFragment.text()` 在 `Fonts.tech` 缺字时切回 `Styles.defaultLabel` 的字体回退语义。
