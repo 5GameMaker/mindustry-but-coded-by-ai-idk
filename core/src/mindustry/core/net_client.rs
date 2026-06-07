@@ -3978,7 +3978,7 @@ mod tests {
             let mut net = client.net_mut();
             net.handle_client_received(PacketKind::SetHudTextReliableCallPacket(
                 SetHudTextReliableCallPacket(SetHudTextCallPacket {
-                    message: ":play:".into(),
+                    message: "relay :play: keep :missing: at 127.0.0.1:6567".into(),
                 }),
             ));
         }
@@ -3987,7 +3987,10 @@ mod tests {
 
         let state = client.state();
         let state = state.lock().unwrap();
-        assert_eq!(state.last_hud_text.as_deref(), Some(play.as_str()));
+        assert_eq!(
+            state.last_hud_text.as_deref(),
+            Some(format!("relay {play} keep :missing: at 127.0.0.1:6567").as_str())
+        );
     }
 
     #[test]

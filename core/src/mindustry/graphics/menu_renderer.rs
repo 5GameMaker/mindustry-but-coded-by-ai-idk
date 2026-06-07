@@ -12,6 +12,7 @@ use crate::mindustry::ui::{
     upstream_bundle_en_value, upstream_image_button_style_skin,
     upstream_menu_bundle_value_for_locale_owned, upstream_text_button_style_skin,
     upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, UiDrawableAlias, UiDrawableTint,
+    UPSTREAM_ROUTER_LANGUAGE_GLYPH,
 };
 
 pub const MENU_DARKNESS: f32 = 0.3;
@@ -113,6 +114,26 @@ fn menu_push_label_render_command(
     commands.push(RenderCommand::draw_text_styled(
         label, point, color, size, rotation, style, layer,
     ));
+}
+
+fn menu_is_router_locale(locale: &str) -> bool {
+    locale
+        .trim()
+        .replace('-', "_")
+        .eq_ignore_ascii_case("router")
+}
+
+fn menu_routerized_text(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_whitespace() {
+                ch
+            } else {
+                UPSTREAM_ROUTER_LANGUAGE_GLYPH
+            }
+        })
+        .collect()
 }
 
 /// Native-safe approximation of Java `Styles.flatToggleMenut`.
@@ -734,9 +755,17 @@ impl MenuButtonRole {
     }
 
     pub fn label_for_locale(self, locale: &str) -> String {
-        self.bundle_key()
-            .and_then(|key| upstream_menu_bundle_value_for_locale_owned(locale, key))
-            .unwrap_or_else(|| self.label().to_string())
+        if let Some(key) = self.bundle_key() {
+            if let Some(label) = upstream_menu_bundle_value_for_locale_owned(locale, key) {
+                return label;
+            }
+
+            if menu_is_router_locale(locale) {
+                return menu_routerized_text(self.label());
+            }
+        }
+
+        self.label().to_string()
     }
 
     pub const fn is_submenu(self) -> bool {
@@ -3368,8 +3397,8 @@ fn menu_ui_plan(
 mod tests {
     use super::*;
     use crate::mindustry::ui::{
-        upstream_menu_bundle_value_for_locale, upstream_ui_icon_glyph_string,
-        UPSTREAM_ROUTER_LANGUAGE_GLYPH,
+        upstream_menu_bundle_value_for_locale, upstream_menu_bundle_value_for_locale_owned,
+        upstream_ui_icon_glyph_string, UPSTREAM_ROUTER_LANGUAGE_GLYPH,
     };
 
     #[test]
@@ -5726,30 +5755,40 @@ mod tests {
 
     #[test]
     fn menu_button_role_label_for_locale_router_uses_routerized_text() {
-        let play = MenuButtonRole::Play.label_for_locale("router");
-        let settings = MenuButtonRole::Settings.label_for_locale("router");
+        for (role, key, english) in [
+            (MenuButtonRole::Play, "play", MenuButtonRole::Play.label()),
+            (
+                MenuButtonRole::Campaign,
+                "campaign",
+                MenuButtonRole::Campaign.label(),
+            ),
+            (
+                MenuButtonRole::Database,
+                "database.button",
+                MenuButtonRole::Database.label(),
+            ),
+            (
+                MenuButtonRole::Schematics,
+                "schematics",
+                MenuButtonRole::Schematics.label(),
+            ),
+        ] {
+            let label = role.label_for_locale("router");
+            let expected = upstream_menu_bundle_value_for_locale_owned("router", key)
+                .expect("router locale should routerize built-in menu labels");
 
-        assert_ne!(play, MenuButtonRole::Play.label());
-        assert_ne!(settings, MenuButtonRole::Settings.label());
-        assert!(!play.starts_with('@'));
-        assert!(!settings.starts_with('@'));
-        assert_eq!(
-            play.chars().count(),
-            MenuButtonRole::Play.label().chars().count()
-        );
-        assert_eq!(
-            settings.chars().count(),
-            MenuButtonRole::Settings.label().chars().count()
-        );
-        assert!(play.chars().all(|ch| ch == UPSTREAM_ROUTER_LANGUAGE_GLYPH));
-        assert!(settings
-            .chars()
-            .all(|ch| ch == UPSTREAM_ROUTER_LANGUAGE_GLYPH));
+            assert_eq!(label, expected);
+            assert_ne!(label, english);
+            assert!(!label.starts_with('@'));
+            assert!(label
+                .chars()
+                .all(|ch| ch.is_whitespace() || ch == UPSTREAM_ROUTER_LANGUAGE_GLYPH));
+        }
     }
 
     #[test]
     fn menu_ui_plan_desktop_router_locale_draws_routerized_builtin_labels() {
-        let plan = menu_ui_plan(
+        let play_plan = menu_ui_plan(
             MenuFrameInput::new(1280.0, 720.0, 4.0, 1.0 / 60.0),
             "router",
             false,
@@ -5762,19 +5801,71 @@ mod tests {
             false,
             &[],
         );
-        let expected = MenuButtonRole::Play.label_for_locale("router");
+        let play_expected = upstream_menu_bundle_value_for_locale_owned("router", "play")
+            .expect("router locale should routerize the Play label");
+        let campaign_expected = upstream_menu_bundle_value_for_locale_owned("router", "campaign")
+            .expect("router locale should routerize the Campaign submenu label");
+        let join_expected = upstream_menu_bundle_value_for_locale_owned("router", "joingame")
+            .expect("router locale should routerize the Join submenu label");
 
-        assert!(plan.buttons.iter().any(|button| button.label == expected));
-        assert!(!plan
+        assert!(play_plan
             .buttons
             .iter()
-            .any(|button| button.label == MenuButtonRole::Play.label()));
+            .any(|button| button.role == MenuButtonRole::Play && button.label == play_expected));
+        assert!(play_plan.buttons.iter().any(|button| {
+            button.role == MenuButtonRole::Campaign && button.label == campaign_expected
+        }));
+        assert!(play_plan.buttons.iter().any(|button| {
+            button.role == MenuButtonRole::Join && button.label == join_expected
+        }));
+        assert!(!play_plan
+            .buttons
+            .iter()
+            .any(|button| button.label.starts_with('@')));
 
-        let commands = plan.to_render_commands();
+        let database_plan = menu_ui_plan(
+            MenuFrameInput::new(1280.0, 720.0, 4.0, 1.0 / 60.0),
+            "router",
+            false,
+            MenuButtonRole::Database,
+            Some(MenuButtonRole::Database),
+            Some(MenuButtonRole::Database),
+            1.0,
+            1.0,
+            false,
+            false,
+            &[],
+        );
+        let database_expected =
+            upstream_menu_bundle_value_for_locale_owned("router", "database.button")
+                .expect("router locale should routerize the Database label");
+        let schematics_expected =
+            upstream_menu_bundle_value_for_locale_owned("router", "schematics")
+                .expect("router locale should routerize the Schematics submenu label");
+        let content_database_expected =
+            upstream_menu_bundle_value_for_locale_owned("router", "database")
+                .expect("router locale should routerize the Core Database submenu label");
+
+        assert!(database_plan.buttons.iter().any(|button| {
+            button.role == MenuButtonRole::Database && button.label == database_expected
+        }));
+        assert!(database_plan.buttons.iter().any(|button| {
+            button.role == MenuButtonRole::Schematics && button.label == schematics_expected
+        }));
+        assert!(database_plan.buttons.iter().any(|button| {
+            button.role == MenuButtonRole::ContentDatabase
+                && button.label == content_database_expected
+        }));
+        assert!(!database_plan
+            .buttons
+            .iter()
+            .any(|button| button.label.starts_with('@')));
+
+        let commands = play_plan.to_render_commands();
         assert!(commands.iter().any(|command| matches!(
             command,
             RenderCommand::DrawText { text, style, .. }
-                if text == &expected
+                if text == &play_expected
                     && style.font == RenderFontId::Default
                     && style.markup
         )));

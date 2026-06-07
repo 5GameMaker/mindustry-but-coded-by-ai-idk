@@ -19,6 +19,41 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1055. 收紧 Join 图标按钮与字体 raw 资源链
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体和语言链路，优先处理 JoinDialog 可见按钮壳、router 语言文案和 HUD 图标 token 裸露问题。
+- 本轮总体进度更新：约 **98.18%**，仍未达到完整可玩，不能宣告目标完成；后续继续 LanguageDialog、Settings/Controls/Data、Database/About/Mods、Load/Save/Editor 等子菜单的 Java Scene2D 视觉表现与运行时接入。
+- Java 对照证据：
+  - `JoinDialog.java` 的全局搜索 zoom 使用 `Styles.emptyi`，社区组 star 使用自定义 `ImageButtonStyle` 只控制 glyph 色，hidden/eye 使用 `Styles.grayi`，社区 host add 使用 `Styles.emptyi`；
+  - `finishLocalHosts()` 的空本地发现状态是 `local.background(Tex.button)` + `Icon.refresh` 的 70f ImageButton，不是带描边的 text button；
+  - Java 菜单按钮按 bundle key 取文案，router locale 应由 bundle 层转成 router glyph，不应回退英文或裸 `@key`；
+  - `HudFragment` 对 HUD/objective 可见文本调用 `UI.formatIcons(...)`，`:play:` 等 icon token 不应裸露。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 普通 asset 查找在 `assets` 未命中时会精确回退到同级 `assets-raw`，并尊重 `MINDUSTRY_ASSET_RAW_ROOT`，让 `fontgen/config.json` 这类上游 raw 字体配置进入字体资源验证链；
+    - Join 本地空状态 refresh 改成真正 icon-only ImageButton 渲染，保留 Java 的 70f 几何和 `Tex.button` 空卡背景；
+    - Join 社区搜索 zoom / show-hidden / group star / hidden eye / host add 的按钮皮肤改回 `emptyi`、`grayi` 或无 drawable 自定义 ImageButtonStyle 语义，去掉 Rust-only defaulti 壳和 outline glyph。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuButtonRole::label_for_locale("router")` 改走 locale-aware owned bundle 文案，并补 router glyph fallback，避免 core 单独消费时回退英文。
+  - `core/src/mindustry/core/net_client.rs`
+    - `SetHudTextCallPacket` 与 `SetHudTextReliableCallPacket` 的可见 HUD 文本接入 `format_icon_tokens_like_java`，保留未知 token 与 IP/端口字符串。
+  - `README.md`
+    - 迁移进度更新到 **98.18%**。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_button_role_label_for_locale_router_uses_routerized_text -- --nocapture`
+  - `cargo test -p mindustry-core menu_ui_plan_desktop_router_locale_draws_routerized_builtin_labels -- --nocapture`
+  - `cargo test -p mindustry-core menu_renderer_state_locale_changes_rebuild_ui_layout_cache_and_labels_like_java -- --nocapture`
+  - `cargo test -p mindustry-core update_formats_hud_icon_tokens_like_java_ui_format_icons -- --nocapture`
+  - `cargo test -p mindustry-core format_icon_tokens_like_java_matches_ui_format_icons_for_iconc_and_string_icons -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_font_asset_sources_resolve_from_mindustry_asset_root -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_local_empty_refresh_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_community_search_filters_only_on_refresh_like_java -- --nocapture`
+- 注意：
+  - 这只收 JoinDialog 局部图标按钮、字体 raw 配置命中、router/HUD 文案；完整前端仍需继续逐页对齐，尤其 Settings/Language/Controls/Data、Load/Save/Editor、Database/About/Mods 的字体、ScrollPane、按钮皮肤、footer/back 层级和子菜单状态。
+
 ## 1054. LanguageDialog ScrollPane 高度脱离固定七行
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理 Settings → Language 子弹窗仍用 Rust 过渡期固定 7 行视口的问题。
