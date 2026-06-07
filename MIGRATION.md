@@ -19,6 +19,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1032. Styles 字体颜色元数据补齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉/字体缺口，对照 `Styles.java` 补齐 Scene2D style 的字体与颜色元数据。
+- 本轮总体进度更新：约 **97.85%**，仍未达到完整可玩，不能宣告目标完成；后续继续把 Settings/子菜单实际渲染接入这些 style 元数据，并推进所有子菜单视觉与可玩性 runtime。
+- 主改动：
+  - `core/src/mindustry/ui/styles.rs`
+    - 新增 `UiStyleColor`，保留 `Color.white`、`Color.gray`、`Color.lightGray`、`Pal.accent` 的 Java 语义与 RGBA；
+    - 新增 `UiLabelStyleSkin` 与 `UPSTREAM_LABEL_STYLE_SKINS`，覆盖 `defaultLabel`、`outlineLabel`、`techLabel`、`monoLabel`；
+    - `UiTextFieldStyleSkin` 增加 `font`、`font_color`、`disabled_font_color`、`message_font`、`message_font_color`；
+    - `UiCheckBoxStyleSkin` 增加 `font`、`font_color`、`disabled_font_color`；
+    - 补表驱动测试，锁定 Java `Styles.java` 的 Label/TextField/CheckBox 字体颜色契约。
+  - `core/src/mindustry/ui/mod.rs`
+    - re-export 新增的 label style 与 style color 元数据，便于 desktop/render 后续统一消费。
+- 已验证：
+  - `cargo test -p mindustry-core style_skins -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 本轮只补 core 元数据；desktop Settings 当前仍有部分颜色硬编码，下一步要把 `push_settings_pref_controls_for_specs` 等渲染入口切到这些 style 元数据。
+
 ## 1031. Controls 键位显示词表与 Unset 颜色对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉与字体/语言缺口，先收口 Settings → Controls 中肉眼可见的键位显示漂移。

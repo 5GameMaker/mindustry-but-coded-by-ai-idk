@@ -54,6 +54,25 @@ pub enum UiDrawableTint {
     DarkestestGray,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UiStyleColor {
+    White,
+    Gray,
+    LightGray,
+    PalAccent,
+}
+
+impl UiStyleColor {
+    pub const fn rgba(self) -> [f32; 4] {
+        match self {
+            Self::White => [1.0, 1.0, 1.0, 1.0],
+            Self::Gray => [0.498_039_22, 0.498_039_22, 0.498_039_22, 1.0],
+            Self::LightGray => [0.749_019_6, 0.749_019_6, 0.749_019_6, 1.0],
+            Self::PalAccent => [1.0, 0.827_450_98, 0.498_039_22, 1.0],
+        }
+    }
+}
+
 impl UiDrawableTint {
     pub const fn rgba(self) -> [f32; 4] {
         match self {
@@ -148,6 +167,13 @@ impl UiTextButtonStyleSkin {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiLabelStyleSkin {
+    pub java_name: &'static str,
+    pub font: &'static str,
+    pub font_color: UiStyleColor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UiImageButtonStyleSkin {
     pub java_name: &'static str,
     pub up: Option<&'static str>,
@@ -184,16 +210,24 @@ pub struct UiCheckBoxStyleSkin {
     pub checkbox_over: &'static str,
     pub checkbox_on_disabled: &'static str,
     pub checkbox_off_disabled: &'static str,
+    pub font: &'static str,
+    pub font_color: UiStyleColor,
+    pub disabled_font_color: UiStyleColor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UiTextFieldStyleSkin {
     pub java_name: &'static str,
+    pub font: &'static str,
+    pub font_color: UiStyleColor,
+    pub disabled_font_color: UiStyleColor,
     pub background: &'static str,
     pub disabled_background: Option<&'static str>,
     pub invalid_background: Option<&'static str>,
     pub selection: &'static str,
     pub cursor: &'static str,
+    pub message_font: &'static str,
+    pub message_font_color: UiStyleColor,
 }
 
 pub const UPSTREAM_UI_SKIN_SPRITES: &[UiSkinSprite] = &[
@@ -808,6 +842,29 @@ pub const UPSTREAM_UI_DRAWABLE_ALIASES: &[UiDrawableAlias] = &[
     UiDrawableAlias::new("logo", "logo", "sprites/ui/logo.png", UiDrawableTint::None),
 ];
 
+pub const UPSTREAM_LABEL_STYLE_SKINS: &[UiLabelStyleSkin] = &[
+    UiLabelStyleSkin {
+        java_name: "defaultLabel",
+        font: "Fonts.def",
+        font_color: UiStyleColor::White,
+    },
+    UiLabelStyleSkin {
+        java_name: "outlineLabel",
+        font: "Fonts.outline",
+        font_color: UiStyleColor::White,
+    },
+    UiLabelStyleSkin {
+        java_name: "techLabel",
+        font: "Fonts.tech",
+        font_color: UiStyleColor::White,
+    },
+    UiLabelStyleSkin {
+        java_name: "monoLabel",
+        font: "Fonts.monospace",
+        font_color: UiStyleColor::White,
+    },
+];
+
 pub const UPSTREAM_TEXT_BUTTON_STYLE_SKINS: &[UiTextButtonStyleSkin] = &[
     UiTextButtonStyleSkin::new("defaultt", "Fonts.def")
         .up("button")
@@ -1058,40 +1115,63 @@ pub const UPSTREAM_CHECK_BOX_STYLE_SKINS: &[UiCheckBoxStyleSkin] = &[UiCheckBoxS
     checkbox_over: "checkOver",
     checkbox_on_disabled: "checkOnDisabled",
     checkbox_off_disabled: "checkDisabled",
+    font: "Fonts.def",
+    font_color: UiStyleColor::White,
+    disabled_font_color: UiStyleColor::Gray,
 }];
 
 pub const UPSTREAM_TEXT_FIELD_STYLE_SKINS: &[UiTextFieldStyleSkin] = &[
     UiTextFieldStyleSkin {
         java_name: "defaultField",
+        font: "Fonts.def",
+        font_color: UiStyleColor::White,
+        disabled_font_color: UiStyleColor::Gray,
         background: "underline",
         disabled_background: Some("underlineDisabled"),
         invalid_background: Some("underlineRed"),
         selection: "selection",
         cursor: "cursor",
+        message_font: "Fonts.def",
+        message_font_color: UiStyleColor::Gray,
     },
     UiTextFieldStyleSkin {
         java_name: "nodeField",
+        font: "Fonts.def",
+        font_color: UiStyleColor::White,
+        disabled_font_color: UiStyleColor::Gray,
         background: "underlineWhite",
         disabled_background: Some("underlineDisabled"),
         invalid_background: Some("underlineRed"),
         selection: "selection",
         cursor: "cursor",
+        message_font: "Fonts.def",
+        message_font_color: UiStyleColor::Gray,
     },
     UiTextFieldStyleSkin {
         java_name: "areaField",
+        font: "Fonts.def",
+        font_color: UiStyleColor::White,
+        disabled_font_color: UiStyleColor::Gray,
         background: "underline",
         disabled_background: None,
         invalid_background: None,
         selection: "selection",
         cursor: "cursor",
+        message_font: "Fonts.def",
+        message_font_color: UiStyleColor::Gray,
     },
     UiTextFieldStyleSkin {
         java_name: "nodeArea",
+        font: "Fonts.def",
+        font_color: UiStyleColor::White,
+        disabled_font_color: UiStyleColor::Gray,
         background: "underlineWhite",
         disabled_background: None,
         invalid_background: None,
         selection: "selection",
         cursor: "cursor",
+        message_font: "Fonts.def",
+        message_font_color: UiStyleColor::Gray,
     },
 ];
 
@@ -1115,6 +1195,12 @@ pub fn upstream_ui_drawable_alias(java_name: &str) -> Option<&'static UiDrawable
     UPSTREAM_UI_DRAWABLE_ALIASES
         .iter()
         .find(|alias| alias.java_name == java_name)
+}
+
+pub fn upstream_label_style_skin(java_name: &str) -> Option<&'static UiLabelStyleSkin> {
+    UPSTREAM_LABEL_STYLE_SKINS
+        .iter()
+        .find(|style| style.java_name == java_name)
 }
 
 pub fn upstream_text_button_style_skin(java_name: &str) -> Option<&'static UiTextButtonStyleSkin> {
@@ -1240,6 +1326,23 @@ mod tests {
     }
 
     #[test]
+    fn upstream_label_style_skins_match_java_label_styles() {
+        for (name, font) in [
+            ("defaultLabel", "Fonts.def"),
+            ("outlineLabel", "Fonts.outline"),
+            ("techLabel", "Fonts.tech"),
+            ("monoLabel", "Fonts.monospace"),
+        ] {
+            let label = upstream_label_style_skin(name).unwrap_or_else(|| {
+                panic!("{name} should be present in the upstream label style registry")
+            });
+            assert_eq!(label.font, font);
+            assert_eq!(label.font_color, UiStyleColor::White);
+            assert_eq!(label.font_color.rgba(), [1.0, 1.0, 1.0, 1.0]);
+        }
+    }
+
+    #[test]
     fn upstream_text_button_style_skins_match_java_styles_names() {
         let defaultt = upstream_text_button_style_skin("defaultt").unwrap();
         assert_eq!(defaultt.up, Some("button"));
@@ -1302,13 +1405,43 @@ mod tests {
         assert_eq!(check.checkbox_off, "checkOff");
         assert_eq!(check.checkbox_on_disabled, "checkOnDisabled");
         assert_eq!(check.checkbox_off_disabled, "checkDisabled");
+        assert_eq!(check.font, "Fonts.def");
+        assert_eq!(check.font_color, UiStyleColor::White);
+        assert_eq!(check.disabled_font_color, UiStyleColor::Gray);
 
         let field = upstream_text_field_style_skin("defaultField").unwrap();
+        assert_eq!(field.font, "Fonts.def");
+        assert_eq!(field.font_color, UiStyleColor::White);
+        assert_eq!(field.disabled_font_color, UiStyleColor::Gray);
         assert_eq!(field.background, "underline");
         assert_eq!(field.disabled_background, Some("underlineDisabled"));
         assert_eq!(field.invalid_background, Some("underlineRed"));
         assert_eq!(field.selection, "selection");
         assert_eq!(field.cursor, "cursor");
+        assert_eq!(field.message_font, "Fonts.def");
+        assert_eq!(field.message_font_color, UiStyleColor::Gray);
+        assert_eq!(
+            field.message_font_color.rgba(),
+            [0.498_039_22, 0.498_039_22, 0.498_039_22, 1.0]
+        );
+
+        let node_field = upstream_text_field_style_skin("nodeField").unwrap();
+        assert_eq!(node_field.background, "underlineWhite");
+        assert_eq!(node_field.disabled_background, Some("underlineDisabled"));
+        assert_eq!(node_field.invalid_background, Some("underlineRed"));
+        assert_eq!(node_field.font_color, UiStyleColor::White);
+        assert_eq!(node_field.message_font_color, UiStyleColor::Gray);
+
+        for name in ["areaField", "nodeArea"] {
+            let area = upstream_text_field_style_skin(name).unwrap();
+            assert_eq!(area.font, "Fonts.def");
+            assert_eq!(area.font_color, UiStyleColor::White);
+            assert_eq!(area.disabled_font_color, UiStyleColor::Gray);
+            assert_eq!(area.message_font, "Fonts.def");
+            assert_eq!(area.message_font_color, UiStyleColor::Gray);
+            assert_eq!(area.disabled_background, None);
+            assert_eq!(area.invalid_background, None);
+        }
     }
 
     #[test]
