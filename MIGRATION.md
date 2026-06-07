@@ -19,6 +19,21 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1029. Fonts.outline shadowOffsetY 视觉收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续字体/前端视觉缺口，对照 `Fonts.java` 中 `fontParameter()` 的 `shadowColor = Color.darkGray` 与 `shadowOffsetY = 2`。
+- 本轮总体进度更新：约 **97.72%**，仍未达到完整可玩，不能宣告目标完成；后续继续 JP/CJK outline raster fidelity、所有子菜单视觉还原、可玩性 runtime 与 Java↔Rust 联机兼容。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - `RenderFontId::Outline` / `style.outline` 的 real font 渲染分支在 8 向 border pass 和 foreground pass 之前新增 darkGray shadow pass；
+    - shadow 使用 Java `fontParameter()` 对应的 18px 基准 `shadowOffsetY = 2`，并按实际 text size 缩放；
+    - 新增 `DESKTOP_OUTLINE_FONT_SHADOW_LAYER_OFFSET`，使 shadow layer 位于 outline border layer 之后但仍低于 foreground；
+    - 补充 `desktop_graphics_opengl_backend_outline_font_applies_java_shadow`，同时保留原有 borderWidth=2 回归。
+- 已验证：
+  - `cargo test -p mindustry-desktop outline_font -- --nocapture`
+- 注意：
+  - 本轮只补 `Fonts.outline` shadow pass，不代表 FreeType border rasterization 与 Java 完全像素等价；后续仍需继续收 JP outline override、border alpha/coverage 与 CJK glyph fidelity。
+
 ## 1028. Mod bundle 本地化 overlay 与字体 seed 接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端字体/语言缺口收口，对照 `Mods.java:614-652` 的 `bundles/*.properties` 合并语义。
