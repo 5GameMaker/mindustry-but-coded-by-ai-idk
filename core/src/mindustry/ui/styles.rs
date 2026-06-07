@@ -57,7 +57,9 @@ pub enum UiDrawableTint {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UiStyleColor {
     White,
+    Black,
     Gray,
+    DarkGray,
     LightGray,
     PalAccent,
 }
@@ -66,7 +68,9 @@ impl UiStyleColor {
     pub const fn rgba(self) -> [f32; 4] {
         match self {
             Self::White => [1.0, 1.0, 1.0, 1.0],
+            Self::Black => [0.0, 0.0, 0.0, 1.0],
             Self::Gray => [0.498_039_22, 0.498_039_22, 0.498_039_22, 1.0],
+            Self::DarkGray => [0.25, 0.25, 0.25, 1.0],
             Self::LightGray => [0.749_019_6, 0.749_019_6, 0.749_019_6, 1.0],
             Self::PalAccent => [1.0, 0.827_450_98, 0.498_039_22, 1.0],
         }
@@ -216,6 +220,79 @@ pub struct UiImageButtonStyleSkin {
     pub over: Option<&'static str>,
     pub checked: Option<&'static str>,
     pub disabled: Option<&'static str>,
+    pub image_up_color: Option<UiStyleColor>,
+    pub image_down_color: Option<UiStyleColor>,
+    pub image_over_color: Option<UiStyleColor>,
+    pub image_checked_color: Option<UiStyleColor>,
+    pub image_disabled_color: Option<UiStyleColor>,
+}
+
+impl UiImageButtonStyleSkin {
+    pub const fn new(java_name: &'static str) -> Self {
+        Self {
+            java_name,
+            up: None,
+            down: None,
+            over: None,
+            checked: None,
+            disabled: None,
+            image_up_color: None,
+            image_down_color: None,
+            image_over_color: None,
+            image_checked_color: None,
+            image_disabled_color: None,
+        }
+    }
+
+    pub const fn up(mut self, drawable: &'static str) -> Self {
+        self.up = Some(drawable);
+        self
+    }
+
+    pub const fn down(mut self, drawable: &'static str) -> Self {
+        self.down = Some(drawable);
+        self
+    }
+
+    pub const fn over(mut self, drawable: &'static str) -> Self {
+        self.over = Some(drawable);
+        self
+    }
+
+    pub const fn checked(mut self, drawable: &'static str) -> Self {
+        self.checked = Some(drawable);
+        self
+    }
+
+    pub const fn disabled(mut self, drawable: &'static str) -> Self {
+        self.disabled = Some(drawable);
+        self
+    }
+
+    pub const fn image_up_color(mut self, color: UiStyleColor) -> Self {
+        self.image_up_color = Some(color);
+        self
+    }
+
+    pub const fn image_down_color(mut self, color: UiStyleColor) -> Self {
+        self.image_down_color = Some(color);
+        self
+    }
+
+    pub const fn image_over_color(mut self, color: UiStyleColor) -> Self {
+        self.image_over_color = Some(color);
+        self
+    }
+
+    pub const fn image_checked_color(mut self, color: UiStyleColor) -> Self {
+        self.image_checked_color = Some(color);
+        self
+    }
+
+    pub const fn image_disabled_color(mut self, color: UiStyleColor) -> Self {
+        self.image_disabled_color = Some(color);
+        self
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -985,134 +1062,78 @@ pub const UPSTREAM_TEXT_BUTTON_STYLE_SKINS: &[UiTextButtonStyleSkin] = &[
 ];
 
 pub const UPSTREAM_IMAGE_BUTTON_STYLE_SKINS: &[UiImageButtonStyleSkin] = &[
-    UiImageButtonStyleSkin {
-        java_name: "defaulti",
-        up: Some("button"),
-        down: Some("buttonDown"),
-        over: Some("buttonOver"),
-        checked: None,
-        disabled: Some("buttonDisabled"),
-    },
-    UiImageButtonStyleSkin {
-        java_name: "nodei",
-        up: Some("buttonOver"),
-        down: None,
-        over: Some("buttonDown"),
-        checked: None,
-        disabled: None,
-    },
-    UiImageButtonStyleSkin {
-        java_name: "emptyi",
-        up: None,
-        down: None,
-        over: None,
-        checked: None,
-        disabled: None,
-    },
-    UiImageButtonStyleSkin {
-        java_name: "emptyTogglei",
-        up: None,
-        down: None,
-        over: None,
-        checked: None,
-        disabled: None,
-    },
-    UiImageButtonStyleSkin {
-        java_name: "selecti",
-        up: Some("none"),
-        down: None,
-        over: None,
-        checked: Some("buttonSelect"),
-        disabled: None,
-    },
-    UiImageButtonStyleSkin {
-        java_name: "logici",
-        up: None,
-        down: None,
-        over: None,
-        checked: None,
-        disabled: None,
-    },
-    UiImageButtonStyleSkin {
-        java_name: "geni",
-        up: None,
-        down: None,
-        over: None,
-        checked: None,
-        disabled: None,
-    },
-    UiImageButtonStyleSkin {
-        java_name: "grayi",
-        up: None,
-        down: None,
-        over: None,
-        checked: None,
-        disabled: None,
-    },
-    UiImageButtonStyleSkin {
-        java_name: "graySquarei",
-        up: Some("grayPanel"),
-        down: Some("flatOver"),
-        over: Some("flatOver"),
-        checked: None,
-        disabled: None,
-    },
-    UiImageButtonStyleSkin {
-        java_name: "flati",
-        up: Some("black"),
-        down: Some("flatOver"),
-        over: Some("flatOver"),
-        checked: None,
-        disabled: None,
-    },
-    UiImageButtonStyleSkin {
-        java_name: "squarei",
-        up: Some("pane"),
-        down: Some("whiteui"),
-        over: Some("flatDown"),
-        checked: None,
-        disabled: None,
-    },
-    UiImageButtonStyleSkin {
-        java_name: "squareTogglei",
-        up: Some("black"),
-        down: Some("flatDown"),
-        over: Some("flatOver"),
-        checked: Some("flatDown"),
-        disabled: None,
-    },
-    UiImageButtonStyleSkin {
-        java_name: "clearNonei",
-        up: Some("none"),
-        down: Some("flatDown"),
-        over: Some("flatOver"),
-        checked: None,
-        disabled: Some("none"),
-    },
-    UiImageButtonStyleSkin {
-        java_name: "cleari",
-        up: Some("black6"),
-        down: Some("flatDown"),
-        over: Some("flatOver"),
-        checked: None,
-        disabled: Some("black6"),
-    },
-    UiImageButtonStyleSkin {
-        java_name: "clearTogglei",
-        up: Some("black6"),
-        down: Some("flatDown"),
-        over: Some("flatOver"),
-        checked: Some("flatDown"),
-        disabled: None,
-    },
-    UiImageButtonStyleSkin {
-        java_name: "clearNoneTogglei",
-        up: Some("none"),
-        down: Some("flatDown"),
-        over: Some("flatOver"),
-        checked: Some("flatDown"),
-        disabled: None,
-    },
+    UiImageButtonStyleSkin::new("defaulti")
+        .up("button")
+        .down("buttonDown")
+        .over("buttonOver")
+        .disabled("buttonDisabled")
+        .image_up_color(UiStyleColor::White)
+        .image_disabled_color(UiStyleColor::Gray),
+    UiImageButtonStyleSkin::new("nodei")
+        .up("buttonOver")
+        .over("buttonDown"),
+    UiImageButtonStyleSkin::new("emptyi")
+        .image_up_color(UiStyleColor::White)
+        .image_down_color(UiStyleColor::PalAccent)
+        .image_over_color(UiStyleColor::LightGray),
+    UiImageButtonStyleSkin::new("emptyTogglei")
+        .image_up_color(UiStyleColor::Gray)
+        .image_down_color(UiStyleColor::White)
+        .image_checked_color(UiStyleColor::White)
+        .image_disabled_color(UiStyleColor::DarkGray),
+    UiImageButtonStyleSkin::new("selecti")
+        .up("none")
+        .checked("buttonSelect"),
+    UiImageButtonStyleSkin::new("logici").image_up_color(UiStyleColor::Black),
+    UiImageButtonStyleSkin::new("geni")
+        .image_up_color(UiStyleColor::Black)
+        .image_down_color(UiStyleColor::PalAccent),
+    UiImageButtonStyleSkin::new("grayi")
+        .image_up_color(UiStyleColor::LightGray)
+        .image_down_color(UiStyleColor::White),
+    UiImageButtonStyleSkin::new("graySquarei")
+        .up("grayPanel")
+        .down("flatOver")
+        .over("flatOver")
+        .image_up_color(UiStyleColor::White)
+        .image_down_color(UiStyleColor::LightGray),
+    UiImageButtonStyleSkin::new("flati")
+        .up("black")
+        .down("flatOver")
+        .over("flatOver"),
+    UiImageButtonStyleSkin::new("squarei")
+        .up("pane")
+        .down("whiteui")
+        .over("flatDown"),
+    UiImageButtonStyleSkin::new("squareTogglei")
+        .up("black")
+        .down("flatDown")
+        .over("flatOver")
+        .checked("flatDown"),
+    UiImageButtonStyleSkin::new("clearNonei")
+        .up("none")
+        .down("flatDown")
+        .over("flatOver")
+        .disabled("none")
+        .image_up_color(UiStyleColor::White)
+        .image_disabled_color(UiStyleColor::Gray),
+    UiImageButtonStyleSkin::new("cleari")
+        .up("black6")
+        .down("flatDown")
+        .over("flatOver")
+        .disabled("black6")
+        .image_up_color(UiStyleColor::White)
+        .image_disabled_color(UiStyleColor::LightGray),
+    UiImageButtonStyleSkin::new("clearTogglei")
+        .up("black6")
+        .down("flatDown")
+        .over("flatOver")
+        .checked("flatDown"),
+    UiImageButtonStyleSkin::new("clearNoneTogglei")
+        .up("none")
+        .down("flatDown")
+        .over("flatOver")
+        .checked("flatDown"),
 ];
 
 pub const UPSTREAM_SCROLL_PANE_STYLE_SKINS: &[UiScrollPaneStyleSkin] = &[
@@ -1544,6 +1565,8 @@ mod tests {
         assert_eq!(defaulti.down, Some("buttonDown"));
         assert_eq!(defaulti.over, Some("buttonOver"));
         assert_eq!(defaulti.disabled, Some("buttonDisabled"));
+        assert_eq!(defaulti.image_up_color, Some(UiStyleColor::White));
+        assert_eq!(defaulti.image_disabled_color, Some(UiStyleColor::Gray));
 
         for name in [
             "nodei",
@@ -1568,16 +1591,49 @@ mod tests {
         assert_eq!(node.up, Some("buttonOver"));
         assert_eq!(node.over, Some("buttonDown"));
 
+        let empty = upstream_image_button_style_skin("emptyi").unwrap();
+        assert_eq!(empty.image_up_color, Some(UiStyleColor::White));
+        assert_eq!(empty.image_down_color, Some(UiStyleColor::PalAccent));
+        assert_eq!(empty.image_over_color, Some(UiStyleColor::LightGray));
+
+        let empty_toggle = upstream_image_button_style_skin("emptyTogglei").unwrap();
+        assert_eq!(empty_toggle.image_up_color, Some(UiStyleColor::Gray));
+        assert_eq!(empty_toggle.image_down_color, Some(UiStyleColor::White));
+        assert_eq!(empty_toggle.image_checked_color, Some(UiStyleColor::White));
+        assert_eq!(
+            empty_toggle.image_disabled_color,
+            Some(UiStyleColor::DarkGray)
+        );
+
+        let logic = upstream_image_button_style_skin("logici").unwrap();
+        assert_eq!(logic.image_up_color, Some(UiStyleColor::Black));
+
+        let geni = upstream_image_button_style_skin("geni").unwrap();
+        assert_eq!(geni.image_up_color, Some(UiStyleColor::Black));
+        assert_eq!(geni.image_down_color, Some(UiStyleColor::PalAccent));
+
+        let grayi = upstream_image_button_style_skin("grayi").unwrap();
+        assert_eq!(grayi.image_up_color, Some(UiStyleColor::LightGray));
+        assert_eq!(grayi.image_down_color, Some(UiStyleColor::White));
+
         let gray_square = upstream_image_button_style_skin("graySquarei").unwrap();
         assert_eq!(gray_square.up, Some("grayPanel"));
         assert_eq!(gray_square.down, Some("flatOver"));
         assert_eq!(gray_square.over, Some("flatOver"));
+        assert_eq!(gray_square.image_up_color, Some(UiStyleColor::White));
+        assert_eq!(gray_square.image_down_color, Some(UiStyleColor::LightGray));
 
         let clear_none = upstream_image_button_style_skin("clearNonei").unwrap();
         assert_eq!(clear_none.up, Some("none"));
         assert_eq!(clear_none.down, Some("flatDown"));
         assert_eq!(clear_none.over, Some("flatOver"));
         assert_eq!(clear_none.disabled, Some("none"));
+        assert_eq!(clear_none.image_up_color, Some(UiStyleColor::White));
+        assert_eq!(clear_none.image_disabled_color, Some(UiStyleColor::Gray));
+
+        let clear = upstream_image_button_style_skin("cleari").unwrap();
+        assert_eq!(clear.image_up_color, Some(UiStyleColor::White));
+        assert_eq!(clear.image_disabled_color, Some(UiStyleColor::LightGray));
 
         let clear_toggle = upstream_image_button_style_skin("clearTogglei").unwrap();
         assert_eq!(clear_toggle.up, Some("black6"));
