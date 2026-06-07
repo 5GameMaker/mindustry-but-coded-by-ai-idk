@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1064. JoinDialog saved refresh/failed body 改为 Java 单行提示
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续 JoinDialog 前端视觉收口，处理 saved server 刷新中/失败时仍渲染假版本、人数、地图和 ping 详情的问题。
+- 本轮总体进度更新：约 **98.26%**，仍未达到完整可玩，不能宣告目标完成；后续继续 community host 分层、Settings/Language/Controls/Data 子菜单、字体 atlas/语言覆盖缺口。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java:235-247` 中 `refreshServer()` 会清空 `server.content`，设置 `Tex.whitePane`，并只添加居中的 `server.refreshing...` 或 `@host.invalid`；
+  - Java saved server 的外层 IP 顶栏和右上操作按钮保留，但 content body 不继续绘制 fake detail rows。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_saved_server_placeholder_label_key_like_java(...)`；
+    - saved server card 渲染在 `Refreshing` / `Failed` 状态下只在 body center 绘制 `@server.refreshing` / `@host.invalid`；
+    - 跳过 fake players/map/ping rows，避免 `Map: --`、`-- players`、`--ms` 这类 Rust-only 占位信息进入前端；
+    - saved refresh 回归测试新增 body-center 与 fake row 不存在断言。
+  - `README.md`
+    - 迁移进度更新到 **98.26%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_drive_server_cards_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - Java 还会给 refreshing 文案追加 `Strings.animated(Time.time, 4, 11, ".")` 动画点；本轮先对齐 body 单行与 fake rows 消除，后续可再补动画点节奏。
+
 ## 1063. JoinDialog community 搜索行改回 Java 70f 容器
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉对齐，处理 JoinDialog community/global 搜索区过紧的问题。
