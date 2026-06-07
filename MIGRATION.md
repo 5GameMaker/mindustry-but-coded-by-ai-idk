@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1063. JoinDialog community 搜索行改回 Java 70f 容器
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉对齐，处理 JoinDialog community/global 搜索区过紧的问题。
+- 本轮总体进度更新：约 **98.25%**，仍未达到完整可玩，不能宣告目标完成；后续继续 community host 分层、Settings/Language/Controls/Data 子菜单、字体 atlas/语言覆盖缺口。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java` 的 `refreshCommunity()` 中搜索区外层 table 高度是 `70f`；
+  - 内部 `@search` label、TextField 与 zoom refresh button 仍按 `54f` 控件高度布局。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `JOIN_COMMUNITY_SEARCH_ROW_HEIGHT = 70.0` 与 `JOIN_COMMUNITY_SEARCH_CONTROL_HEIGHT = 54.0`；
+    - `join_route_search_row_rect_for_panel(...)` 改为 70f 容器；
+    - `join_route_search_label_rect_for_panel(...)`、`join_route_search_rect_for_panel(...)`、`join_route_search_zoom_button_rect_for_panel(...)` 改为在 70f 行内垂直居中放置 54f 控件；
+    - community group row 起点改用完整 search row 的底部，避免内部控件居中导致卡片整体漂移；
+    - JoinDialog skeleton 测试新增 70f row、54f control、垂直居中断言。
+  - `README.md`
+    - 迁移进度更新到 **98.25%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+- 注意：
+  - community host 仍需继续从 Rust 统一 88f 卡片，进一步拆成 Java `addHeader()` 组头 + `addCommunityHost()` host 顶栏/body 分层。
+
 ## 1062. JoinDialog 卡片人数/ping 与 Java 规则对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉和语言/字体相关页面的肉眼差异收口，先处理 JoinDialog saved/local server cards 的 Java `buildServer()` 指标显示规则。
