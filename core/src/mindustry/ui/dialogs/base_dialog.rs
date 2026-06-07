@@ -442,8 +442,7 @@ impl BaseDialog {
                     0.0,
                     RenderTextStyle::new(RenderTextAlign::Center)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true)
-                        .with_outline(true),
+                        .with_integer_position(true),
                     layout.title_layer,
                 ),
             );
@@ -643,6 +642,29 @@ mod tests {
             })
             .expect("dialog title should render");
         assert_eq!(title_size, 31.0);
+    }
+
+    #[test]
+    fn base_dialog_shell_title_uses_fonts_def_without_runtime_outline_like_java() {
+        let dialog = BaseDialog::new("@title");
+        let layout = DialogShellLayout::from_stage_and_panel(
+            RenderRect::new(0.0, 0.0, 800.0, 600.0),
+            RenderRect::new(140.0, 160.0, 520.0, 220.0),
+        );
+
+        let commands = dialog.shell_render_commands(layout);
+
+        let title_style = commands
+            .iter()
+            .find_map(|command| match command {
+                RenderCommand::DrawText { text, style, .. } if text == "@title" => Some(*style),
+                _ => None,
+            })
+            .expect("dialog title should render");
+        assert!(
+            !title_style.outline,
+            "Java Styles.defaultDialog.titleFont is Fonts.def; BaseDialog title must not add a Rust-only runtime outline pass"
+        );
     }
 
     #[test]

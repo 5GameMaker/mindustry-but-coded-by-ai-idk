@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1101. 去除 BaseDialog/Outline 字体 Rust-only 二次描边
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.67%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/Styles.java`：`defaultDialog.titleFont = Fonts.def`，`fullDialog.titleFont = Fonts.def`；
+  - `core/src/mindustry/ui/Fonts.java`：`Fonts.outline` 是 FreeType 预描边字体，`borderWidth = 2f`；
+  - Java 使用 `Fonts.def` / `Fonts.outline` 字形本身，不对 `Fonts.outline` 再做 Rust runtime 8 方向描边。
+- 本轮主改动：
+  - `core/src/mindustry/ui/dialogs/base_dialog.rs`
+    - `BaseDialog::shell_render_commands(...)` 的标题 `DrawText` 去掉 `.with_outline(true)`，让标题使用 `Fonts.def` 的内置 shadow/atlas 语义；
+    - 新增 `base_dialog_shell_title_uses_fonts_def_without_runtime_outline_like_java`，锁定 BaseDialog 标题不带 Rust-only runtime outline。
+  - `desktop/src/lib.rs`
+    - `opengl_backend_text_real_font_quads_for_locale(...)` 中 runtime outline 只由 `style.outline` 触发，不再把 `RenderFontId::Outline` 当作需要额外 8 方向描边的信号；
+    - 新增 `desktop_opengl_outline_font_uses_prebaked_glyph_not_runtime_outline_pass_like_java`，断言 `RenderFontId::Outline` 绘制 `OK` 只生成两个真实 font atlas glyph quads，而不是 shadow + 8 向描边重复 quads。
+  - `README.md`
+    - 迁移进度更新到 **98.67%**。
+- 已验证：
+  - `cargo test -p mindustry-core --lib base_dialog_shell_title_uses_fonts_def_without_runtime_outline_like_java`
+  - `cargo test -p mindustry-desktop --lib desktop_opengl_outline_font_uses_prebaked_glyph_not_runtime_outline_pass_like_java --no-default-features`
+  - `cargo test -p mindustry-core --lib base_dialog`
+  - `cargo test -p mindustry-desktop --lib settings_text_sizes --no-default-features`
+- 仍未完成：
+  - 显式 `style.outline=true` 的世界/提示文本路径仍需继续按 Java 使用场景核对；
+  - LanguageDialog/Settings 子菜单还需补像素级滚动、Scrollbar、pressed/disabled/hover 细节和 Rust-only 描边差异；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1100. Settings/Language 字号改回 Java Fonts 基准
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
