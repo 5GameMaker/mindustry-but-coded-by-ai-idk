@@ -30,6 +30,7 @@ use crate::mindustry::net::{
     UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::r#type::{ItemStack, LiquidStack};
+use crate::mindustry::ui::format_icon_tokens_like_java;
 use crate::mindustry::vars::TILE_SIZE;
 use crate::mindustry::world::{
     meta::{BlockFlag, BuildVisibility},
@@ -4293,7 +4294,9 @@ where
         return PingLocationOutcome::rejected(&context, PingLocationRejectReason::AdminDenied);
     }
 
-    let text = text.unwrap_or_default();
+    let text = text
+        .map(|text| format_icon_tokens_like_java(&text))
+        .unwrap_or_default();
     let displayed_text = PlayerComp::normalized_ping_text(&text, context.max_text_len);
 
     if context.same_team_visible {
@@ -4317,11 +4320,15 @@ where
 }
 
 pub fn client_ping_location_packet(x: f32, y: f32, text: Option<String>) -> PingLocationCallPacket {
+    let text = text
+        .map(|text| format_icon_tokens_like_java(&text))
+        .unwrap_or_default();
+
     PingLocationCallPacket {
         player_id: None,
         x,
         y,
-        text: text.unwrap_or_default(),
+        text,
     }
 }
 
@@ -8665,6 +8672,19 @@ mod tests {
         assert_eq!(packet.player_id, None);
         assert_eq!((packet.x, packet.y), (5.0, 6.0));
         assert_eq!(packet.text, "go");
+    }
+
+    #[test]
+    fn client_ping_location_packet_formats_icon_tokens_like_java() {
+        let input = "go :play: keep :missing: 127.0.0.1:6567".to_string();
+        let packet = client_ping_location_packet(5.0, 6.0, Some(input.clone()));
+
+        let expected = format_icon_tokens_like_java(&input);
+        assert_eq!(packet.text, expected);
+        assert!(packet.text.contains(":missing:"));
+        assert!(packet.text.contains("127.0.0.1:6567"));
+        assert!(packet.text.contains("go "));
+        assert_ne!(packet.text, input);
     }
 
     #[test]

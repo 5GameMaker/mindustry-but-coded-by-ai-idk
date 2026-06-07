@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1039. Controls 重绑弹窗与 ping 文本图标替换收口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉/字体/语言缺口，处理 Keybind 重绑弹窗 chrome 与 ping 文本 `UI.formatIcons()` 运行点。
+- 本轮总体进度更新：约 **97.97%**，仍未达到完整可玩，不能宣告目标完成；后续继续 HintsFragment runtime/render、MessageBlock 选中显示、更多子菜单视觉与完整可玩性。
+- 主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_keybind_rebind_dialog(...)` 去掉 Rust 额外描边，缩短空捕获弹窗高度，将 prompt 居中，贴近 Java `KeybindDialog.openDialog()` 的 `new Dialog(prompt)` 裸捕获弹窗；
+    - 现有 Settings/Controls 回归增加断言，确保弹窗内只有 press prompt，不出现 Rust-only hint，也不为重绑 dialog 额外画 `StrokeRect`。
+  - `core/src/mindustry/input/input_handler.rs`
+    - `ping_location(...)` 和 `client_ping_location_packet(...)` 在构造/显示 ping 文本前调用 `format_icon_tokens_like_java(...)`，对齐 Java `DesktopInput` / `MinimapFragment` 的 `UI.formatIcons(result)`；
+    - 补测试覆盖 `:play:` 替换、`:missing:` 保持、`127.0.0.1:6567` 不误伤。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `rustfmt --edition 2021 --check core/src/mindustry/input/input_handler.rs`
+  - `cargo test -p mindustry-core client_ping_location_packet_formats_icon_tokens_like_java -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - `HintsFragment` 与 `MessageBlock.drawSelect` 仍未有完整 Rust runtime/render 入口；探索结论已确认不是简单 formatter 接线，需要新增或接入真实渲染路径。
+  - `desktop/src/lib.rs` 仍因体量大不适合整文件 rustfmt；本轮只用定向测试和 `git diff --check` 兜底。
+
 ## 1038. 前端文字图标运行链路与色板/语言弹窗视觉收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，重点把 Java `UI.formatIcons()` 的更多真实运行点接到 Rust runtime，并修复 Settings/PaletteDialog 可见 chrome 差异。
