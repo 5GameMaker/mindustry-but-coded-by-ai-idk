@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1053. 保留系统语言区域码
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续语言/本地化链路，修正系统 `LANG` fallback 中区域码被过早丢弃的问题。
+- 本轮总体进度更新：约 **98.16%**，仍未达到完整可玩，不能宣告目标完成；后续继续 LanguageDialog、本地化刷新、CJK/日文/韩文字体 fallback 与所有子菜单文案/视觉对齐。
+- Java 对照证据：
+  - Java 运行时从默认 `Locale` 构造 bundle fallback 时会保留区域信息参与查找；
+  - `zh_CN.UTF-8`、`pt_BR.UTF-8`、`ja_JP.UTF-8` 这类系统 locale 不应被 Rust 直接压缩成 `zh`、`pt`、`ja`。
+- 主改动：
+  - `core/src/mindustry/type/map_locales.rs`
+    - `current_locale_from_lang(...)` 改为先去掉编码/修饰后缀，再保留 `language_COUNTRY` / script 等 locale 段；
+    - 规范化语言段小写、区域段大写、script 段首字母大写；
+    - 对空值、`C`、`POSIX` 继续回退到 `en`。
+  - `README.md`
+    - 迁移进度更新到 **98.16%**。
+- 已验证：
+  - `cargo test -p mindustry-core map_locales_current_locale_parses_lang_like_runtime_fallback -- --nocapture`
+  - `cargo test -p mindustry-core map_locales_current_locale_prefers_game_settings_locale_over_env_like_java -- --nocapture`
+  - `git diff --check`
+- 注意：
+  - 这只修正系统 locale 解析；完整语言切换 UI、bundle 生命周期刷新、字体动态 fallback 仍需继续按 Java 原版补齐。
+
 ## 1052. 主菜单移除 Rust-only 中文 label sprite
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮继续前端视觉、字体、语言缺口，处理主菜单仍保留 Rust-only `menu-label-zh-*` 预渲染中文字牌资源的问题。

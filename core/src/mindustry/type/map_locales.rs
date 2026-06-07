@@ -118,10 +118,38 @@ impl MapLocales {
     }
 
     pub fn current_locale_from_lang(lang: Option<&str>) -> String {
-        lang.and_then(|value| value.split('.').next().map(|s| s.to_string()))
-            .and_then(|value| value.split('_').next().map(|s| s.to_string()))
+        let Some(lang) = lang.map(str::trim).filter(|value| !value.is_empty()) else {
+            return "en".to_string();
+        };
+
+        let base = lang
+            .split(|ch| ch == '.' || ch == '@')
+            .next()
+            .map(str::trim)
             .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "en".to_string())
+            .unwrap_or("en");
+
+        if base.eq_ignore_ascii_case("c") || base.eq_ignore_ascii_case("posix") {
+            return "en".to_string();
+        }
+
+        let base = base.replace('-', "_");
+        let mut parts = base.split('_').filter(|part| !part.is_empty());
+        let Some(language) = parts.next() else {
+            return "en".to_string();
+        };
+
+        let mut normalized = normalize_locale_segment(language, 0);
+        for (index, part) in parts.enumerate() {
+            normalized.push('_');
+            normalized.push_str(&normalize_locale_segment(part, index + 1));
+        }
+
+        if normalized.is_empty() {
+            "en".to_string()
+        } else {
+            normalized
+        }
     }
 
     pub fn contains_property(&self, key: &str) -> bool {
@@ -209,6 +237,26 @@ fn push_json_string(out: &mut String, value: &str) {
         }
     }
     out.push('"');
+}
+
+fn normalize_locale_segment(segment: &str, index: usize) -> String {
+    match index {
+        0 => segment.to_ascii_lowercase(),
+        _ if segment.len() == 2 || segment.len() == 3 => segment.to_ascii_uppercase(),
+        _ if segment.len() == 4 => {
+            let mut chars = segment.chars();
+            match chars.next() {
+                Some(first) => {
+                    let mut out = first.to_ascii_uppercase().to_string();
+                    let tail = chars.as_str().to_ascii_lowercase();
+                    out.push_str(&tail);
+                    out
+                }
+                None => String::new(),
+            }
+        }
+        _ => segment.to_string(),
+    }
 }
 
 struct MapLocalesJsonParser<'a> {
@@ -508,7 +556,8 @@ mod tests {
     #[test]
     fn map_locales_current_locale_parses_lang_like_runtime_fallback() {
         let parsed = MapLocales::current_locale_from_lang(Some("zh_CN.UTF-8"));
-        assert_eq!(parsed, "zh");
+        assert_eq!(parsed, "zh_CN");
+        assert_eq!(MapLocales::current_locale_from_lang(Some("pt_BR.UTF-8")), "pt_BR");
         assert_eq!(MapLocales::current_locale_from_lang(Some("")), "en");
         assert_eq!(MapLocales::current_locale_from_lang(None), "en");
     }
@@ -527,8 +576,8 @@ mod tests {
         );
         assert_eq!(
             MapLocales::current_locale_from_setting("default", Some("ja_JP.UTF-8")),
-            "ja",
-            "Java only falls back to Locale.getDefault().getLanguage() when settings.locale == default"
+            "ja_JP",
+            "Java Vars loads the default locale as a full Locale, so region codes should survive the LANG fallback"
         );
     }
 
