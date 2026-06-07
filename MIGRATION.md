@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1080. Editor map info 接入 MapLocalesDialog overlay/search 闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认不是 UTF-8 后再尝试其他编码。
+- 本轮总体进度更新：约 **98.46%**，仍未达到完整可玩；继续优先前端视觉、字体、语言、本地化和所有子菜单贴近 Java 原版，同时最终目标仍是整体化、可游玩的 Rust Mindustry/MDT，而不是彼此独立的模块。
+- Java 对照依据：
+  - `core/src/mindustry/editor/MapInfoDialog.java`：地图信息弹窗内有 `@editor.locales` 按钮，并从 `editor.tags.get("locales", "{}")` 读取 `MapLocales`；
+  - `core/src/mindustry/editor/MapLocalesDialog.java`：标题 `@editor.locales`、搜索 by key/value、locale 行选择、状态色卡片、返回/保存层级必须表现为子 dialog；
+  - `core/src/mindustry/type/MapLocales.java`：地图本地化数据落在 map tags 的 `locales` JSON 中。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `EditorMapsDialog` 的 map info 弹窗新增 `@editor.locales` 按钮；
+    - 新增 `editor_map_locales_dialog_index`、`editor_map_locales_dialog`、`editor_map_locales_search_focused` 状态；
+    - 从 `MapDescriptor.tags["locales"]` 解析 core `MapLocalesDialog`，渲染 modal overlay、locale rows、搜索框、按 key/value 筛选按钮、首个属性卡和返回按钮；
+    - hit-test/dispatch 接入打开、关闭、搜索聚焦、清空搜索、按值筛选、locale 行选择；
+    - Back/Escape 优先关闭 MapLocales overlay，再关闭 map info dialog；切路由、打开 play/editor、删除 map、CloseMapCard 时清理 overlay 状态；
+    - 补 SaveDialog 在游戏状态回到 menu 时自动隐藏，继续对齐 Java `SaveDialog.update(...)` 行为。
+  - `README.md`
+    - 迁移进度更新到 **98.46%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop editor_map_info_locales -- --nocapture`
+  - `cargo test -p mindustry-desktop back_key_closes_locales -- --nocapture`
+  - `cargo test -p mindustry-desktop editor_map_locales_search_filter -- --nocapture`
+- 仍未完成：
+  - Java `MapLocalesDialog` 的完整属性网格、locale edit/trash、add/import/export/apply/save 子对话框还未完整接入 desktop 视觉层；
+  - 字体/语言仍需继续补强：LanguageDialog 滚动保持、外部 bundle/mod bundle 字体 seed、日文 `font_jp` override、缺 glyph 回退到 Java `Fonts.getGlyph()` 语义；
+  - 前端所有子菜单仍需继续逐控件对齐，完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1079. 前端字体/语言与 MapLocalesDialog 模型收口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。本轮按用户当前优先级继续推进前端视觉、字体与语言缺口，吸收并行子代理对 MapLocales、LanguageDialog、Keybind、Join/Palette 与 Load/Save 的对照结果。
