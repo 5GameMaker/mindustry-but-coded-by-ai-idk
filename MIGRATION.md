@@ -33357,3 +33357,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Join 重连兜底、Host 非 address-in-use 异常主文案、Settings Back fallback 与键位名仍需继续按 Java bundle 链路处理；
   - Settings/Language/Load-Save/Join-Host/Mods Browser 的行高、按钮皮肤、空态和所有子菜单视觉细节仍需继续收口；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1050. Join/Host fallback 错误文案收口
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.82%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `JoinDialog.reconnect()` 只显示 `@reconnecting` loadfrag，ping 失败回调不把 `reconnect failed` 这类内部兜底文本作为前端主文案；
+  - `HostDialog.runHost()` 捕获异常时只选择 `@server.error.addressinuse` 或 `@server.error` 作为异常 modal 标题/主 key；
+  - Java `KickReason.toString()` 走 `Core.bundle.get("server.kicked." + name())`，不是硬编码 `"The server is restarting."`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `host_error_message_for_exception()`，Host 非 address-in-use 失败回退 `@server.error`，不再拼接 `[accent]@server.error: {error_text}`；
+    - 新增 `join_connection_error_message_like_java()`，Join 重连、connect packet、confirm、world data 原始错误不再直接拼进前端主文案，改走 `@disconnect.error` / `@disconnect.data` 或已有 bundle key；
+    - `join_kick_reason_message()` 缺 key fallback 改为 `@disconnect`，移除硬编码 `"The server is restarting."`；
+    - 补 `desktop_launcher_join_and_host_fallback_errors_use_java_bundle_messages` 锁定 fallback 行为。
+- 已验证：
+  - `cargo test -p mindustry-desktop fallback_errors_use_java_bundle_messages -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route_connect_error_uses_java_like_error_modal -- --nocapture`
+  - `cargo test -p mindustry-desktop host_route -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Settings Back fallback 与键位名仍需继续按 Java bundle 链路处理；
+  - Settings/Language/Load-Save/Join-Host/Mods Browser 的行高、按钮皮肤、空态和所有子菜单视觉细节仍需继续收口；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
