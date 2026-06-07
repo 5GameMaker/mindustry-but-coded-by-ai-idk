@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1090. MapLocales 非英文 UI locale 显示名对齐 Java `Locale.getDisplayName`
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.56%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java:175-183`：locale 行显示使用 `loc.getDisplayName(Core.bundle.getLocale())`，即显示名随当前 UI bundle locale 变化；
+  - 本轮用本地 JDK 17.0.8 生成 `zh_CN/zh_TW/ja/ko/ru/de/fr` UI locale 下的 Java `Locale.getDisplayName(...)` 基线，输出先写 UTF-8 文件再读取，避免 Windows 控制台编码污染。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 MapLocales 专用非英文显示名表，覆盖 `zh_CN`、`zh_TW`、`ja`、`ko`、`ru`、`de`、`fr` 下的重点 locale 显示；
+    - `map_locales_display_name_for_code(code, ui_locale)` 改为按规范化后的 UI locale 选择 Java display-name 表，未知表项再回退 LanguageDialog native-name；
+    - 新增 `desktop_map_locales_display_name_matches_java_for_non_english_ui_locales`，用 7×7 表驱动锁住 Java 基线。
+  - `README.md`
+    - 迁移进度更新到 **98.56%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib desktop_map_locales_display_name --no-default-features`
+  - `cargo test -p mindustry-desktop --lib map_locales --no-default-features`
+- 仍未完成：
+  - 其他 UI locale 的全量 Java display-name 覆盖、外部/mod bundle fallback 与字体 atlas merge 语义仍需继续补；
+  - MapLocalesDialog 的 property edit/delete/add 弹窗、addLocaleDialog 候选列表、apply/save/import/export 仍需继续按 Java 接入；
+  - 前端所有子菜单、完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1089. MapLocalesDialog 三栏视觉与 Controls 复开滚动对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
