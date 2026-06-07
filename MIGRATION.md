@@ -33230,3 +33230,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Load/Save 其它 route-shell 摘要与 pending status detail 仍需继续收口；
   - Mods Browser / Join / Host / Database / Editor 等子菜单仍需继续逐页和 Java 视觉表现对齐；
   - 完整可玩和 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1045. Load/Save pending 状态诊断收口
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **97.77%**，仍未达到完整可玩；继续优先前端/UI 子菜单、字体与语言表现对齐 Java 原版。
+- Java 对照证据：
+  - `LoadDialog` 点击存档后走 `ui.loadfrag.show("@loading")`，可见加载层只暴露 `@loading`，不会显示 Rust-only 的 `slot ...` 诊断；
+  - `SaveDialog.save()` 走 `ui.loadAnd("@saving", ...)`，新建和覆盖保存只显示 `@saving`，不会把存档名、槽位或内部 pending 操作拼进可见文案。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 移除 `DesktopLoadGamePendingLoad::status_line()` 与 `DesktopSaveGamePendingOperation::status_line()`；
+    - LoadGame route-shell pending 状态只保留 `loadfrag: @loading`，不再插入 `@loading: @load | slot ...`；
+    - SaveGame route-shell pending 状态只保留 `loadfrag: @saving`，不再插入 `@saving: @save.new | ...` 或 `@saving: @overwrite | slot ...`；
+    - 加载/保存 overlay 只渲染 Java 原版 loadfrag 标题，去掉小号内部诊断文本；
+    - 更新 Load/Save 相关回归，锁定 pending operation 仍存在但不再泄漏到前端可见文案。
+- 已验证：
+  - `cargo test -p mindustry-desktop load_game_route_lists_save_slots -- --nocapture`
+  - `cargo test -p mindustry-desktop save_game_new_dialog -- --nocapture`
+  - `cargo test -p mindustry-desktop save_game -- --nocapture`
+  - `git diff --check`
+- 仍未完成：
+  - Load/Save route-shell 中 `save slots:`、`search:`、`hidden modes:` 等摘要仍需继续按 Java 可见 UI 逐步收口；
+  - Join/Host 的服务器状态 bundle key 与版本错误文案仍需补齐；
+  - 前端视觉、字体、语言、所有子菜单与完整可玩性仍需继续推进，不能宣告目标完成。
