@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1121. Mod bundle 覆盖 global.properties 优先级
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.87%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/Vars.java`：先载入 external/internal/router bundle，再 merge `global.properties`；
+  - `core/src/mindustry/mod/Mods.java`：mod bundle 在后续 build files 阶段叠加进 `Core.bundle`，因此最终优先级应为 `mod > global.properties > external/internal/routerized internal`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `bundle_value_for_current_locale(...)` 顺序从 `global -> mod -> external/internal` 改为 `mod -> global -> external/internal`；
+    - 新增 `desktop_launcher_mod_bundles_override_global_properties_like_java`；
+    - 新增 `desktop_launcher_router_locale_mod_bundles_override_routerized_globals_like_java`；
+    - 新增 `desktop_launcher_mod_bundle_beats_external_bundle_family_like_java`；
+    - 保持既有 `desktop_launcher_merges_mod_bundle_properties_into_active_bundle_like_java` 通过，确保 locale/exact/language/root 与 enabled mod 顺序不被破坏。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_mod_bundles_override_global_properties_like_java --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_router_locale_mod_bundles_override_routerized_globals_like_java --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_mod_bundle_beats_external_bundle_family_like_java --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_merges_mod_bundle_properties_into_active_bundle_like_java --no-default-features`
+  - `cargo fmt`
+  - `git diff --check`
+- 后续继续优先：
+  1. 继续补 MapLocales 剩余 UI family；
+  2. JoinDialog saved server 卡片与 LAN 空态、社区 group header/eye tooltip 继续逐项核对；
+  3. Load/Save 的预览/nomap 与确认框行为继续按 Java 收口，避免子代理无测试半成品直接合入。
+
 ## 1120. MapLocales 常见 UI 语言显示名补齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

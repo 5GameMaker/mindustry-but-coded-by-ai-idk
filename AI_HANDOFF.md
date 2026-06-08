@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.86%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.87%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：MapLocales 常见 UI 语言显示名补齐
+## 最新闭环：Mod bundle 覆盖 global.properties 优先级
+
+- 当前总体迁移完成度：约 **98.87%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/Vars.java`：先载入 external/internal/router bundle，再 merge `global.properties`；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/mod/Mods.java`：mod bundle 后续叠加到 `Core.bundle`，最终应为 `mod > global > external/internal/routerized internal`。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - `bundle_value_for_current_locale(...)` 顺序改为 `mod -> global -> external/internal`；
+    - 新增 mod 覆盖 global、router locale 下 mod 覆盖 router/global、mod 覆盖 external family 的三条回归；
+    - 既有 mod locale/exact/language/root overlay 测试保持通过。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_mod_bundles_override_global_properties_like_java --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_router_locale_mod_bundles_override_routerized_globals_like_java --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_mod_bundle_beats_external_bundle_family_like_java --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_merges_mod_bundle_properties_into_active_bundle_like_java --no-default-features`
+  - `cargo fmt`
+  - `git diff --check`
+- 下一步建议继续：
+  1. 继续补 MapLocales 剩余 UI family：`be/bg/ca/cs/da/et/eu/fi/fil/hu/lt/nl/ro/sr/sv/th/tk/uk/vi`；
+  2. JoinDialog saved server 卡片、LAN 空态、社区 group header/eye tooltip 继续按 Java 核对；
+  3. Join/Load/Database 子菜单视觉继续按 Java 源码逐项收口。
+
+## 上一闭环：MapLocales 常见 UI 语言显示名补齐
 
 - 当前总体迁移完成度：约 **98.86%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/editor/MapLocalesDialog.java`：
@@ -44,10 +67,6 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo test -p mindustry-desktop --lib desktop_graphics_font_seed_covers_map_locales_display_names_like_java --no-default-features`
   - `cargo fmt`
   - `git diff --check`
-- 下一步建议继续：
-  1. 最高优先修 Bundle 优先级：Java 应为 `mod > global.properties > external/internal/routerized internal`，Rust 当前 explorer 指出 `global > mod`；
-  2. 继续补 MapLocales 剩余 UI family：`be/bg/ca/cs/da/et/eu/fi/fil/hu/lt/nl/ro/sr/sv/th/tk/uk/vi`；
-  3. Join/Load/Database 子菜单视觉继续按 Java 源码逐项收口。
 
 ## 上一闭环：global.properties 文案纳入默认字体 seed
 
