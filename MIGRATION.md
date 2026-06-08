@@ -35613,3 +35613,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - MapLocales 对剩余 UI locale 的显示名和字体 seed 强绑定仍需继续补齐；
   - Settings/Load/Save/CustomGame/Database 等前端子菜单视觉、字体、语言和交互状态仍需继续逐项对照 Java；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1061. MapLocales 补齐捷克丹麦芬兰匈牙利罗马尼亚瑞典显示名
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **98.91%**，仍未达到完整可玩；继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java` 使用 `loc.getDisplayName(Core.bundle.getLocale())`；
+  - `core/assets/locales` 中仍有多种 UI locale 未在 Rust 专用表覆盖；
+  - 本轮用本机 JDK 17 直接生成 `cs/da/fi/hu/ro/sv` display locale 下所有 `core/assets/locales` code 的 Java display-name，避免手写翻译猜测。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_language_options!` 宏，让新增静态表保持紧凑但仍展开为 `&[DesktopLanguageOption]`；
+    - 新增 `MAP_LOCALES_CZECH_DISPLAY_NAMES`；
+    - 新增 `MAP_LOCALES_DANISH_DISPLAY_NAMES`；
+    - 新增 `MAP_LOCALES_FINNISH_DISPLAY_NAMES`；
+    - 新增 `MAP_LOCALES_HUNGARIAN_DISPLAY_NAMES`；
+    - 新增 `MAP_LOCALES_ROMANIAN_DISPLAY_NAMES`；
+    - 新增 `MAP_LOCALES_SWEDISH_DISPLAY_NAMES`；
+    - `map_locales_display_names_for_ui_locale(...)` 接入 `cs/da/fi/hu/ro/sv`；
+    - `desktop_extend_font_seed_characters_from_map_locale_display_names(...)` 同步加入 6 张表；
+    - 扩展 `desktop_map_locales_display_name_matches_java_for_non_english_ui_locales`；
+    - 扩展 `desktop_graphics_font_seed_covers_map_locales_display_names_like_java`。
+  - `README.md`
+    - 迁移进度更新到 **98.91%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_map_locales_display_name_matches_java_for_non_english_ui_locales -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_seed_covers_map_locales_display_names_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_map_locales_display_name_uses_current_ui_locale_not_language_dialog_native_name -- --nocapture`
+  - `cargo fmt --all`
+  - `git diff --check`
+- 仍未完成：
+  - MapLocales 仍未覆盖 `be/bg/ca/et/eu/fil/lt/sr/th/tk/uk_UA` 等 UI locale 的专用 Java display-name 表；
+  - 新增表虽然已进入 seed，但后续仍应继续审查真实字体 atlas 对这些新增字形的渲染质量；
+  - Settings/Load/Save/CustomGame/Database 等前端子菜单视觉、字体、语言和交互状态仍需继续逐项对照 Java；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。

@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.90%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.91%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：JoinDialog 卡片文本 wrap 与 ellipsis 收口
+## 最新闭环：MapLocales 补齐捷克丹麦芬兰匈牙利罗马尼亚瑞典显示名
+
+- 当前总体迁移完成度：约 **98.91%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/editor/MapLocalesDialog.java` 的 `loc.getDisplayName(Core.bundle.getLocale())`，用本机 JDK 17 生成 `cs/da/fi/hu/ro/sv` display locale 下所有 `core/assets/locales` code 的显示名。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_language_options!` 宏，用于紧凑定义新增 `DesktopLanguageOption` 表；
+    - 新增 `MAP_LOCALES_CZECH_DISPLAY_NAMES`、`MAP_LOCALES_DANISH_DISPLAY_NAMES`、`MAP_LOCALES_FINNISH_DISPLAY_NAMES`、`MAP_LOCALES_HUNGARIAN_DISPLAY_NAMES`、`MAP_LOCALES_ROMANIAN_DISPLAY_NAMES`、`MAP_LOCALES_SWEDISH_DISPLAY_NAMES`；
+    - `map_locales_display_names_for_ui_locale(...)` 接入 `cs/da/fi/hu/ro/sv`；
+    - `desktop_extend_font_seed_characters_from_map_locale_display_names(...)` 同步加入 6 张表；
+    - 扩展 MapLocales 显示名与字体 seed 测试矩阵。
+- 验证：
+  - `cargo test -p mindustry-desktop desktop_map_locales_display_name_matches_java_for_non_english_ui_locales -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_seed_covers_map_locales_display_names_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_map_locales_display_name_uses_current_ui_locale_not_language_dialog_native_name -- --nocapture`
+  - `cargo fmt --all`
+  - `git diff --check`
+- 下一步建议继续：
+  1. 继续补剩余 MapLocales UI locale：`be/bg/ca/et/eu/fil/lt/sr/th/tk/uk_UA`；
+  2. 继续审查真实字体 atlas 对新增变音符/非拉丁字形的渲染质量；
+  3. JoinDialog ellipsis 继续接入真实字体度量/布局；
+  4. Load/Save、Settings、CustomGame、Database/ContentInfo 子菜单视觉继续按 Java 源码收口。
+
+## 上一闭环：JoinDialog 卡片文本 wrap 与 ellipsis 收口
 
 - 当前总体迁移完成度：约 **98.90%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java` 的 `buildServer(...)`：
