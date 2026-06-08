@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1139. 收口 ModsBrowser selection 详情 pane 节奏
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.15%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/ModsDialog.java:551-555`：browser selection 使用 `BaseDialog(mod.name)`，正文放进 `sel.cont.pane(...)`，文本 `labelWrap(...).width(mobile ? 400f : 500f).pad(4f).labelAlign(Align.center, Align.left)`，按钮保持 `150f x 54f`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `mods_browser_selection_details_pane_rect_for_browser(...)`，让 selection 描述/作者文本进入 Java 式 pane 区域，不再作为 bare floating text；
+    - `push_mods_browser_selection_dialog(...)` 中按桌面 500f、portrait 400f 计算 wrap width，并把文本 top-align 到 pane 内 4f padding；
+    - 扩展 `desktop_launcher_mods_browser_selection_dialog_renders_details_and_buttons`，锁定 pane 存在、wrap 宽度、top align 与按钮数量/尺寸。
+  - `README.md`
+    - 迁移进度更新到 **99.15%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 ModsBrowser selection 详情 pane 节奏收口。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_selection_dialog_renders_details_and_buttons --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_selection_dialog_omits_missing_author_and_description_placeholders_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog --lib -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. ModsBrowser installed detail、release rows 与 View Content tooltip 继续按 Java `ModsDialog` 的 pane/tooltip/button 节奏收口；
+  2. Settings 子页面按钮字号、图标尺寸、语言默认 locale 物化继续按 Java `SettingsMenuDialog` / `LanguageDialog` 收口；
+  3. Menu chrome 的 `discordBanner` / `infoBanner` / mobile gutter 继续接入真实菜单渲染命令；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1138. 收口 Load/Save 模式过滤 tooltip chrome
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
