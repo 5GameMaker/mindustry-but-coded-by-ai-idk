@@ -19,6 +19,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1112. LanguageDialog 裁剪外行不再响应 hover/click
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.78%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java`：语言按钮表放在 `ScrollPane` 中，只禁用横向滚动；滚动视口外的 `TextButton` 不应接收 hover/click；
+  - 每个语言项仍是 `Styles.flatTogglet` 的 `400f x 50f` 按钮，点击当前语言直接 return，点击其他语言才触发 restart 提示。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_language_dialog_content(...)` 的 row hover 增加 `list_clip.contains_point(point)` 前置条件；
+    - `settings_child_dialog_action_at_point(...)` 的 Language 分支同样要求点击点位于 `settings_language_list_clip_rect(dialog)` 内，避免半行滚动时被 ScrollPane 裁掉的额外行仍可点击；
+    - 新增 `desktop_launcher_language_dialog_scrollpane_clip_blocks_hidden_subrow_hit_and_hover_like_java`，锁定裁剪外额外 row 不可 `SelectLanguage`，且不进入 `Styles.flatTogglet` hover tint。
+  - `README.md`
+    - 迁移进度更新到 **98.78%**。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib language_dialog --no-default-features`
+  - `cargo fmt`
+  - `git diff --check`
+
 ## 1111. MapList/CustomGame 卡片区接入 Java ScrollPane 显式裁剪
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.77%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.78%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：MapList/CustomGame 卡片区接入 Java ScrollPane 显式裁剪
+## 最新闭环：LanguageDialog 裁剪外行不再响应 hover/click
+
+- 当前总体迁移完成度：约 **98.78%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java`：
+  - 语言按钮表位于 Java `ScrollPane` 内，滚动视口外的行不应接收 hover/click；
+  - 语言项继续保持 `Styles.flatTogglet`、`400f x 50f`、ButtonGroup checked 语义。
+- 本轮实现：
+  - `push_settings_language_dialog_content(...)` 的 hover 判定增加 `list_clip.contains_point(point)`；
+  - `settings_child_dialog_action_at_point(...)` 的 Language hit-test 同步要求点击点位于 list clip 内；
+  - 新增 `desktop_launcher_language_dialog_scrollpane_clip_blocks_hidden_subrow_hit_and_hover_like_java`，覆盖半行滚动时裁剪外额外行不可点击、不可 hover。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib language_dialog --no-default-features`
+  - `cargo fmt`
+  - `git diff --check`
+- 下一步建议继续前端：
+  1. Settings/Language：继续补 ScrollPane track/knob pressed/drag、pressed 状态与 `.properties`/bundle family Java 语义边角；
+  2. JoinDialog：删除 saved servers 为空时额外 `@host.invalid` 占位卡；
+  3. 主菜单：桌面态按钮状态、黑底面板、子菜单间距/淡入淡出继续向 `MenuFragment`/`MenuRenderer` 收口。
+
+## 上一闭环：MapList/CustomGame 卡片区接入 Java ScrollPane 显式裁剪
 
 - 当前总体迁移完成度：约 **98.77%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/MapListDialog.java`：
