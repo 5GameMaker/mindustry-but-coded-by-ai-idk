@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.75%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.76%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：LoadDialog 模式筛选与存档 action 图标改回 Java emptyTogglei/emptyi
+## 最新闭环：Fonts.outline 独立 atlas glyph 与 Java 预烘焙边框字体对齐
+
+- 当前总体迁移完成度：约 **98.76%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Fonts.java`：
+  - `Fonts.outline` 是 `mainFont` 的独立 FreeType border 字体，loader 注入 `borderWidth = Scl.scl(2f)` 且 `spaceX -= borderWidth`；
+  - content icon glyph 会同时写入 `Fonts.def` 与 `Fonts.outline`；
+  - 日文 `font_jp_outline` 覆盖 `Fonts.outline.data`，不能把普通 `Fonts.def` glyph 变成 outline。
+- 本轮实现：
+  - `DesktopRealFontGlyphKey` 新增 `OUTLINE`，`RenderFontId::Outline` 输出 `font:Outline:DrawText:*`；
+  - `fonts/font.woff` 同时注册 Default 与 Outline atlas source，Outline 带 2px darkGray border；
+  - content icon bitmap glyph 同步写入 Default/Outline；
+  - Outline 测试从旧运行时描边假设改为真实预烘焙 glyph 验收。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib outline_font --no-default-features`
+  - `cargo test -p mindustry-desktop --lib font_atlas --no-default-features`
+  - `cargo test -p mindustry-desktop --lib language_dialog --no-default-features`
+- 下一步建议继续前端：
+  1. Settings/Language：语言列表排序、checked 行、restart 提示与 18px 级按钮字体；
+  2. Fonts：继续补 CJK 动态增量与更多真实菜单文案截图/渲染 smoke；
+  3. JoinDialog/MapList 继续收口子菜单卡片与 ScrollPane 视觉。
+
+## 上一闭环：LoadDialog 模式筛选与存档 action 图标改回 Java emptyTogglei/emptyi
 
 - 当前总体迁移完成度：约 **98.75%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LoadDialog.java`：
@@ -37,10 +58,6 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - icon-only ImageButton 不再带 Rust-only outline。
 - 验证：
   - `cargo test -p mindustry-desktop --lib load_game_route --no-default-features`
-- 下一步建议继续前端：
-  1. Settings/Language：语言列表排序、checked 行、restart 提示与 18px 级按钮字体；
-  2. Fonts：日文/CJK override、missing glyph fallback 与 icon/outline/monospace 链路；
-  3. JoinDialog/MapList 继续收口子菜单卡片与 ScrollPane 视觉。
 
 ## 上一闭环：CustomGame/MapList filter 图标按钮改回 Java emptyi/emptyTogglei
 

@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1110. Fonts.outline 独立 atlas glyph 与 Java 预烘焙边框字体对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.76%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/Fonts.java:237-272`：`Fonts.outline` 由 `mainFont` 以 `borderColor = Color.darkGray`、loader 注入 `borderWidth = Scl.scl(2f)` 和 `spaceX -= borderWidth` 生成；
+  - `Fonts.java:145-164`：content icon glyph 同时写入 `Fonts.def` 与 `Fonts.outline`；
+  - `Fonts.java:112-117`：日文 `font_jp_outline` 覆盖 `Fonts.outline.data`，不应污染 `Fonts.def`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopRealFontGlyphKey` 新增独立 `OUTLINE` key，`RenderFontId::Outline` 不再与 `Default` 共用普通 glyph；
+    - `desktop_default_real_font_atlas_sources_for_locale(...)` 为 `fonts/font.woff` 同时注册 Default 与 Outline，Outline 使用 2px darkGray border；
+    - content icon bitmap glyph 同步写入 Default/Outline 两套 key；
+    - `font_jp_outline` 现在只覆盖 Outline key，避免日文 outline 覆盖普通 Default glyph；
+    - 回归测试改为锁定真实 `font:Outline:*` atlas glyph、预烘焙 border、`spaceX -= borderWidth` 与无运行时重复描边/阴影层。
+  - `README.md`
+    - 迁移进度更新到 **98.76%**。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib outline_font --no-default-features`
+  - `cargo test -p mindustry-desktop --lib font_atlas --no-default-features`
+  - `cargo test -p mindustry-desktop --lib language_dialog --no-default-features`
+
 ## 1109. LoadDialog 模式筛选与存档 action 图标改回 Java emptyTogglei/emptyi
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
