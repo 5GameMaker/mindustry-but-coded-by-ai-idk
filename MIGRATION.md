@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1149. 收口 Campaign PlanetDialog 可见文案与 debug 残差
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.26%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/PlanetDialog.java:723-727`：顶部 info label 在 `select` 模式显示 `@sectors.select`，在 `planetLaunch` 模式显示 `@sectors.launchselect`，普通 `look` 模式为空；
+  - `core/src/mindustry/ui/dialogs/PlanetDialog.java:993-996`：new presets 通过 `ui.announce(...)` 做短暂提示，不是常驻英文 `1 new sector` badge；
+  - `core/src/mindustry/ui/dialogs/PlanetDialog.java:1198-1199`：sector 标题正常只显示 sector 名称，只有 `debugSelect` 且满足调试条件时才追加 sector id。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Campaign look 模式去掉 Rust-only `Ready to launch` / `Select a launch sector` / `Launch sector ready` 状态文案；
+    - planetLaunch 模式改用本地化 `@sectors.launchselect`，最终 `DrawText` 不漏 raw key；
+    - sector 标题不再常规追加 `#sector_id`，避免正常 UI 显示 debug id；
+    - 删除固定英文 `1 new sector` / `N new sectors` badge，保留后续按 Java `ui.announce(...)` 语义接入的空间；
+    - 扩展 Campaign 测试，锁住上述 Rust-only 文案不会回归。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_menu_route_shell_uses_content_start_sector --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_renders_planetdialog_like_sector_stats --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_launch_mode_hides_rules_and_sectorlist_like_java --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. 继续清理 route title fallback 与 `desktop_show_upstream_route_debug()` 下的 `upstream:*` 调试叠字，不让它们进入正常可见 UI；
+  2. 继续对照 Java Campaign sector announcement、hover label、sector select dialog 与 launch loadout 子弹窗；
+  3. Settings/Language/Controls 字体、CJK/Unicode fallback 和所有子菜单视觉仍需继续逐项收口。
+
 ## 1148. 收口 Campaign/TechTree 文本防漏与 Settings defaultt 按钮 chrome
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.25%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.26%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 Campaign/TechTree 文本防漏与 Settings defaultt 按钮 chrome
+## 最新闭环：收口 Campaign PlanetDialog 可见文案与 debug 残差
+
+- 当前总体迁移完成度：约 **99.26%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/PlanetDialog.java:723-727`：顶部 info label 在 `select` 模式显示 `@sectors.select`，在 `planetLaunch` 模式显示 `@sectors.launchselect`，普通 `look` 模式为空；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/PlanetDialog.java:993-996`：new presets 通过 `ui.announce(...)` 短暂提示，不是常驻英文 `1 new sector` badge；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/PlanetDialog.java:1198-1199`：sector 标题正常只显示名称，只有 `debugSelect` 调试时才追加 id。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - Campaign look 模式去掉 Rust-only `Ready to launch` / `Select a launch sector` / `Launch sector ready`；
+    - planetLaunch 模式改用本地化 `@sectors.launchselect`，最终 `DrawText` 不漏 raw key；
+    - sector 标题不再常规追加 `#sector_id`；
+    - 删除固定英文 `1 new sector` / `N new sectors` badge，保留后续按 Java `ui.announce(...)` 接入空间；
+    - 扩展 Campaign 测试锁住上述可见差异。
+  - `README.md`
+    - 迁移进度更新到 **99.26%**。
+  - `MIGRATION.md`
+    - 新增 `1149. 收口 Campaign PlanetDialog 可见文案与 debug 残差`。
+- 验证：
+  - 已通过 Campaign 本轮 3 个定向 UI/语言测试；
+  - 已通过 `cargo build -p mindustry-desktop --features opengl-native-runtime`。
+- 下一步建议继续：
+  1. 清理 route title fallback 与 `desktop_show_upstream_route_debug()` 下的 `upstream:*` 调试叠字，不让它们进入正常可见 UI；
+  2. 继续对照 Java Campaign sector announcement、hover label、sector select dialog 与 launch loadout 子弹窗；
+  3. Settings/Language/Controls 字体、CJK/Unicode fallback 和所有子菜单视觉仍需继续逐项收口。
+
+## 上一闭环：收口 Campaign/TechTree 文本防漏与 Settings defaultt 按钮 chrome
 
 - 当前总体迁移完成度：约 **99.25%**，仍未达到完整可玩。
 - 本轮对照：
