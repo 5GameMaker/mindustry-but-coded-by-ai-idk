@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.46%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.47%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：清理存取档对话框 upstream 调试行
+## 最新闭环：补齐 IconLarge 字体 glyph seed
+
+- 当前总体迁移完成度：约 **99.47%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Fonts.java`：`Fonts.iconLarge` 加载 `fonts/icon.ttf`，`characters = "\0" + Iconc.all`，`size = 48`，`borderWidth = 5`；
+  - Rust runtime 已用 UI icon glyph 集合作为 IconLarge atlas seed，core 字体注册表也需要表达同一 Java 语义，避免字体计划/诊断漏报。
+- 本轮实现：
+  - `core/src/mindustry/ui/fonts.rs`
+    - 新增 `UPSTREAM_ICON_LARGE_FONT_CHARACTERS`，包含 `\0` 与当前 109 个上游 UI icon glyph；
+    - `UpstreamFontRole::IconLarge` 的 `characters` 从 `None` 改为 `Some(UPSTREAM_ICON_LARGE_FONT_CHARACTERS)`；
+    - 新增 `upstream_font_registry_keeps_icon_large_glyph_seed_like_java`，逐个校验 `UPSTREAM_UI_ICON_GLYPHS` 均进入 IconLarge 字符种子。
+  - `README.md`
+    - 迁移进度更新到 **99.47%**。
+  - `MIGRATION.md`
+    - 新增 `1170. 补齐 IconLarge 字体 glyph seed`。
+- 验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core upstream_font_registry_keeps_icon_large_glyph_seed_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core upstream_font_registry_exposes_icon_and_extra_font_resources --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 下一步建议继续：
+  1. 继续按 route 清理 Database/Planet 等剩余 upstream 调试行；
+  2. 继续补 LanguageDialog / MapLocalesDialog 中 Java `flatTogglet`、outlineLabel、filterStyle 的可测视觉语义；
+  3. Settings/Data 与字体/语言可见层继续隔离 raw diagnostics、英文 token 和 fallback 泄漏。
+
+## 上一闭环：清理存取档对话框 upstream 调试行
 
 - 当前总体迁移完成度：约 **99.46%**，仍未达到完整可玩。
 - 本轮对照：

@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1170. 补齐 IconLarge 字体 glyph seed
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.47%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Fonts.java`：`Fonts.iconLarge` 加载 `fonts/icon.ttf`，`characters = "\0" + Iconc.all`，`size = 48`，`borderWidth = 5`；
+  - Rust runtime 已用 UI icon glyph 集合作为 IconLarge atlas seed，core 字体注册表也需要表达同一 Java 语义，避免字体计划/诊断漏报。
+- 本轮主改动：
+  - `core/src/mindustry/ui/fonts.rs`
+    - 新增 `UPSTREAM_ICON_LARGE_FONT_CHARACTERS`，包含 `\0` 与当前 109 个上游 UI icon glyph；
+    - `UpstreamFontRole::IconLarge` 的 `characters` 从 `None` 改为 `Some(UPSTREAM_ICON_LARGE_FONT_CHARACTERS)`；
+    - 新增 `upstream_font_registry_keeps_icon_large_glyph_seed_like_java`，逐个校验 `UPSTREAM_UI_ICON_GLYPHS` 均进入 IconLarge 字符种子。
+  - `README.md`
+    - 迁移进度更新到 **99.47%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 IconLarge 字体 glyph seed 补齐。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core upstream_font_registry_keeps_icon_large_glyph_seed_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core upstream_font_registry_exposes_icon_and_extra_font_resources --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. 继续按 route 清理 Database/Planet 等剩余 upstream 调试行；
+  2. 继续补 LanguageDialog / MapLocalesDialog 中 Java `flatTogglet`、outlineLabel、filterStyle 的可测视觉语义；
+  3. Settings/Data 与字体/语言可见层继续隔离 raw diagnostics、英文 token 和 fallback 泄漏。
+
 ## 1169. 清理存取档对话框 upstream 调试行
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

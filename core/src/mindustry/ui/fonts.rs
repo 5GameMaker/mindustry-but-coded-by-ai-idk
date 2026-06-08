@@ -20,6 +20,23 @@ pub const UPSTREAM_UI_ICON_FONTGEN_CONFIG_SOURCE_PATH: &str = "fontgen/config.js
 
 pub const UPSTREAM_LOGIC_FONT_CHARACTERS: &str =
     "\0ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890\"!`?'.,;:()[]{}<>|/@\\^$€-%+=#_&~*";
+pub const UPSTREAM_ICON_LARGE_FONT_CHARACTERS: &str = concat!(
+    "\0",
+    "\u{f15c}\u{f15b}\u{f0f6}\u{e802}\u{e803}\u{e804}\u{e805}\u{e807}",
+    "\u{e800}\u{e808}\u{e809}\u{e80b}\u{e80f}\u{f300}\u{f1c5}\u{e813}",
+    "\u{e816}\u{e819}\u{e81a}\u{f0b0}\u{e81d}\u{e822}\u{e824}\u{e825}",
+    "\u{e826}\u{e827}\u{e823}\u{e829}\u{e806}\u{e811}\u{e815}\u{e818}",
+    "\u{f120}\u{e835}\u{e836}\u{f129}\u{e837}\u{e839}\u{e83a}\u{e83b}",
+    "\u{e83e}\u{e83f}\u{f12d}\u{e801}\u{f029}\u{e812}\u{e842}\u{e844}",
+    "\u{e80d}\u{e81e}\u{f281}\u{f308}\u{e83d}\u{e845}\u{f181}\u{e80e}",
+    "\u{e814}\u{e817}\u{e81b}\u{e81c}\u{e82a}\u{e82b}\u{e82c}\u{e82d}",
+    "\u{e830}\u{e84c}\u{e852}\u{e853}\u{e85b}\u{e85c}\u{e85d}\u{e85e}",
+    "\u{e85f}\u{e861}\u{e865}\u{e867}\u{e868}\u{e869}\u{e86a}\u{e86b}",
+    "\u{e86c}\u{e86d}\u{e86e}\u{e86f}\u{e870}\u{e871}\u{e872}\u{e873}",
+    "\u{e874}\u{e875}\u{e876}\u{e877}\u{e878}\u{e879}\u{e87b}\u{e87c}",
+    "\u{e87d}\u{e88a}\u{e88b}\u{e810}\u{e88c}\u{e88d}\u{e88e}\u{e88f}",
+    "\u{26a0}\u{e864}\u{e84d}\u{e833}\u{e834}",
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UpstreamFontRole {
@@ -159,7 +176,7 @@ pub const UPSTREAM_FONT_ASSETS: &[UpstreamFontAsset] = &[
         border_width: Some(5),
         shadow_offset_y: None,
         markup_enabled: false,
-        characters: None,
+        characters: Some(UPSTREAM_ICON_LARGE_FONT_CHARACTERS),
         fallback_java_static_name: None,
     },
     UpstreamFontAsset {
@@ -1060,6 +1077,10 @@ mod tests {
         assert_eq!(icon_large.size, 48);
         assert_eq!(icon_large.border_width, Some(5));
         assert!(!icon_large.scaled);
+        assert_eq!(
+            icon_large.characters,
+            Some(UPSTREAM_ICON_LARGE_FONT_CHARACTERS)
+        );
         assert_eq!(icon_large.render_font_id(), Some(RenderFontId::IconLarge));
 
         let monospace = upstream_font_asset_by_name("monospace").unwrap();
@@ -1082,6 +1103,30 @@ mod tests {
         assert!(paths.contains(&"fonts/tech.ttf"));
         assert!(paths.contains(&"icons/icons.properties"));
         assert!(paths.contains(&"fontgen/config.json"));
+    }
+
+    #[test]
+    fn upstream_font_registry_keeps_icon_large_glyph_seed_like_java() {
+        let icon_large = upstream_font_asset(UpstreamFontRole::IconLarge).unwrap();
+        let characters = icon_large
+            .characters
+            .expect("Java Fonts.iconLarge sets characters = \"\\0\" + Iconc.all");
+        assert!(
+            characters.starts_with('\0'),
+            "Java Fonts.iconLarge keeps the null glyph in its seed"
+        );
+
+        for glyph in UPSTREAM_UI_ICON_GLYPHS {
+            let character = glyph
+                .glyph_char()
+                .expect("registered UI icon glyph should be a valid Unicode scalar");
+            assert!(
+                characters.contains(character),
+                "Fonts.iconLarge should include Iconc.{} / {} in its Java-like seed",
+                glyph.java_name,
+                glyph.css_name
+            );
+        }
     }
 
     #[test]
