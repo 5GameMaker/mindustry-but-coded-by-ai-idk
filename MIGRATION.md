@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1164. 收口 HostDialog 信息弹窗视觉
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.41%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/HostDialog.java`：非 Steam 首次显示 HostDialog 后通过 `ui.showInfo("@host.info")` 弹出独立信息弹窗；
+  - `@host.info` 是包含 markup 和多段换行的长文案，不能作为旧 Rust 小弹窗的单行居中段落处理。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `host_info_dialog_rect_for_panel(...)`；
+    - Host info 弹窗改为 Java-like pane + stroke + `@info.title`；
+    - `@host.info` 文本改为 Start 对齐、markup 开启、按 `dialog.width - 60` wrap；
+    - OK 按钮渲染与 hit-test 统一使用 Java-like dialog footer 按钮矩形。
+  - `README.md`
+    - 迁移进度更新到 **99.41%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 HostDialog 信息弹窗视觉收口。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_opens_host_dialog_route --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_host_steam_friends_only_tooltip_is_not_persistent_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_host_route_run_failure_opens_exception_modal_like_java --lib -- --test-threads=1 --nocapture`
+- 后续继续优先：
+  1. HostDialog 继续收 name/port TextField 内部 padding、PaletteDialog 标题/关闭按钮；
+  2. JoinDialog 继续补 Add/Edit/Delete/Disclaimer 子弹窗与 community card 视觉；
+  3. Settings/Data 与字体 seed 的 raw diagnostics/fallback 继续隔离。
+
 ## 1163. 补齐 invitefriends 内置 bundle fallback
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.40%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.41%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：补齐 invitefriends 内置 bundle fallback
+## 最新闭环：收口 HostDialog 信息弹窗视觉
+
+- 当前总体迁移完成度：约 **99.41%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/HostDialog.java`：非 Steam 首次打开 HostDialog 通过 `ui.showInfo("@host.info")` 显示独立信息弹窗；
+  - Java `ui.showInfo` 需要标题、BaseDialog/pane chrome、markup 文本换行和 OK footer，不应把长 `@host.info` 当成一个居中文本段落。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `host_info_dialog_rect_for_panel(...)`；
+    - Host info 弹窗改为 Java-like pane + stroke + `@info.title`；
+    - `@host.info` 文本改为 Start 对齐、markup 开启、按 dialog 宽度 wrap；
+    - OK 按钮渲染和 hit-test 同步为 Java-like dialog footer 按钮。
+  - `README.md`
+    - 迁移进度更新到 **99.41%**。
+  - `MIGRATION.md`
+    - 新增 `1164. 收口 HostDialog 信息弹窗视觉`。
+- 验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_opens_host_dialog_route --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_host_steam_friends_only_tooltip_is_not_persistent_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_host_route_run_failure_opens_exception_modal_like_java --lib -- --test-threads=1 --nocapture`
+- 下一步建议继续：
+  1. HostDialog 继续收 name/port TextField 内部 padding、PaletteDialog 标题/关闭按钮；
+  2. JoinDialog 继续补 Add/Edit/Delete/Disclaimer 子弹窗与 community card 视觉；
+  3. Settings/Data 与字体 seed 的 raw diagnostics/fallback 继续隔离。
+
+## 上一闭环：补齐 invitefriends 内置 bundle fallback
 
 - 当前总体迁移完成度：约 **99.40%**，仍未达到完整可玩。
 - 本轮对照：
