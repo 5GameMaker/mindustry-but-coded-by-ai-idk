@@ -19,6 +19,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1147. 收口 Load/Save/Mods 最终文本本地化
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.24%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java`：存档卡片 map/wave/autosave/playtime/date 行应走 `Core.bundle.format(...)`、`Gamemode.toString()` 和 `[lightgray]` 值标记，不能把 `@save.*` / `@mode.*` raw key 画进最终文本；
+  - SaveDialog 失败路径的 `@savefail` 应在显示前解析，最终 `UI.showException` 弹窗不能漏 raw key；
+  - ModsDialog 主界面、空态、状态条、Browser 与 Selection 弹窗的按钮/状态/详情文案都应在进入最终 `DrawText` 前完成 bundle 本地化。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 LoadDialog 存档卡片渲染专用文本：map/wave/autosave/playtime 走 `format_bundle_text(...)`，date 按 Java 只显示 `[lightgray]` 日期值；
+    - SaveDialog 写入失败时先解析 `@savefail`，保留 `[accent]` 标记但不再把 raw key 传进最终弹窗文本；
+    - 补强 Load/Save/Mods 多个最终 `RenderCommand::DrawText` raw-key 防漏断言。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_save_dialog_new_save_input_contract_matches_upstream_savegame --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_save_dialog_creates_and_overwrites_save_slots --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_save_dialog_failure_uses_java_error_modal --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_renders_scanned_mod_cards_and_back_button --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_empty_state_uses_java_black6_row --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_renders_state_and_reload_required_like_java_dialog --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_selection_dialog_renders_details_and_buttons --lib -- --nocapture`
+- 后续继续优先：
+  1. 继续收口 Settings 子页字体/图标/按钮间距、语言默认 locale 落盘和 Load/Save tooltip chrome；
+  2. 继续给 Campaign/TechTree/Database/Join 的实际 `RenderCommand::DrawText` 路径补 raw-key 防漏断言，并保持 debug shell raw key 与最终 UI 文本分离。
+
 ## 1146. 补强 About/Credits 最终 DrawText 本地化防漏
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

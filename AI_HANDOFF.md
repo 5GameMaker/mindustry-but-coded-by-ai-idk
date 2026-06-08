@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.22%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.24%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，字体与语言链路继续优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,26 +27,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：补强 About/Credits 最终 DrawText 本地化防漏
+## 最新闭环：收口 Load/Save/Mods 最终文本本地化
 
-- 当前总体迁移完成度：约 **99.22%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.24%**，仍未达到完整可玩。
 - 本轮对照：
-  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/AboutDialog.java`：links ScrollPane 中的 link description 与 CreditsDialog 的标题/正文/返回按钮都应经 `Core.bundle` 解析后进入可见 label；
-  - Credits contributor 表格仍按 Java 三列表格渲染，不应暴露 raw key、URL summary 或 Rust-only pipe-joined 文本。
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LoadDialog.java`：存档卡片 map/wave/autosave/playtime/date 行走 `Core.bundle.format(...)` / `Gamemode.toString()` / `[lightgray]` 值标记；
+  - SaveDialog 失败路径的 `@savefail` 需要在最终弹窗前解析；
+  - ModsDialog 主界面、空态、状态条、Browser 与 Selection 弹窗最终 `DrawText` 不应暴露 raw bundle key。
 - 本轮实现：
   - `desktop/src/lib.rs`
-    - 强化 `desktop_launcher_about_menu_route_renders_upstream_credits_links_and_contributors`；
-    - 断言 About link cards 最终 `RenderCommand::DrawText` 不包含 `@link.discord.description`、`@link.github.description`、`@link.wiki.description`；
-    - 断言 CreditsDialog 最终 `RenderCommand::DrawText` 不包含 `@credits`、`@credits.text`、`@contributors`、`@back`。
+    - LoadDialog 存档卡片渲染改为 Java 风格格式化文本，不再绘制 `@save.map`、`@save.wave`、`@save.autosave`、`@save.playtime`、`@mode.*` raw key；
+    - SaveDialog 写入失败先解析 `@savefail`，保留 `[accent]`，最终错误弹窗不漏 raw key；
+    - Save/Load/Mods 多个最终 `RenderCommand::DrawText` 路径新增 raw-key 防漏断言。
   - `README.md`
-    - 迁移进度更新到 **99.22%**。
+    - 迁移进度更新到 **99.24%**。
   - `MIGRATION.md`
-    - 新增 `1146. 补强 About/Credits 最终 DrawText 本地化防漏`。
+    - 新增 `1147. 收口 Load/Save/Mods 最终文本本地化`。
 - 验证：
-  - `cargo test -p mindustry-desktop desktop_launcher_about_menu_route_renders_upstream_credits_links_and_contributors --lib -- --nocapture`
+  - 已通过 Load/Save/Mods 本轮 10 个定向 UI/语言测试；具体命令见 `MIGRATION.md` 最新条目。
 - 下一步建议继续：
-  1. 继续给 Join/Save/Mods/Planet/TechTree 的实际 `RenderCommand::DrawText` 路径补 raw-key 防漏断言；
-  2. 继续按 Java `Skin`/`Styles` 对齐 UI skin 九宫格、tooltip、按钮 hover/pressed/disabled、字体 shadow/outline 与行高；
+  1. 优先继续 Settings 子页字体/图标/按钮节奏、语言默认 locale 落盘、Load/Save tooltip chrome；
+  2. 继续推进 Campaign/TechTree/Database/Join 的最终 DrawText 防漏和视觉对齐；
   3. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
 
 ## 上一闭环：补强 Host/Load 最终 DrawText 本地化防漏
