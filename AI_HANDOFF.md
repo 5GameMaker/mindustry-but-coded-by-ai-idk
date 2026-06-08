@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.73%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.74%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,23 +27,21 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：MapLocales 与 About 图标按钮状态色/语言顺序继续贴近 Java
+## 最新闭环：CustomGame/MapList filter 图标按钮改回 Java emptyi/emptyTogglei
 
-- 当前总体迁移完成度：约 **98.73%**，仍未达到完整可玩。
-- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/AboutDialog.java` 与 `core/src/mindustry/editor/MapLocalesDialog.java`：
-  - About 链接 action 改为消费 `Styles.clearNonei` hover/background/image color；
-  - MapLocales 左侧 locale 行改为真正走 `Styles.flatTogglet` checked 分支；
-  - MapLocales 折叠/filter/search clear/属性卡折叠图标改为消费 `emptyTogglei` / `emptyi` image color；
-  - MapLocales locale rows 在渲染、hit-test、dispatch 三处统一按 Java `Vars.locales` / LanguageDialog display-name 顺序排序。
+- 当前总体迁移完成度：约 **98.74%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/MapListDialog.java`：
+  - CustomGame/Editor MapList 搜索栏右侧 filter 改回 `Icon.filter` + `Styles.emptyi`，不再绘制 Rust-only solid `button` 背景；
+  - MapList filter dialog 的 Gamemode / Priority / Planet icon toggles 改回 `Styles.emptyTogglei` image color/checked/disabled 语义；
+  - 保留 Java 的外层 `Tex.button` group 视觉，不把 icon-only toggle 画成 `flatTogglet` text-button cell。
 - 验证：
   - `cargo fmt`
-  - `cargo test -p mindustry-desktop --lib desktop_launcher_about_route_uses_upstream_link_cards_and_hitboxes --no-default-features`
-  - `cargo test -p mindustry-desktop --lib desktop_launcher_editor_map_locales_search_filter_and_row_selection_match_java --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_map_list_route_controls_dispatch_actions --no-default-features`
   - `git diff --check`
 - 下一步建议继续前端：
-  1. 继续补 Settings/Language 字体与 restart 提示视觉回归；
-  2. 收口 CustomGame/LoadDialog 搜索栏、filter 按钮、ScrollPane/空态；
-  3. Join/Mods/About 剩余 icon button hover/pressed/image color 做统一消费端审查。
+  1. 收口 CustomGame 列表 ScrollPane/空态与 Java table flow；
+  2. 收口 LoadDialog Rust-only 文本/空态/ScrollPane；
+  3. 继续补 Settings/Language 字体与 restart 提示视觉回归。
 
 ## 上一闭环：JoinDialog 连接中接入 LoadingFragment 遮罩与取消
 

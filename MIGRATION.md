@@ -19,6 +19,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1108. CustomGame/MapList filter 图标按钮改回 Java emptyi/emptyTogglei
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.74%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/MapListDialog.java:96-107`：搜索栏右侧 filter 是 `Icon.filter` + `Styles.emptyi`；
+  - `MapListDialog.showMapFilters()`：Gamemode / Priority / Planet filter icon toggles 是 `Styles.emptyTogglei`，位于 `Tex.button` group 内，而不是单个 `flatTogglet` text-button 背景。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - CustomGame/Editor MapList 搜索栏 filter 控件不再绘制 Rust-only solid `button` 背景，图标色改为消费 `emptyi` image color；
+    - MapList filter dialog 的 icon-only toggles 改为 `emptyTogglei` image color/checked/disabled 语义，保留外层 group 背景；
+    - 回归测试锁定主 filter icon 为 `Color.white`、不出现 solid button 背景，Gamemode filter 不再绘制 `flatTogglet` cell。
+  - `README.md`
+    - 迁移进度更新到 **98.74%**。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_map_list_route_controls_dispatch_actions --no-default-features`
+
 ## 1107. MapLocales 与 About 图标按钮状态色/语言顺序继续贴近 Java
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
