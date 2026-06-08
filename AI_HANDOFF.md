@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.32%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.33%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：接入 Campaign LaunchLoadout SchematicImage 预览
+## 最新闭环：收紧 Controls keybind Rust-only raw fallback
+
+- 当前总体迁移完成度：约 **99.33%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/KeybindDialog.java:109-121`：Controls 值列来自 Java `KeyCode.getName()`；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/KeybindDialog.java:128-150`：rebind 后通过 Java keybind settings 形态保存。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 不再写入或显示迁移期私有 `keybind-default-keyboard-*-rust-display`；
+    - 旧 `-rust-display` 不再作为 UI 可见 fallback；
+    - rebind 输入必须能映射到 Java KeyCode ordinal，未知 key 名直接拒绝；
+    - 扩展 Delete/Backspace/Mouse Back/Mouse Forward 等 keycode roundtrip 测试。
+  - `README.md`
+    - 迁移进度更新到 **99.33%**。
+  - `MIGRATION.md`
+    - 新增 `1156. 收紧 Controls keybind Rust-only raw fallback`。
+- 验证：
+  - 已通过本轮 4 个 Controls/keybind 定向测试；
+  - 已通过 `cargo build -p mindustry-desktop --features opengl-native-runtime`；
+  - 已执行 `cargo fmt`。
+- 下一步建议继续：
+  1. LaunchLoadout picker 几何扩展到 Java `size(200f)` 方卡/滚动；
+  2. SectorSelectDialog 完整滚动结果；
+  3. Settings/Language/Controls 字体、icon fallback 与所有子菜单视觉继续收口。
+
+## 上一闭环：接入 Campaign LaunchLoadout SchematicImage 预览
 
 - 当前总体迁移完成度：约 **99.32%**，仍未达到完整可玩。
 - 本轮对照：

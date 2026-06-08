@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1156. 收紧 Controls keybind Rust-only raw fallback
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.33%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/KeybindDialog.java:109-121`：Controls 值列显示 `keybind.value.key.getName()`；
+  - `core/src/mindustry/ui/dialogs/KeybindDialog.java:128-150`：rebind 后通过 Java `KeyBind.save()` 走 Java keybind settings 形态，而不是 Rust-only display 字段。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `persist_settings_keybind_override_to_settings(...)` 不再写入 `keybind-default-keyboard-*-rust-display`；
+    - `settings_keybind_display_value_from_settings(...)` 不再把旧 `-rust-display` 当作 Controls 可见值 fallback，只有可解析的 Java KeyCode ordinal 会进入最终 UI；
+    - `commit_settings_keybind_rebind(...)` 拒绝无法转换到 Java ordinal 的未知 key 名，避免 Rust-only raw text 进入可见 Controls 文本；
+    - 补齐 `Delete/Backspace/Mouse Back/Mouse Forward` 等边缘 key display/ordinal roundtrip。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_keybind_display_matches_java_keycode_names --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_keybind_legacy_rust_display_never_leaks_to_controls_ui --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_keybind_rebinds_persist_to_java_keybind_settings_shape --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_keybind_unset_rows_render_dark_gray_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. 继续把 LaunchLoadout picker 几何扩展到 Java `size(200f)` 方卡和完整滚动；
+  2. 继续补 SectorSelectDialog 完整滚动结果；
+  3. 继续审查 Settings/Language/Controls 字体、icon fallback 与所有子菜单视觉。
+
 ## 1155. 接入 Campaign LaunchLoadout SchematicImage 预览
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
