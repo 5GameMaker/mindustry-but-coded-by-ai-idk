@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.07%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.08%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收紧内容图标字体注册与 token 替换边界
+## 最新闭环：收口 Settings 子页通用按钮字体与间距
+
+- 当前总体迁移完成度：约 **99.08%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:94-120`：Planet Data 子页按钮使用 `Styles.flatt` 与 Java TextButton 布局；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:171-194`：Data 子页通用按钮同样依赖 style 字号和 Scene2D 内部布局；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:363-386`：主 Settings 菜单与子页按钮不能散落 Rust-only 小号魔数。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 Settings 子页 TextButton 的 Java 式 icon size、icon center offset、label gap 常量；
+    - 新增 `settings_text_button_icon_point_like_java(...)` 与 `settings_text_button_label_point_like_java(...)`；
+    - `push_settings_text_button_enabled_with_style(...)` 改为使用 upstream style 字号和共享 icon/label 布局，不再硬编码 `16.0/15.0`；
+    - 扩展 `desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell`，锁住 Data 子页 `Styles.flatt` 按钮 icon/label 的位置、字号、font 与非 outline。
+  - `README.md`
+    - 迁移进度更新到 **99.08%**。
+  - `MIGRATION.md`
+    - 新增 `1134. 收口 Settings 子页通用按钮字体与间距`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_pages_render_reset_and_back_buttons -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_keybind_categories_are_real_scroll_rows_like_java -- --nocapture`
+  - `git diff --check`
+- 下一步建议继续：
+  1. 字体剩余：Tech fallback、IconLarge atlas fallback、`unicodeToName()` / `getLargeIcon()` 链路继续对齐；
+  2. 主菜单 chrome / `noBarPane` 显式约束、Discord/info/BE、mobile gutter 继续回归审查；
+  3. ModsBrowser / Database / ContentInfo / MapLocales 剩余子弹窗继续按 Java 默认字体节奏与动态语言值收口；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
+## 上一闭环：收紧内容图标字体注册与 token 替换边界
 
 - 当前总体迁移完成度：约 **99.07%**，仍未达到完整可玩。
 - 本轮对照：

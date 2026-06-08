@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1134. 收口 Settings 子页通用按钮字体与间距
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.08%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:94-120`：Planet Data 子页按钮走 `t.button(..., Icon.*, Styles.flatt, ...)`；
+  - `core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:171-194`：Data 子页通用按钮同样使用 Java `TextButtonStyle` 与 Scene2D 内部布局；
+  - `core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:363-386`：主 Settings 菜单按钮与子页按钮应共享上游样式字号语义，而不是 Rust-only 小号硬编码。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 Settings 子页通用 TextButton 的 Java 式 icon size、icon center offset、label gap 常量；
+    - 新增 `settings_text_button_icon_point_like_java(...)` 与 `settings_text_button_label_point_like_java(...)`，集中推导 icon/label 布局；
+    - `push_settings_text_button_enabled_with_style(...)` 不再硬编码 `16.0` 图标字号与 `15.0` label 字号，改用上游 style 字号和共享按钮布局；
+    - 扩展 Settings route 回归断言，锁住 Data 子页第一个 `Styles.flatt` 按钮的 icon/label size、position、font 与非 outline。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_pages_render_reset_and_back_buttons -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_keybind_categories_are_real_scroll_rows_like_java -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. 字体剩余：Tech fallback、IconLarge atlas fallback、`unicodeToName()` / `getLargeIcon()` 链路继续对齐；
+  2. 主菜单 chrome / `noBarPane` 显式约束、Discord/info/BE、mobile gutter 继续回归审查；
+  3. ModsBrowser / Database / ContentInfo / MapLocales 剩余子弹窗继续按 Java 默认字体节奏与动态语言值收口；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1133. 收紧内容图标字体注册与 token 替换边界
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
