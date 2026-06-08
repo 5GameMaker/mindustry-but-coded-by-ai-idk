@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.79%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.80%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：JoinDialog 空 saved 列表不再绘制 Rust-only invalid 占位卡
+## 最新闭环：主菜单无子菜单根按钮改为 Java fadeOutMenu 过渡
+
+- 当前总体迁移完成度：约 **98.80%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/fragments/MenuFragment.java`：
+  - 点击无 submenu 按钮时 Java 执行 `currentMenu = null; fadeOutMenu(); b.runnable.run()`；
+  - `fadeOutMenu()` 会保持 submenu children 并淡出 0.2s，结束后才 `submenu.clearChildren()`。
+- 本轮实现：
+  - `dispatch_menu_action(...)` 对已打开桌面 submenu 后点击无 submenu 根按钮的路径，改为 `fade_out_desktop_submenu_like_java()`，不再直接 `reset_desktop_root()`；
+  - 测试更新为 `desktop_launcher_non_submenu_route_fades_open_desktop_submenu_like_java_menu_fragment`，锁定 route 打开后 submenu 仍在 fade-out 期间存在，结束后才清空。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_non_submenu_route_fades_open_desktop_submenu_like_java_menu_fragment --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_menu_primary_action_switches_database_submenu --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_submenu_item_click_keeps_fade_out_like_java_menu_fragment --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_menu_back_key_closes_route_shell_then_submenu --no-default-features`
+  - `cargo fmt`
+  - `git diff --check`
+- 下一步建议继续前端：
+  1. Settings 主菜单可按子代理建议只补“300x60 / icon 32 / label gap / no extra stroke”更细回归测试；
+  2. Load/Content 列表 scrollbar pressed/drag、card shell 密度继续向 Java Scene2D 收口；
+  3. 主菜单可继续检查 hover/pressed 输入事件是否在 route shell/modal 打开时正确阻断底层菜单。
+
+## 上一闭环：JoinDialog 空 saved 列表不再绘制 Rust-only invalid 占位卡
 
 - 当前总体迁移完成度：约 **98.79%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java`：

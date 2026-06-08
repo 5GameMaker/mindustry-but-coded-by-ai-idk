@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1114. 主菜单无子菜单根按钮改为 Java fadeOutMenu 过渡
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.80%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:263-286`：点击无 submenu 的按钮时 `currentMenu = null; fadeOutMenu(); b.runnable.run()`；
+  - `fadeOutMenu()` 先把 submenu alpha 置 1，再用 `Actions.alpha(0f, 0.2f, Interp.fade)` 淡出，最后清空 children；不应瞬间清掉 Play/Database submenu。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `dispatch_menu_action(...)` 中当已打开桌面 submenu、点击 `Editor/Mods/Settings/Quit/Workshop` 等无 submenu 根按钮时，统一调用 `menu_renderer_state.fade_out_desktop_submenu_like_java()`，不再对 desktop root 直接 `reset_desktop_root()`；
+    - 将 `desktop_launcher_non_submenu_route_clears_open_desktop_submenu_like_java_menu_fragment` 更新为 `desktop_launcher_non_submenu_route_fades_open_desktop_submenu_like_java_menu_fragment`，锁定 route 已打开但 submenu children 在 fade-out 期间继续存在，动画结束后才清空。
+  - `README.md`
+    - 迁移进度更新到 **98.80%**。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_non_submenu_route_fades_open_desktop_submenu_like_java_menu_fragment --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_menu_primary_action_switches_database_submenu --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_submenu_item_click_keeps_fade_out_like_java_menu_fragment --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_menu_back_key_closes_route_shell_then_submenu --no-default-features`
+  - `cargo fmt`
+  - `git diff --check`
+
 ## 1113. JoinDialog 空 saved 列表不再绘制 Rust-only invalid 占位卡
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
