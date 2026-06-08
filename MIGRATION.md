@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1132. 收口 LanguageDialog 默认 locale 物化语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.06%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java:91-99`：`getLocale()` 读取 `Core.settings.getString("locale")`，遇到 `"default"` 时调用 `findClosestLocale()`；
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java:110-127`：`findClosestLocale()` 按 exact locale、same language、fallback `en` 顺序写回 `Core.settings.put("locale", ...)`；
+  - `Vars.java` / Java `Locale.getDefault()` 路径不以 `LANGUAGE` 覆盖 locale category。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_environment_default_locale_codes_from_environment(...)`，环境 fallback 只读取 `LC_ALL`、`LC_MESSAGES`、`LANG`，不再让 `LANGUAGE` 盖过 Java `Locale.getDefault()` 语义；
+    - 新增 `materialize_settings_default_locale_like_java(...)`；
+    - `OpenLanguageDialog` 时对缺失、空值或 `default` locale 写回 closest actual locale，但不触发 `@language.restart`；
+    - 补充回归测试锁住 `LANGUAGE` 不参与 fallback、打开语言页物化 `default`、既有 system-locale 优先顺序保持不变。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_locale_environment_fallback_ignores_language_env_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_language_default_locale_materializes_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_locale_prefers_system_locale_like_java -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. 字体/内容图标：收紧 content icon 注册与 `:token:` 替换 gate，继续对齐 Java `Fonts.registerIcon` / `Iconc.codes`；
+  2. Settings 子页通用按钮字号、图标字号、icon/label 间距按 Java `TextButtonStyle` 收口；
+  3. 主菜单 chrome：Logo/版本、Discord/info/BE 按钮、mobile gutter 继续补齐；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1131. 收口 ModsDialog 缺值占位与错误文本 raw bundle 语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

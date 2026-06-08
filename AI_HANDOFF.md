@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.05%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.06%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 ModsDialog 缺值占位与错误文本 raw bundle 语义
+## 最新闭环：收口 LanguageDialog 默认 locale 物化语义
+
+- 当前总体迁移完成度：约 **99.06%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java:91-127`：`getLocale()` 遇到 `default` 时调用 `findClosestLocale()` 并写回 `Core.settings.put("locale", ...)`；
+  - Java `Locale.getDefault()` 路径不让 `LANGUAGE` 覆盖 `LC_ALL/LC_MESSAGES/LANG` 这类 locale category。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_environment_default_locale_codes_from_environment(...)`，fallback 只读取 `LC_ALL`、`LC_MESSAGES`、`LANG`；
+    - 新增 `materialize_settings_default_locale_like_java(...)`；
+    - `OpenLanguageDialog` 时将缺失、空值或 `default` locale 物化为 closest actual locale；
+    - 物化默认值不触发 `@language.restart`，保持 Java“打开对话框选中最近语言”语义。
+  - `README.md`
+    - 迁移进度更新到 **99.06%**。
+  - `MIGRATION.md`
+    - 新增 `1132. 收口 LanguageDialog 默认 locale 物化语义`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_locale_environment_fallback_ignores_language_env_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_language_default_locale_materializes_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_locale_prefers_system_locale_like_java -- --nocapture`
+  - `git diff --check`
+- 下一步建议继续：
+  1. 字体/内容图标：收紧 content icon 注册与 `:token:` 替换 gate，继续对齐 Java `Fonts.registerIcon` / `Iconc.codes`；
+  2. Settings 子页通用按钮字号、图标字号、icon/label 间距按 Java `TextButtonStyle` 收口；
+  3. 主菜单 chrome：Logo/版本、Discord/info/BE 按钮、mobile gutter 继续补齐；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
+## 上一闭环：收口 ModsDialog 缺值占位与错误文本 raw bundle 语义
 
 - 当前总体迁移完成度：约 **99.05%**，仍未达到完整可玩。
 - 本轮对照：
