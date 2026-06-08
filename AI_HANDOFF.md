@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.03%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.04%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：接入 MapLocales filterDialog 子弹窗
+## 最新闭环：收口 JoinDialog 动态描述与 modeName 本地化语义
+
+- 当前总体迁移完成度：约 **99.04%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java`：
+  - `host.description` 只做最多两次换行保留后直接显示，不做 bundle 查表；
+  - `host.modeName` 非空时原样显示，只有空/None 时才 fallback 到 `Gamemode.toString()` / `mode.<name>.name` bundle。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `join_host_mode_name_like_java(...)`；
+    - local/community Host 卡片的 description 与非空 modeName 不再走 `localize_bundle_markup_text(...)`；
+    - saved server snapshot 增加 `description_raw/map_raw/mode_raw`，区分真实动态值与内部 `@server.refreshing/@unknown/@mode.*` fallback key；
+    - 更新 Join 测试断言，锁住 `@play` description 与 `@mode.*` modeName 原样显示。
+  - `README.md`
+    - 迁移进度更新到 **99.04%**。
+  - `MIGRATION.md`
+    - 新增 `1130. 收口 JoinDialog 动态描述与 modeName 本地化语义`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route -- --nocapture --test-threads=1`
+  - `git diff --check`
+- 下一步建议继续：
+  1. ModsDialog 详情/选择弹窗 displayName、缺作者、省略行、动态值原样显示；
+  2. Mods GitHub/目录错误 raw exception 中间 `@token` 不应被误 bundle 化；
+  3. Settings / Database / ContentInfo / Host / Load 等子菜单继续按 Java 视觉和字体节奏对齐；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
+## 上一闭环：接入 MapLocales filterDialog 子弹窗
 
 - 当前总体迁移完成度：约 **99.03%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/editor/MapLocalesDialog.java`：

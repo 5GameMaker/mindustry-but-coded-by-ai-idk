@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1130. 收口 JoinDialog 动态描述与 modeName 本地化语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.04%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java:281-295`：`host.description` 只限制换行后直接拼入 label，不再做 bundle 查表；
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java:301`：`host.modeName == null ? host.mode.toString() : host.modeName`，即服务端提供的非空 `modeName` 原样显示；
+  - `core/src/mindustry/game/Gamemode.java:83-85`：只有 fallback 到 `Gamemode.toString()` 时才读取 `mode.<name>.name` bundle。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_host_mode_name_like_java(...)`，统一 local / saved / community Host 卡片的 modeName 语义；
+    - Join 本地服务器与社区服务器卡片中，真实 `host.description` / 非空 `host.mode_name` 不再走 `localize_bundle_markup_text(...)`；
+    - 保存服务器 snapshot 增加 `description_raw/map_raw/mode_raw` 标记，保证真实动态值原样显示，同时 `@server.refreshing` / `@host.invalid` / `@unknown` / fallback gamemode 等内部 key 仍先本地化；
+    - 更新 Join route 回归断言：`@play raw survival server`、`@mode.survival.name`、` @mode.attack.name ` 必须按 Java 非空动态值原样出现。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route -- --nocapture --test-threads=1`
+  - `git diff --check`
+- 后续继续优先：
+  1. ModsDialog 详情/浏览器选择弹窗的 displayName、缺作者、省略行、动态值原样显示继续对照 Java；
+  2. Mods GitHub/目录错误弹窗 raw exception 中间 `@token` 不应被误 bundle 化；
+  3. Settings / Database / ContentInfo / Host / Load 等用户可见子菜单继续按 Java 视觉和默认字体节奏对齐；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1129. 接入 MapLocales filterDialog 子弹窗
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
