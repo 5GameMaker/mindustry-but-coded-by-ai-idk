@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.95%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.96%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 LoadDialog 存档卡片描边
+## 最新闭环：接入 JoinDialog 字体 dirty 抑制窗口
+
+- 当前总体迁移完成度：约 **98.96%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java`：
+  - 社区服务器 ping 回调里若 `fontIgnoreDirtyTask == null`，会设置 `FreeTypeFontData.ignoreDirty = true`；
+  - 延迟 `0.6f * 60f` 后恢复并清空任务；
+  - 任务存在时不会重复创建，避免社区服务器刷新/过滤/重排时反复 dirty 字体纹理。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `JOIN_FONT_IGNORE_DIRTY_FRAMES_LIKE_JAVA = 36`；
+    - 新增 `join_font_ignore_dirty_frames_remaining` 状态；
+    - 社区 feed/缓存加载与社区 refresh 在存在社区组时 arm 36 帧窗口；
+    - `menu_graphics_frame_for_surface(...)` 每帧递减；
+    - `active_menu_route_shell_lines(...)` 暴露 `font-ignore-dirty` 状态；
+    - 新增 `desktop_launcher_join_route_community_refresh_suppresses_font_dirty_churn_like_java`，锁住窗口不重复延长且字体 glyph 上传计划缓存不重建。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_community_refresh_suppresses_font_dirty_churn_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_community_search_filters_only_on_refresh_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+  - `git diff --check`
+- 下一步建议继续：
+  1. LanguageDialog 语言名来源继续收口，减少手工静态表维护面；
+  2. Settings/Language 字号、默认字体 shadow、outline 预烘焙字形继续审查；
+  3. Load/Save、Join、CustomGame、Database/ContentInfo 子菜单视觉继续按 Java 源码收口；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 上一闭环：收口 LoadDialog 存档卡片描边
 
 - 当前总体迁移完成度：约 **98.95%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LoadDialog.java`：
@@ -44,13 +71,8 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click -- --nocapture`
   - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog -- --nocapture`
   - `git diff --check`
-- 下一步建议继续：
-  1. Load/Save 子菜单继续收口：过滤 chip 背景/tooltip、存档卡片 `grayt` 层级、操作图标颜色和点击穿透；
-  2. Settings/Language 字号、默认字体 shadow、outline 预烘焙字形继续审查；
-  3. Join、CustomGame、Database/ContentInfo 子菜单视觉继续按 Java 源码收口；
-  4. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
 
-## 上一闭环：收口 LoadDialog 搜索框视觉
+## 上二闭环：收口 LoadDialog 搜索框视觉
 
 - 当前总体迁移完成度：约 **98.94%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LoadDialog.java` 的搜索行：`search.image(Icon.zoom)`、`search.field("", ...)`、`search.button(..., Styles.emptyTogglei, ...)`。

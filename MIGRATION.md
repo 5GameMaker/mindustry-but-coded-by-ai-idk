@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1124. 接入 JoinDialog 字体 dirty 抑制窗口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.96%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java` 中 `fontIgnoreDirtyTask` 在社区服务器 ping 回调里设置 `FreeTypeFontData.ignoreDirty = true`；
+  - 延迟 `0.6f * 60f` 后恢复 `ignoreDirty = false` 并清空任务；
+  - 任务未清空时不会重复创建/延长，避免社区服务器刷新/重排时反复 dirty 字体纹理。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `JOIN_FONT_IGNORE_DIRTY_FRAMES_LIKE_JAVA = 36`；
+    - `DesktopLauncher` 新增 `join_font_ignore_dirty_frames_remaining`；
+    - 社区 feed/缓存加载与 `refresh_join_community_servers_like_java()` 在有社区组时 arm 该窗口；
+    - `menu_graphics_frame_for_surface(...)` 每帧递减窗口；
+    - `active_menu_route_shell_lines(...)` 暴露 `font-ignore-dirty` 状态用于回归。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_community_refresh_suppresses_font_dirty_churn_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_community_search_filters_only_on_refresh_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. LanguageDialog 语言名来源继续收口，减少手工静态表维护面；
+  2. Settings/Language 字号、默认字体 shadow、outline 预烘焙字形、真实 glyph atlas 落点继续审查；
+  3. Load/Save、Join、CustomGame、MapList/MapPlay、Database/ContentInfo 子菜单视觉继续按 Java 源码收口；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1123. 收口 LoadDialog 存档卡片描边
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
