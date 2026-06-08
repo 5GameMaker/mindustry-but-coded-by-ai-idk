@@ -19,6 +19,40 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1160. 收口 LaunchLoadoutDialog 底部按钮与缺资源提示
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.37%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LaunchLoadoutDialog.java:34-37`：`buttons.defaults().size(160f, 64f)` 后依次加入 `@back`、`@resources.max`、`@resources`、`@launch.text`；
+  - `core/src/mindustry/ui/dialogs/LaunchLoadoutDialog.java:167-201`：候选 loadout 使用 `SchematicImage` + `Styles.togglet`，前一闭环已保留该路径；
+  - `core/src/mindustry/ui/dialogs/LaunchLoadoutDialog.java:203-205`：`@sector.missingresources` 只在资源汇总后显示一次，不能在 picker 中央重复出现。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 Java-like 底部按钮尺寸常量 `160x64`；
+    - `campaign_launch_loadout_back/max/resources/confirm_rect(...)` 改为一排四个 `160x64` 按钮，匹配 Java `buttons.defaults().size(160f, 64f)`；
+    - 略扩展 LaunchLoadoutDialog 宽度并上移资源汇总区域，避免 64 高按钮与底部提示/资源表重叠；
+    - `launch.capacity` 文案位置移到 picker 与资源汇总之间；
+    - 移除空候选时 picker 中央的重复 `@sector.missingresources`，保留 Java 底部单处提示；
+    - 扩展回归测试，锁定四个底部按钮 `160x64`，并断言缺资源提示只出现一次。
+  - `README.md`
+    - 迁移进度更新到 **99.37%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 LaunchLoadoutDialog 底部按钮与缺资源提示收口。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_button_opens_loadout_then_seeds_playable_smoke_world --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_blocks_confirm_when_source_resources_are_insufficient_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_picker_selects_and_commits_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_picker_supports_more_than_four_candidates_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_picker_uses_java_width_based_columns --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_resources_opens_child_loadout_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. 主菜单 chrome、Settings、About、Join 按子代理审查结果继续收口按钮皮肤、字体和本地化；
+  2. Discord route debug 行、icon raw-name fallback、About link fallback 继续清理，避免可见英文/图标名泄漏；
+  3. LaunchLoadoutDialog 后续仍可继续补 titlebar/BaseDialog 结构感和移动 portrait 按钮换行。
+
 ## 1159. 对齐 CampaignRulesDialog 难度按钮与规则 checkbox
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

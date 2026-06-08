@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.36%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.37%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,30 +27,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：对齐 CampaignRulesDialog 难度按钮与规则 checkbox
+## 最新闭环：收口 LaunchLoadoutDialog 底部按钮与缺资源提示
 
-- 当前总体迁移完成度：约 **99.36%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.37%**，仍未达到完整可玩。
 - 本轮对照：
-  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/CampaignRulesDialog.java:29-48`：难度按钮使用 `Styles.flatTogglet`，固定 `size(140f, 50f)`，portrait 每两个换行；
-  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/CampaignRulesDialog.java:87-94`：规则项是 Java `CheckBox` 行，`.info` bundle key 只挂 hover tooltip。
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LaunchLoadoutDialog.java:34-37`：底部按钮统一 `buttons.defaults().size(160f, 64f)`；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LaunchLoadoutDialog.java:203-205`：`@sector.missingresources` 只在资源汇总后显示一次。
 - 本轮实现：
   - `desktop/src/lib.rs`
-    - `CampaignRulesDialog` 难度按钮改为固定 `140x50` + `flatTogglet` checked/hover 皮肤；
-    - 规则行从两列按钮块和裸 `☑/☐` 前缀改成单列 Java CheckBox drawable + label；
-    - 难度说明与 `@rules.*.info` 改为 hover tooltip，不再作为正文常驻文本；
-    - 扩展测试锁定 flatTogglet、checkbox sprite、无裸 Unicode checkbox、tooltip 本地化和 hit-test。
+    - 底部 `@back` / `@resources.max` / `@resources` / `@launch.text` 改为一排 `160x64`；
+    - LaunchLoadoutDialog 宽度和资源汇总区域微调，避免 64 高按钮与底部提示/资源表重叠；
+    - `launch.capacity` 文案移到 picker 与资源汇总之间；
+    - 移除 picker 中央重复的 `@sector.missingresources`；
+    - 扩展测试锁定按钮尺寸和缺资源提示单处渲染。
   - `README.md`
-    - 迁移进度更新到 **99.36%**。
+    - 迁移进度更新到 **99.37%**。
   - `MIGRATION.md`
-    - 新增 `1159. 对齐 CampaignRulesDialog 难度按钮与规则 checkbox`。
+    - 新增 `1160. 收口 LaunchLoadoutDialog 底部按钮与缺资源提示`。
 - 验证：
-  - 已通过 4 个 CampaignRulesDialog 定向测试；
+  - 已通过 6 个 LaunchLoadout 定向测试；
   - 已通过 `cargo build -p mindustry-desktop --features opengl-native-runtime`；
   - 已执行 `cargo fmt`。
 - 下一步建议继续：
-  1. `LaunchLoadoutDialog` 底部按钮 `160x64`、missing resources 单处提示、候选 ScrollPane 继续对齐 Java；
-  2. 主菜单 chrome、Settings、About、Join 按子代理审查结果继续收口按钮皮肤、字体和本地化；
-  3. Discord route debug 行、icon raw-name fallback、About link fallback 继续清理，避免可见英文/图标名泄漏。
+  1. 主菜单 chrome、Settings、About、Join 按子代理审查结果继续收口按钮皮肤、字体和本地化；
+  2. Discord route debug 行、icon raw-name fallback、About link fallback 继续清理；
+  3. LaunchLoadoutDialog 后续仍可补 titlebar/BaseDialog 结构感和移动 portrait 按钮换行。
 
 ## 上一闭环：接入 Campaign LaunchLoadout SchematicImage 预览
 
