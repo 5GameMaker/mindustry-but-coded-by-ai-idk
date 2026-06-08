@@ -35576,3 +35576,40 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - MapLocales 对剩余 UI locale 的 `Locale.getDisplayName(Core.bundle.getLocale())` 覆盖仍需继续补齐，并保证显示名表和字体 seed 强绑定；
   - Settings/Load/Save/CustomGame/Database 等前端子菜单视觉、字体、语言和交互状态仍需继续逐项对照 Java；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1060. JoinDialog 卡片文本 wrap 与 ellipsis 收口
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **98.90%**，仍未达到完整可玩；继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java` 的 `buildServer(...)`：
+    - 标题行 `(host.name + versionString).replace('\n', ' ')` 使用 `width(targetWidth() - 40f).ellipsis(true)`；
+    - description 最多保留前两个换行后使用 `width(targetWidth() - 40f).wrap()`；
+    - map/mode 行 `replace('\n', ' ')` 后使用 `width(targetWidth() - 40f).ellipsis(true)`；
+  - `addCommunityHost(...)` 的社区服务器 header 标题使用 `wrap()`，不应裸画超出右侧 add 按钮。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_join_visible_char_estimated_width_like_java(...)` 与 `desktop_join_single_line_ellipsis_like_java(...)`，按零宽保留 markup tag、将换行替换为空格并用 `...` 表示 Java `Label.ellipsis(true)`；
+    - 新增 `join_route_server_card_text_width_like_java(...)`，统一使用卡片宽度近似 Java `targetWidth() - 40f`；
+    - LAN/local 卡片：标题接 ellipsis，description `RenderTextStyle.wrap_width`，map/mode 行接 ellipsis；
+    - saved server 卡片：已解析的 server title、description、map/mode 行分别接入 ellipsis/wrap；
+    - community host 卡片：header 标题接 `wrap_width`，description 接 `wrap_width`，map/mode 行接 ellipsis；
+    - 新增 `desktop_join_single_line_ellipsis_preserves_markup_like_java_labels`；
+    - 新增 `desktop_launcher_join_route_server_text_fits_like_java`。
+  - `README.md`
+    - 迁移进度更新到 **98.90%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_join_single_line_ellipsis_preserves_markup_like_java_labels -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_server_text_fits_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_server_metrics_match_java_zero_player_and_ping_rules -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_drive_server_cards_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_uses_java_like_grid_slots_for_local_and_saved_servers -- --nocapture`
+  - `cargo fmt --all`
+  - `git diff --check`
+- 仍未完成：
+  - ellipsis 目前仍是估算宽度，后续应继续接入真实字体度量/布局以更接近 Arc Label；
+  - JoinDialog 社区 host 长 description 的多行实际行高、ScrollPane 裁剪和 header wrap 后高度仍需继续按 Java 视觉审查；
+  - MapLocales 对剩余 UI locale 的显示名和字体 seed 强绑定仍需继续补齐；
+  - Settings/Load/Save/CustomGame/Database 等前端子菜单视觉、字体、语言和交互状态仍需继续逐项对照 Java；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。

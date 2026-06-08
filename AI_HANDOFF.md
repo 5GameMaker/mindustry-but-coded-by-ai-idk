@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.89%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.90%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,37 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：JoinDialog 卡片列数边界对齐 Java
+## 最新闭环：JoinDialog 卡片文本 wrap 与 ellipsis 收口
+
+- 当前总体迁移完成度：约 **98.90%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java` 的 `buildServer(...)`：
+  - title：`replace('\n', ' ')` + `width(targetWidth() - 40f).ellipsis(true)`；
+  - description：最多保留前两个换行 + `width(targetWidth() - 40f).wrap()`；
+  - map/mode：`replace('\n', ' ')` + `width(targetWidth() - 40f).ellipsis(true)`；
+  - community host header：`wrap()`，不能压到右侧 add button。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_join_visible_char_estimated_width_like_java(...)` 与 `desktop_join_single_line_ellipsis_like_java(...)`；
+    - 新增 `join_route_server_card_text_width_like_java(...)`；
+    - LAN/local、saved server、community host 卡片接入 title/map ellipsis 与 description/header wrap_width；
+    - 新增 `desktop_join_single_line_ellipsis_preserves_markup_like_java_labels`；
+    - 新增 `desktop_launcher_join_route_server_text_fits_like_java`。
+- 验证：
+  - `cargo test -p mindustry-desktop desktop_join_single_line_ellipsis_preserves_markup_like_java_labels -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_server_text_fits_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_server_metrics_match_java_zero_player_and_ping_rules -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_drive_server_cards_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_uses_java_like_grid_slots_for_local_and_saved_servers -- --nocapture`
+  - `cargo fmt --all`
+  - `git diff --check`
+- 下一步建议继续：
+  1. ellipsis 继续接入真实字体度量/布局，减少估算误差；
+  2. JoinDialog 社区 host 长 description 多行高度、ScrollPane 裁剪和 header wrap 后高度继续按 Java 视觉审查；
+  3. 继续补剩余 MapLocales UI family，并保证显示名表和字体 seed 强绑定；
+  4. Load/Save、Settings、CustomGame、Database/ContentInfo 子菜单视觉继续按 Java 源码收口。
+
+## 上一闭环：JoinDialog 卡片列数边界对齐 Java
 
 - 当前总体迁移完成度：约 **98.89%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java` 的 `targetWidth()` / `columns()`：
