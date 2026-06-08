@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1145. 补强 Host/Load 最终 DrawText 本地化防漏
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.21%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/HostDialog.java`：HostDialog 可见标题、字段名、info 按钮、host 按钮均应经 `Core.bundle` 解析后进入 Scene2D label；
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java`：搜索框 message、import 按钮和 LoadingFragment 文案不应把 raw `@save.search` / `@save.import` / `@loading` 画到屏幕。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 强化 `desktop_launcher_paused_world_overlay_opens_host_dialog_route`，断言 HostDialog 最终 `RenderCommand::DrawText` 不包含 `@hostserver`、`@name`、`@server.port`、`@host.info`、`@host`；
+    - 强化 `desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click`，断言 LoadDialog/LoadingFragment 最终 `RenderCommand::DrawText` 不包含 `@save.search`、`@save.import`、`@loading`。
+  - `README.md`
+    - 迁移进度更新到 **99.21%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_opens_host_dialog_route --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib -- --nocapture`
+- 后续继续优先：
+  1. 继续给 Join/Save/Mods/About/Planet/TechTree 的实际 `RenderCommand::DrawText` 路径补 raw-key 防漏断言；
+  2. 继续按 Java `Skin`/`Styles` 对齐 UI skin 九宫格、tooltip、按钮 hover/pressed/disabled、字体 shadow/outline 与行高；
+  3. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1144. 收口语言标题、properties UTF-8 边界与 UI 资源诊断
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

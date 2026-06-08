@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.20%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.21%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，字体与语言链路继续优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口语言标题、properties UTF-8 边界与 UI 资源诊断
+## 最新闭环：补强 Host/Load 最终 DrawText 本地化防漏
+
+- 当前总体迁移完成度：约 **99.21%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/HostDialog.java`：HostDialog 标题、字段名、info/host 按钮均应经 bundle 解析后进入可见 label；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LoadDialog.java`：搜索框 message、import 按钮和 LoadingFragment 文案不能把 raw `@save.search` / `@save.import` / `@loading` 画到屏幕。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 强化 `desktop_launcher_paused_world_overlay_opens_host_dialog_route`，断言 HostDialog 最终 `RenderCommand::DrawText` 不包含 `@hostserver`、`@name`、`@server.port`、`@host.info`、`@host`；
+    - 强化 `desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click`，断言 LoadDialog/LoadingFragment 最终 `RenderCommand::DrawText` 不包含 `@save.search`、`@save.import`、`@loading`。
+  - `README.md`
+    - 迁移进度更新到 **99.21%**。
+  - `MIGRATION.md`
+    - 新增 `1145. 补强 Host/Load 最终 DrawText 本地化防漏`。
+- 验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_opens_host_dialog_route --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib -- --nocapture`
+- 下一步建议继续：
+  1. 继续给 Join/Save/Mods/About/Planet/TechTree 的实际 `RenderCommand::DrawText` 路径补 raw-key 防漏断言；
+  2. 继续按 Java `Skin`/`Styles` 对齐 UI skin 九宫格、tooltip、按钮 hover/pressed/disabled、字体 shadow/outline 与行高；
+  3. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
+## 上一闭环：收口语言标题、properties UTF-8 边界与 UI 资源诊断
 
 - 当前总体迁移完成度：约 **99.20%**，仍未达到完整可玩。
 - 本轮对照：
