@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1141. 收口 Mods View Content 图标 tooltip chrome
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.17%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/ModsDialog.java:441-452`：`@mods.viewcontent` 子窗里的每个 content icon 通过 `.tooltip(c.localizedName)` 展示本地化名称，使用 Java 标准 Tooltip chrome，不是自绘 button/stroke 提示框。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_mods_content_dialog(...)` 中 hover tooltip 背景由 Rust-only `button` 改为 Java-like `black6`；
+    - 移除 tooltip 自绘 `StrokeRect`；
+    - tooltip 高度、padding 与字号收口到紧凑 Java tooltip 节奏；
+    - 扩展 `desktop_launcher_mods_route_opens_and_closes_detail_dialog`，锁定 content icon tooltip 使用 `black6`、11f 字号、4f padding 且无 tooltip stroke。
+  - `README.md`
+    - 迁移进度更新到 **99.17%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 Mods View Content 图标 tooltip chrome 收口。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_opens_and_closes_detail_dialog --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_content_grid_scrolls_icon_rows_like_java_pane --lib -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. ModsBrowser selection 继续清查是否仍有 Rust-only name/version 行，并按 Java description + author pane 收敛；
+  2. Mods releases/detail 的剩余 tooltip、row chrome 和 button rhythm 继续做小闭环；
+  3. MapLocales addIconDialog 继续接入 desktop 真 UI、点击命中与真实 content registry；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1140. 收口 MapLocales 图标/属性编辑、Settings/ContentInfo 与 noBarPane 细节
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

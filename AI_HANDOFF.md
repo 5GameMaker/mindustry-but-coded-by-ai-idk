@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.16%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.17%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，字体与语言链路继续优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 MapLocales 图标/属性编辑、Settings/ContentInfo 与 noBarPane 细节
+## 最新闭环：收口 Mods View Content 图标 tooltip chrome
+
+- 当前总体迁移完成度：约 **99.17%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/ModsDialog.java:441-452`：View Content 子窗中每个 content icon 使用 `.tooltip(c.localizedName)`，应走 Java 标准 Tooltip chrome。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - `push_mods_content_dialog(...)` 的 hover tooltip 背景改为 `black6`；
+    - 移除 tooltip 自绘 `StrokeRect`；
+    - tooltip 收口为 28f 高、4f padding、11f 文本；
+    - 扩展 detail/content 测试锁定 tooltip 文本、背景、无描边和点击仍可打开 ContentInfo。
+  - `README.md`
+    - 迁移进度更新到 **99.17%**。
+  - `MIGRATION.md`
+    - 新增 `1141. 收口 Mods View Content 图标 tooltip chrome`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_opens_and_closes_detail_dialog --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_content_grid_scrolls_icon_rows_like_java_pane --lib -- --nocapture`
+  - `git diff --check`
+- 下一步建议继续：
+  1. ModsBrowser selection 继续清查是否仍有 Rust-only name/version 行；
+  2. Mods releases/detail 的剩余 tooltip、row chrome 和 button rhythm 继续小闭环；
+  3. MapLocales addIconDialog 继续接入 desktop 真 UI、点击命中与真实 content registry；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
+## 上一闭环：收口 MapLocales 图标/属性编辑、Settings/ContentInfo 与 noBarPane 细节
 
 - 当前总体迁移完成度：约 **99.16%**，仍未达到完整可玩。
 - 本轮对照：
