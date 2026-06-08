@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.83%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.84%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：主菜单 submenu 按 Java sibling table 层级绘制
+## 最新闭环：主菜单按钮释放后 pressed 视觉立即回落
+
+- 当前总体迁移完成度：约 **98.84%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/fragments/MenuFragment.java`：
+  - 主菜单按钮走 Scene2D `Button` + `Styles.flatToggleMenut`；
+  - 鼠标释放后 Java 不会额外保留多帧 pressed/down tint，checked 只由 `currentMenu == out[0]` 控制。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - `MENU_VISUAL_PRESSED_HOLD_FRAMES` 归零；
+    - primary mouse release 分支立即清空 `last_menu_visual_pressed_button` / `last_menu_visual_pressed_chrome_action`，不再保留 Rust-only hold frames；
+    - `desktop_launcher_menu_frame_applies_pressed_button_down_drawable_and_release_clears` 改为断言释放后的下一帧不再绘制 `flat-down-base.9` pressed drawable。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_menu_frame_applies_pressed_button_down_drawable_and_release_clears --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_menu_frame --no-default-features`
+- 下一步建议继续前端：
+  1. JoinDialog：优先收已保存服务器卡片 `whitePane + whiteui` 两层、社区组头、tooltip；
+  2. Load/Save：优先收预览/nomap 与删除/重命名/覆盖确认框；
+  3. Database ContentInfo：stat 区仍需从纯文本推进到 Java `StatValue.display(table)` 风格组件。
+
+## 上一闭环：主菜单 submenu 按 Java sibling table 层级绘制
 
 - 当前总体迁移完成度：约 **98.83%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/fragments/MenuFragment.java`：

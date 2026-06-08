@@ -19,6 +19,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1118. 主菜单按钮释放后 pressed 视觉立即回落
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.84%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:267-286`：主菜单按钮使用 Scene2D `Button` / `Styles.flatToggleMenut` 原生 pressed/checked 状态；
+  - 鼠标释放后 Java 不会额外保留多帧 pressed/down 视觉，checked 只由 `currentMenu == out[0]` 驱动。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `MENU_VISUAL_PRESSED_HOLD_FRAMES` 归零；
+    - primary mouse release 分支不再写入 `last_menu_visual_pressed_button` / `last_menu_visual_pressed_chrome_action` 的 hold 状态，而是立即清空；
+    - 更新 `desktop_launcher_menu_frame_applies_pressed_button_down_drawable_and_release_clears`，断言释放后的下一帧不再绘制 `flat-down-base.9` pressed tint。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_menu_frame_applies_pressed_button_down_drawable_and_release_clears --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_menu_frame --no-default-features`
+
 ## 1117. 主菜单 submenu 按 Java sibling table 层级绘制
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
