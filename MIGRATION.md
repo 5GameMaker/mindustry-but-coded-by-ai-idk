@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1167. 清理 AboutDialog upstream 调试行
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.44%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - Java `AboutDialog` 不显示 `upstream: AboutDialog` 这类 Rust route-shell 调试文案；
+  - About/Credits/Links 路径应只显示 Java 对话框自身标题、credits 按钮、link cards、contributors 和本地化文案。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_active_menu_route_shell(...)` 对 `DesktopMenuRoute::About` 跳过 upstream route debug 行；
+    - AboutDialog 回归测试改为断言不渲染 `upstream: AboutDialog`，避免继续把类名调试文本固化为可见 UI。
+  - `README.md`
+    - 迁移进度更新到 **99.44%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 AboutDialog upstream 调试行清理。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_menu_route_renders_upstream_credits_links_and_contributors --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. 继续按 route 清理 Paused/Save/Database 等剩余 upstream 调试行；
+  2. JoinDialog Add/Edit 子弹窗继续细化 field padding、BaseDialog chrome 与 card density；
+  3. Settings/Data 与字体/语言可见层继续隔离 raw diagnostics、英文 token 和 fallback 泄漏。
+
 ## 1166. 清理 HostDialog upstream 调试行
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
