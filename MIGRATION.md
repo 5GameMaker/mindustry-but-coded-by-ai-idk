@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1146. 补强 About/Credits 最终 DrawText 本地化防漏
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.22%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/AboutDialog.java`：links ScrollPane 中的 link description 与 CreditsDialog 的标题/正文/返回按钮都应经 `Core.bundle` 解析后进入可见 label；
+  - Credits contributor 表格仍按 Java 三列表格渲染，不应暴露 raw key、URL summary 或 Rust-only pipe-joined 文本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 强化 `desktop_launcher_about_menu_route_renders_upstream_credits_links_and_contributors`；
+    - 断言 About link cards 最终 `RenderCommand::DrawText` 不包含 `@link.discord.description`、`@link.github.description`、`@link.wiki.description`；
+    - 断言 CreditsDialog 最终 `RenderCommand::DrawText` 不包含 `@credits`、`@credits.text`、`@contributors`、`@back`。
+  - `README.md`
+    - 迁移进度更新到 **99.22%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_about_menu_route_renders_upstream_credits_links_and_contributors --lib -- --nocapture`
+- 后续继续优先：
+  1. 继续给 Join/Save/Mods/Planet/TechTree 的实际 `RenderCommand::DrawText` 路径补 raw-key 防漏断言；
+  2. 继续按 Java `Skin`/`Styles` 对齐 UI skin 九宫格、tooltip、按钮 hover/pressed/disabled、字体 shadow/outline 与行高；
+  3. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1145. 补强 Host/Load 最终 DrawText 本地化防漏
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
