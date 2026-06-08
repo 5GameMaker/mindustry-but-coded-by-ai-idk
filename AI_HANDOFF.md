@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.08%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.09%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 Settings 子页通用按钮字体与间距
+## 最新闭环：收口 Settings 确认弹窗与 Keybind 搜索字体节奏
+
+- 当前总体迁移完成度：约 **99.09%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/KeybindDialog.java:39-53`：Controls 搜索栏是 `Icon.zoom + TextField`；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/UI.java:586-607`：`showConfirm(...)` 正文 `width(500f).wrap()`，按钮 `size(200f, 54f)`；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:175-222`：Data 清理操作调用同一 Java `ui.showConfirm(...)`。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 Keybind 搜索和 Confirm 弹窗的 Java 式字号/尺寸常量；
+    - Data/Planet Data 确认弹窗标题/正文改回默认 UI 字号，正文使用 500f desktop wrap，按钮改为 200x54；
+    - Controls 搜索栏 `Icon.zoom` 和输入文字不再使用 13/11 小字号硬编码，改用 Icon/default 字体节奏；
+    - 扩展 Settings 确认与 Keybind 搜索回归断言，锁住 TextField 背景、默认字号、非 outline、wrap 与按钮尺寸。
+  - `README.md`
+    - 迁移进度更新到 **99.09%**。
+  - `MIGRATION.md`
+    - 新增 `1135. 收口 Settings 确认弹窗与 Keybind 搜索字体节奏`。
+- 验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_keybind_search_matches_localized_labels_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `cargo fmt --all`
+  - `git diff --check`
+- 下一步建议继续：
+  1. 字体剩余：补 Rust 侧 `unicodeToName()` → `getLargeIcon()` 公共 seam，并实现 `IconLarge` glyph 缺失时 fallback 到 atlas region；
+  2. LanguageDialog 未知 raw locale 选中态继续对照 Java `getLocale()` / `findClosestLocale()` 边角语义；
+  3. ModsBrowser selection/release/detail 字体节奏补更细回归断言，防止后续漂移；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
+## 上一闭环：收口 Settings 子页通用按钮字体与间距
 
 - 当前总体迁移完成度：约 **99.08%**，仍未达到完整可玩。
 - 本轮对照：

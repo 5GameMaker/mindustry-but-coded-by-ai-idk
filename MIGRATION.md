@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1135. 收口 Settings 确认弹窗与 Keybind 搜索字体节奏
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.09%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/KeybindDialog.java:39-53`：Controls 搜索栏是 `Icon.zoom + TextField`，输入文字走 TextField 默认字体节奏，不是 Rust-only 小号 caption；
+  - `core/src/mindustry/core/UI.java:586-607`：`showConfirm(...)` 使用 `BaseDialog(title)`，正文 `width(500f).wrap()`，按钮默认 `size(200f, 54f)`；
+  - `core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:175-222`：Data/Planet Data 清理操作都调用同一 `ui.showConfirm(...)` 语义。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 Keybind 搜索图标/输入文字字号、cursor advance、Confirm 正文宽度与按钮尺寸常量；
+    - Settings Data/Planet Data 确认弹窗标题和正文回到 Java 默认 UI 字号节奏，正文加入 500f desktop wrap 约束；
+    - 确认弹窗按钮改为 Java `showConfirm` 的 200x54；
+    - Controls 搜索栏 `Icon.zoom` 和输入文字不再使用 13/11 小字号硬编码，改用上游按钮/默认 TextField 字号节奏；
+    - 扩展 Settings 确认与 Keybind 搜索测试，锁住 TextField 背景、Icon font、默认字号、非 outline、wrap 与按钮尺寸。
+- 验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_keybind_search_matches_localized_labels_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `cargo fmt --all`
+  - `git diff --check`
+- 后续继续优先：
+  1. 字体剩余：补 Rust 侧 `unicodeToName()` → `getLargeIcon()` 公共 seam，并实现 `IconLarge` glyph 缺失时 fallback 到 atlas region；
+  2. LanguageDialog 未知 raw locale 选中态继续对照 Java `getLocale()` / `findClosestLocale()` 边角语义；
+  3. ModsBrowser selection/release/detail 字体节奏补更细回归断言，防止后续漂移；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1134. 收口 Settings 子页通用按钮字体与间距
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
