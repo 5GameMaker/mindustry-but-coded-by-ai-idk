@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1163. 补齐 invitefriends 内置 bundle fallback
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.40%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/assets/bundles/bundle.properties`、`bundle_zh_CN.properties`、`bundle_zh_TW.properties` 均包含 `invitefriends`；
+  - `PausedDialog` 的 Steam invite 分支显示 `@invitefriends`，fallback 表缺失会在资源加载失败或测试 fallback 路径下泄漏 raw key。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 英文内置 bundle fallback 表新增 `("invitefriends", "Invite Friends")`；
+    - 简体中文内置 bundle fallback 表新增 `("invitefriends", "邀请好友")`；
+    - 繁体中文内置 bundle fallback 表新增 `("invitefriends", "邀請好友")`；
+    - `upstream_menu_bundle_entries_cover_menu_fragment_buttons` 增加 `invitefriends` 覆盖。
+  - `README.md`
+    - 迁移进度更新到 **99.40%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 `invitefriends` 内置 bundle fallback 补齐。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core upstream_menu_bundle_entries_cover_menu_fragment_buttons --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_host_button_invites_friends_for_steam_server_like_java --lib -- --test-threads=1 --nocapture`
+- 后续继续优先：
+  1. Join/Host/Paused 真实对话框视觉仍需继续按 Java 补 card/header/modal；
+  2. Settings/Data route 诊断文本继续隔离到测试域；
+  3. 字体 seed 硬编码继续向 bundle 生成式收口。
+
 ## 1162. 收口 About 链接过滤与图标 fallback
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
