@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.29%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.30%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 UI 图标字体、toggle 状态与数据页 chrome
+## 最新闭环：收口 MapPlay help 弹窗 ScrollPane 与正文字号
+
+- 当前总体迁移完成度：约 **99.30%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/MapPlayDialog.java:97-113`：`displayGameModeHelp()` 使用 `BaseDialog`、`ScrollPane(table)`、`labelWrap(...).width(400f)` 与 `@ok` 按钮 `size(110, 50).pad(10f)`。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 移除 help 内容区 Rust-only `button` 背景和手工描边；
+    - help 正文字号调整到 `12.0`，继续保留 400 宽 wrap；
+    - 扩展 MapPlay help 测试，锁定 ScrollPane 无额外 stroke、OK 按钮 `110x50`。
+  - `README.md`
+    - 迁移进度更新到 **99.30%**。
+  - `MIGRATION.md`
+    - 新增 `1153. 收口 MapPlay help 弹窗 ScrollPane 与正文字号`。
+- 验证：
+  - 已通过本轮 3 个定向 MapPlay UI 测试；
+  - 已执行 `cargo fmt`。
+- 下一步建议继续：
+  1. 继续补 Campaign locked hover text 与 SectorSelectDialog 完整滚动结果；
+  2. 继续对照 Java LaunchLoadout 的 `SchematicImage` 视觉；
+  3. 继续精修 Settings/Language/Controls 字体与所有子菜单视觉。
+
+## 上一闭环：收口 UI 图标字体、toggle 状态与数据页 chrome
 
 - 当前总体迁移完成度：约 **99.29%**，仍未达到完整可玩。
 - 本轮对照：

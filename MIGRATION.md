@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1153. 收口 MapPlay help 弹窗 ScrollPane 与正文字号
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.30%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/MapPlayDialog.java:97-113`：`displayGameModeHelp()` 使用 `BaseDialog(Core.bundle.get("mode.help.title"))`、`ScrollPane(table)`、`pane.setFadeScrollBars(false)`、`labelWrap(...).width(400f)` 与 `@ok` 按钮 `size(110, 50).pad(10f)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 移除 MapPlay help 内容区 Rust-only `button` 背景和手工描边，让弹窗正文区更接近 Java `ScrollPane(table)` 语义；
+    - 将 help 正文字号从过小的 `11.0` 收口到更接近 Java 默认 label 节奏的 `12.0`，保留 400 宽 wrap；
+    - 扩展回归测试，锁定 help ScrollPane 不再额外描边，OK 按钮继续保持 Java `110x50`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_button_geometry_matches_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_help_customize_use_independent_basedialog_layer_like_java --lib -- --test-threads=1 --nocapture`
+- 后续继续优先：
+  1. 继续补 Campaign locked hover text 与 SectorSelectDialog 完整滚动结果；
+  2. 继续对照 Java LaunchLoadout 的 `SchematicImage` 预览和候选项 checked/disabled 视觉；
+  3. 继续精修 Settings/Language/Controls 字体、语言/本地化和所有子菜单视觉。
+
 ## 1152. 收口 UI 图标字体、toggle 状态与数据页 chrome
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
