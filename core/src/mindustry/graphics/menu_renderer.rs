@@ -1182,17 +1182,6 @@ fn menu_push_icon_render_commands(
     mobile: bool,
 ) {
     let size = size.max(1.0);
-    if let Some(sprite) = menu_icon_sprite_for_name(icon_name) {
-        commands.push(RenderCommand::draw_sprite(
-            sprite.symbol,
-            menu_icon_sprite_rect(center, size, mobile),
-            color,
-            0.0,
-            layer,
-        ));
-        return;
-    }
-
     if let Some(glyph) = upstream_ui_icon_glyph_string(icon_name) {
         commands.push(RenderCommand::draw_text_styled(
             glyph,
@@ -1204,6 +1193,17 @@ fn menu_push_icon_render_commands(
                 .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true),
+            layer,
+        ));
+        return;
+    }
+
+    if let Some(sprite) = menu_icon_sprite_for_name(icon_name) {
+        commands.push(RenderCommand::draw_sprite(
+            sprite.symbol,
+            menu_icon_sprite_rect(center, size, mobile),
+            color,
+            0.0,
             layer,
         ));
         return;
@@ -5345,13 +5345,14 @@ mod tests {
                 rect.x + MENU_DESKTOP_BUTTON_MARGIN_LEFT + MENU_DESKTOP_BUTTON_ICON_X,
                 rect.center().y,
             );
-            let icon_rect =
-                menu_icon_sprite_rect(icon_center, MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE, false);
+            let icon_glyph = upstream_ui_icon_glyph_string("play")
+                .expect("upstream Icon.play glyph should be registered");
             matches!(
                 command,
-                RenderCommand::DrawSprite { symbol, rect: sprite_rect, layer, .. }
-                    if symbol == "menu-icon-play"
-                        && *sprite_rect == icon_rect
+                RenderCommand::DrawText { text, position, style, layer, .. }
+                    if *text == icon_glyph
+                        && *position == icon_center
+                        && style.font == RenderFontId::Icon
                         && (*layer
                             - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
                                 + MENU_BUTTON_ICON_LAYER_OFFSET))
@@ -5564,15 +5565,21 @@ mod tests {
                 )),
                 "icon {icon} must not regress to the placeholder question mark"
             );
-            let expected_symbol = menu_icon_sprite_for_name(icon)
-                .expect("menu icon should have an upstream sprite bridge")
-                .symbol;
             assert!(
                 commands.iter().any(|command| matches!(
                     command,
-                    RenderCommand::DrawSprite { symbol, .. } if symbol == expected_symbol
+                    RenderCommand::DrawText { text, style, .. }
+                        if *text == upstream_ui_icon_glyph_string(icon)
+                            .expect("menu icon should have an upstream glyph bridge")
+                            && style.font == RenderFontId::Icon
                 )),
-                "icon {icon} should be emitted through the upstream Icon sprite bridge"
+                "icon {icon} should be emitted through the upstream Icon glyph bridge"
+            );
+            assert!(
+                !commands
+                    .iter()
+                    .any(|command| matches!(command, RenderCommand::DrawSprite { .. })),
+                "icon {icon} should prefer the upstream Icon glyph bridge over the sprite bridge"
             );
         }
     }
@@ -5611,13 +5618,14 @@ mod tests {
                 rect.center().x,
                 rect.center().y + MENU_MOBILE_BUTTON_ICON_OFFSET_Y,
             );
-            let icon_rect =
-                menu_icon_sprite_rect(icon_center, MENU_MOBILE_BUTTON_ICON_TEXT_SIZE, true);
+            let icon_glyph = upstream_ui_icon_glyph_string("rightOpenOut")
+                .expect("upstream Icon.rightOpenOut glyph should be registered");
             matches!(
                 command,
-                RenderCommand::DrawSprite { symbol, rect: sprite_rect, layer, .. }
-                    if symbol == "menu-icon-rightOpenOut"
-                        && *sprite_rect == icon_rect
+                RenderCommand::DrawText { text, position, style, layer, .. }
+                    if *text == icon_glyph
+                        && *position == icon_center
+                        && style.font == RenderFontId::Icon
                         && (*layer
                             - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
                                 + MENU_BUTTON_ICON_LAYER_OFFSET))
@@ -5785,13 +5793,14 @@ mod tests {
                 custom.rect.x + MENU_DESKTOP_BUTTON_MARGIN_LEFT + MENU_DESKTOP_BUTTON_ICON_X,
                 custom.rect.center().y,
             );
-            let icon_rect =
-                menu_icon_sprite_rect(icon_center, MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE, false);
+            let icon_glyph = upstream_ui_icon_glyph_string("add")
+                .expect("upstream Icon.add glyph should be registered");
             matches!(
                 command,
-                RenderCommand::DrawSprite { symbol, rect: sprite_rect, layer, .. }
-                    if symbol == "menu-icon-add"
-                        && *sprite_rect == icon_rect
+                RenderCommand::DrawText { text, position, style, layer, .. }
+                    if *text == icon_glyph
+                        && *position == icon_center
+                        && style.font == RenderFontId::Icon
                         && (*layer
                             - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
                                 + MENU_BUTTON_ICON_LAYER_OFFSET))

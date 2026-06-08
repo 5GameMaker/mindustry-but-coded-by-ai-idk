@@ -19,6 +19,39 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1157. 对齐菜单 Icon 字体与 LaunchLoadout 200f 方卡
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.34%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:211-224`：桌面主菜单通过 `TextButton` + `Icon.*` 使用 Java `Fonts.icon` 字体，而不是预生成 PNG 图标优先；
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:143-150`：移动菜单 `MobileButton` 同样以 `Icon.*` 字形作为按钮图标；
+  - `core/src/mindustry/ui/dialogs/LaunchLoadoutDialog.java:167-201`：候选载荷按钮内 `SchematicImage` 使用 `size(200f)` 方卡，并按 `width / 230f` 推导列数。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `menu_push_icon_render_commands(...)` 改为优先走 `upstream_ui_icon_glyph_string(...)` + `RenderFontId::Icon` 的 `DrawText`，缺字形时才回退到 `menu-icon-*` sprite，最后才 primitive fallback；
+    - 更新桌面/移动菜单相关测试，锁定主菜单按钮图标走 Java Icon 字体路径，避免继续以生成 PNG 图标作为优先视觉路径。
+  - `desktop/src/lib.rs`
+    - `campaign_launch_loadout_picker_rect(...)` 将 picker 高度从固定 112 扩展为最多 200；
+    - `campaign_launch_loadout_picker_columns(...)` 恢复 Java `width / 230f` 语义下桌面宽度可排 3 个 200f 方卡；
+    - 补测试锁定桌面 3 列、单行候选 200f 高度和不低于 200f 宽度。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core menu_icon_render_commands_cover_upstream_menu_fragment_icons_without_question_text --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_ui_plan_selected_buttons_emit_java_flat_down_drawable --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_mobile_buttons_render_icon_above_label_like_mobile_button --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_ui_plan_hovered_buttons_emit_java_flat_over_drawable --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core menu_ui_plan_desktop_inserts_custom_buttons_before_quit_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_picker_selects_and_commits_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_picker_supports_more_than_four_candidates_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 注意：
+  - 曾并行跑两个 `mindustry-desktop` 测试时出现一次 Windows `LNK1104`，原因是两个测试进程争用同一个 `target/debug/deps/mindustry_desktop-*.exe`；改为串行后相关测试已通过。
+- 后续继续优先：
+  1. 继续按 Java 原版逐项校准战役/星球发射、JoinDialog、ResearchDialog、编辑器地图、ModsDialog 等视觉差距最大的子菜单；
+  2. 继续核对所有 UI 文本是否通过 bundle/localize 渲染，避免 raw key 或硬编码英文漏到非英文 locale；
+  3. 继续把 fast synthetic menu background 收口到 cached/batched 的原版 `MenuRenderer` 路径。
+
 ## 1156. 收紧 Controls keybind Rust-only raw fallback
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
