@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1115. ContentInfoDialog header 纳入 Java ScrollPane
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.81%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/ContentInfoDialog.java`：`show(...)` 先构造含 icon、localizedName、raw name、patched 标记的同一个 `table`；
+  - 该 `table` 整体被放入 `ScrollPane`，所以 header、description、stats、details 应随同一 ScrollPane content 一起滚动，不应固定在视口外层。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DATABASE_CONTENT_INFO_HEADER_HEIGHT`，把 ContentInfoDialog header 高度计入 body/content 高度；
+    - `database_content_info_scrollpane_rect(...)` 扩大 ScrollPane 高度，让 header 与详情共享同一个裁剪视口；
+    - 将 icon、localizedName、raw name、patched 标记移动到 `SetClip(clip)` 之后，并基于 scrolled `content` rect 计算位置；
+    - `database_content_info_viewfields_rect_for_content(...)` 的起点改为 header 后的 body 起点；
+    - 增强 `desktop_launcher_database_content_info_scrolls_like_java_scrollpane`，断言 display name 位于 ScrollPane clip 内，滚动后与详情文本同步位移。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_database_content_info_scrolls_like_java_scrollpane --no-default-features`
+  - `cargo test -p mindustry-desktop --lib database_content_info --no-default-features`
+
 ## 1114. 主菜单无子菜单根按钮改为 Java fadeOutMenu 过渡
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

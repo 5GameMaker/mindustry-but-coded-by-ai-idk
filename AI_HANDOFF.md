@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.80%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.81%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：主菜单无子菜单根按钮改为 Java fadeOutMenu 过渡
+## 最新闭环：ContentInfoDialog header 纳入 Java ScrollPane
+
+- 当前总体迁移完成度：约 **98.81%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/ContentInfoDialog.java`：
+  - Java 将 icon、localizedName、raw name 与 patched 标记放进同一个 `table`；
+  - 该 `table` 整体进入 `ScrollPane`，因此 header 与 description/stats/details 应共享裁剪与滚动，不应固定在 ScrollPane 外层。
+- 本轮实现：
+  - `desktop/src/lib.rs` 新增 `DATABASE_CONTENT_INFO_HEADER_HEIGHT`，把 header 计入 ContentInfoDialog scrolled content；
+  - `database_content_info_scrollpane_rect(...)` 扩大视口高度；
+  - `push_database_content_info_dialog(...)` 把 icon/name/patched 绘制移动到 `SetClip(clip)` 后，按 scrolled `content` rect 定位；
+  - `database_content_info_viewfields_rect_for_content(...)` 改用 header 后 body 起点；
+  - `desktop_launcher_database_content_info_scrolls_like_java_scrollpane` 断言 display name 位于 ScrollPane clip 内，并随滚动同步移动。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_database_content_info_scrolls_like_java_scrollpane --no-default-features`
+  - `cargo test -p mindustry-desktop --lib database_content_info --no-default-features`
+- 下一步建议继续前端：
+  1. 等待/整合已分发 explorer 的字体、语言、Settings、Database、渲染输入风险审查结果；
+  2. 优先修字体 fallback、语言列表/本地化文案、Settings/Database 子菜单与 Java 原版的高可见差异；
+  3. 每个 UI 缺口继续按“Java 源码对照 → Rust 实现 → 定向测试 → fmt/diff check → 中文提交推送”闭环推进。
+
+## 上一闭环：主菜单无子菜单根按钮改为 Java fadeOutMenu 过渡
 
 - 当前总体迁移完成度：约 **98.80%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/fragments/MenuFragment.java`：
