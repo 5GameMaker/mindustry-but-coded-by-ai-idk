@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.09%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.10%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,37 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 Settings 确认弹窗与 Keybind 搜索字体节奏
+## 最新闭环：收口字体大图标链路、语言未知 locale 选中态与 ContentInfo mod 来源
+
+- 当前总体迁移完成度：约 **99.10%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Fonts.java:121-133`：`unicodeToName()` 先内容图标再 `Iconc.codeToName`，`getLargeIcon()` 优先 `Fonts.iconLarge` glyph，缺失时 `Core.atlas.find(name)`；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java:91-108`：非 `default` raw locale 不应被强行折到 closest locale 作为列表 checked row；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ctype/UnlockableContent.java:140-142`：mod 内容描述追加 `mod.display`。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 Java 式 large icon source seam：`unicodeToName()`、`getLargeIcon()`、IconLarge glyph 与 atlas fallback；
+    - LanguageDialog 选中态保留未知 raw locale，避免错误勾选 English；
+    - Database/ContentInfo 描述追加 mod displayName 来源行；
+    - 新增/扩展对应回归测试。
+  - `README.md`
+    - 迁移进度更新到 **99.10%**。
+  - `MIGRATION.md`
+    - 新增 `1136. 收口字体大图标链路、语言未知 locale 选中态与 ContentInfo mod 来源`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_fonts_ -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_preserves_unknown_raw_locale_without_forcing_checked_row_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_database_content_description_appends_mod_display_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_database_content_info_stats_keep_java_stat_categories -- --nocapture`
+  - `git diff --check`
+- 下一步建议继续：
+  1. 将 large icon seam 接入 MapProcessorsDialog / LogicBlock / PlanetDialog 真实消费端；
+  2. Load/Save 子菜单剩余视觉尾巴继续收口；
+  3. ModsBrowser selection/release/detail 继续补更细字体/布局断言；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
+## 上一闭环：收口 Settings 确认弹窗与 Keybind 搜索字体节奏
 
 - 当前总体迁移完成度：约 **99.09%**，仍未达到完整可玩。
 - 本轮对照：

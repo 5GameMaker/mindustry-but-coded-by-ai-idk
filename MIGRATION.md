@@ -19,6 +19,38 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1136. 收口字体大图标链路、语言未知 locale 选中态与 ContentInfo mod 来源
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.10%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/Fonts.java:121-133`：`unicodeToName()` 先查内容图标注册表再回退 `Iconc.codeToName`，`getLargeIcon()` 先取 `Fonts.iconLarge` glyph，glyph 缺失时 fallback 到 `Core.atlas.find(name)`；
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java:91-108`：非 `default` 的 raw locale 不走 `findClosestLocale()`，未知 locale 打开语言列表时不应错误勾选英语或同语种 fallback；
+  - `core/src/mindustry/ctype/UnlockableContent.java:140-142` 与 `core/src/mindustry/ui/dialogs/ContentInfoDialog.java:59-67`：mod 内容的 `displayDescription()` 会在描述后追加 `Core.bundle.format("mod.display", minfo.mod.meta.displayName)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLargeIconSourceLikeJava`、`desktop_unicode_to_name_like_java(...)`、`desktop_large_icon_source_like_java(...)` 和 `DesktopLauncher` 公共入口，补齐 `unicodeToName()` → `getLargeIcon()` seam；
+    - `unicodeToName` 只接受已按 Java `loadContentIcons()` 成功注册到 UI atlas page 的内容图标，再回退 builtin `Iconc`；
+    - `getLargeIcon` 优先返回 `IconLargeGlyph`，glyph 不存在时返回同名 `AtlasRegion`；
+    - LanguageDialog 选中态新增 raw-locale helper：只有 `default`/空值才走 closest locale，未知 raw locale 保留原值并让列表无误勾选；
+    - Database/ContentInfo 描述新增 mod source → mod metadata displayName 解析，并追加本地化 `mod.display` 行。
+  - `README.md`
+    - 迁移进度更新到 **99.10%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为字体大图标链路、语言未知 locale 选中态与 ContentInfo mod 来源收口。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_fonts_ -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_preserves_unknown_raw_locale_without_forcing_checked_row_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_database_content_description_appends_mod_display_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_database_content_info_stats_keep_java_stat_categories -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. 把 `unicodeToName()` → `getLargeIcon()` seam 继续接入 MapProcessorsDialog / LogicBlock / PlanetDialog 等真实消费端渲染路径；
+  2. Load/Save 子菜单剩余视觉尾巴继续按 Java `LoadDialog` / `SaveDialog` 收口；
+  3. ModsBrowser selection/release/detail 字体节奏继续补更细断言；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1135. 收口 Settings 确认弹窗与 Keybind 搜索字体节奏
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
