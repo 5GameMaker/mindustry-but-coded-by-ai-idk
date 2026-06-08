@@ -35648,3 +35648,44 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 新增表虽然已进入 seed，但后续仍应继续审查真实字体 atlas 对这些新增字形的渲染质量；
   - Settings/Load/Save/CustomGame/Database 等前端子菜单视觉、字体、语言和交互状态仍需继续逐项对照 Java；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1062. MapLocales 补齐剩余语言显示名
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **98.92%**，仍未达到完整可玩；继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java` 使用 `loc.getDisplayName(Core.bundle.getLocale())`；
+  - `core/assets/locales` 的剩余 UI locale 包括 `be/bg/ca/et/eu/fil/lt/sr/th/tk/uk_UA`；
+  - 这些显示名必须随当前 UI locale 变化，而不是回退到 `LanguageDialog` 的 native display-name。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增/接线 `MAP_LOCALES_BELARUSIAN_DISPLAY_NAMES`；
+    - 新增/接线 `MAP_LOCALES_BULGARIAN_DISPLAY_NAMES`；
+    - 新增/接线 `MAP_LOCALES_CATALAN_DISPLAY_NAMES`；
+    - 新增/接线 `MAP_LOCALES_ESTONIAN_DISPLAY_NAMES`；
+    - 新增/接线 `MAP_LOCALES_BASQUE_DISPLAY_NAMES`；
+    - 新增/接线 `MAP_LOCALES_FILIPINO_DISPLAY_NAMES`；
+    - 新增/接线 `MAP_LOCALES_LITHUANIAN_DISPLAY_NAMES`；
+    - 新增/接线 `MAP_LOCALES_SERBIAN_DISPLAY_NAMES`；
+    - 新增/接线 `MAP_LOCALES_THAI_DISPLAY_NAMES`；
+    - 新增/接线 `MAP_LOCALES_TURKMEN_DISPLAY_NAMES`；
+    - 新增/接线 `MAP_LOCALES_UKRAINIAN_DISPLAY_NAMES`；
+    - `map_locales_display_names_for_ui_locale(...)` 接入 `be/bg/ca/et/eu/fil/lt/sr/th/tk/uk`；
+    - `desktop_extend_font_seed_characters_from_map_locale_display_names(...)` 同步加入 11 张表；
+    - 扩展 `desktop_map_locales_display_name_matches_java_for_non_english_ui_locales`；
+    - 扩展 `desktop_graphics_font_seed_covers_map_locales_display_names_like_java`。
+  - `README.md`
+    - 迁移进度更新到 **98.92%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环改为本轮剩余语言显示名补齐，并把下一步优先级收敛到 LanguageDialog/Settings 字体视觉。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_map_locales_display_name_matches_java_for_non_english_ui_locales -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_seed_covers_map_locales_display_names_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_map_locales_display_name_uses_current_ui_locale_not_language_dialog_native_name -- --nocapture`
+  - `cargo fmt --all`
+  - `git diff --check`
+- 仍未完成：
+  - 前端视觉表现和字体/语言部分仍有很多缺失；下一步优先补 LanguageDialog 连续 ScrollPane、400x50 行按钮、24px margin、点击/hover 命中和 `@language.restart`；
+  - Settings/Language 字号、默认字体 shadow、outline 预烘焙字形仍需继续与 Java `Fonts`/`Styles` 对齐；
+  - Load/Save、Join、CustomGame、Database/ContentInfo 子菜单视觉和交互状态仍需继续逐项对照 Java；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
