@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.76%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.77%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：Fonts.outline 独立 atlas glyph 与 Java 预烘焙边框字体对齐
+## 最新闭环：MapList/CustomGame 卡片区接入 Java ScrollPane 显式裁剪
+
+- 当前总体迁移完成度：约 **98.77%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/MapListDialog.java`：
+  - Java 用 `new ScrollPane(mapTable)` 包裹 map card 列表；
+  - `setFadeScrollBars(false)` 与 `setScrollingDisabledX(true)` 表示内容应该被 pane 视口裁剪；
+  - 空态仍只显示 `@maps.none`，不增加 Rust-only hint/page counter。
+- 本轮实现：
+  - `push_map_list_route_page(...)` 在 map list pane 内绘制卡片/空态前加入 `RenderCommand::set_clip(pane)`；
+  - 卡片/空态绘制完成后立即 `RenderCommand::clear_clip()`，overlay/dialog 仍在裁剪外绘制；
+  - `desktop_launcher_map_list_search_and_scroll_filter_visible_cards` 增加卡片 draw command 必须位于 `SetClip(pane)` 和 `ClearClip` 之间的断言。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_map_list_search_and_scroll_filter_visible_cards --no-default-features`
+  - `cargo test -p mindustry-desktop --lib map_list --no-default-features`
+  - `cargo fmt`
+  - `git diff --check`
+- 下一步建议继续前端：
+  1. JoinDialog：删除/收敛 saved servers 为空时额外 `@host.invalid` 占位卡，贴近 Java remote 区域；
+  2. Settings/Language：继续补 `ScrollPane + Styles.flatTogglet` 的 hover/pressed/scrollbar knob 细节；
+  3. 字体/语言：资源文件已齐，重点放在渲染链与 `.properties`/bundle family Java 语义边角。
+
+## 上一闭环：Fonts.outline 独立 atlas glyph 与 Java 预烘焙边框字体对齐
 
 - 当前总体迁移完成度：约 **98.76%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Fonts.java`：

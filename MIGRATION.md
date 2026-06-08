@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1111. MapList/CustomGame 卡片区接入 Java ScrollPane 显式裁剪
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.77%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/MapListDialog.java:92-107`：`mapTable` 放进 `ScrollPane`，`setFadeScrollBars(false)`，`setScrollingDisabledX(true)`，所以 map card / 空态内容必须被 ScrollPane 视口裁剪；
+  - `MapListDialog.java:204-206`：空态只渲染 `@maps.none`，不追加 Rust-only hint/page counter。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_map_list_route_page(...)` 在 pane 边框绘制后、卡片/空态绘制前压入 `RenderCommand::set_clip(pane)`；
+    - 卡片/空态绘制结束后立即 `RenderCommand::clear_clip()`，确保 `push_map_card_dialog`、filter dialog、editor import/export 等 overlay 不被错误裁掉；
+    - 增强 `desktop_launcher_map_list_search_and_scroll_filter_visible_cards`，断言第一张可见 map card 的 `DrawSprite` 被包在 pane `SetClip` 与 `ClearClip` 之间，并继续锁定 Java 不绘制额外页码、不渲染 `@maps.none` 以外的空态 hint。
+  - `README.md`
+    - 迁移进度更新到 **98.77%**。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_map_list_search_and_scroll_filter_visible_cards --no-default-features`
+  - `cargo test -p mindustry-desktop --lib map_list --no-default-features`
+  - `cargo fmt`
+  - `git diff --check`
+
 ## 1110. Fonts.outline 独立 atlas glyph 与 Java 预烘焙边框字体对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
