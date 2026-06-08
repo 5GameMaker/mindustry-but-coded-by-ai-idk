@@ -3,6 +3,7 @@
 pub mod base_dialog;
 pub mod full_text_dialog;
 pub mod keybind_dialog;
+pub mod language_dialog;
 pub mod map_locales_dialog;
 
 pub use base_dialog::{
@@ -11,6 +12,11 @@ pub use base_dialog::{
 };
 pub use full_text_dialog::FullTextDialog;
 pub use keybind_dialog::{KeybindDialog, KeybindDialogRow};
+pub use language_dialog::{
+    LanguageDialog, LanguageDialogLocale, LanguageDialogRow, LANGUAGE_DIALOG_RESTART_MESSAGE_KEY,
+    LANGUAGE_DIALOG_ROW_HEIGHT, LANGUAGE_DIALOG_ROW_WIDTH, LANGUAGE_DIALOG_TABLE_MARGIN_HORIZONTAL,
+    LANGUAGE_DIALOG_TITLE_KEY,
+};
 pub use map_locales_dialog::{
     MapLocalesDialog, MapLocalesDialogLocaleAddRow, MapLocalesDialogLocaleEntry,
     MapLocalesDialogLocaleRow, MapLocalesDialogMainCard, MapLocalesDialogPropertyStatus,

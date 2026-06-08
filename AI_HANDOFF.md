@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.92%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.93%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,41 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：MapLocales 补齐剩余语言显示名
+## 最新闭环：接入 LanguageDialog core 模型
+
+- 当前总体迁移完成度：约 **98.93%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java`：
+  - `super("@settings.language")`；
+  - `langs.marginRight(24f).marginLeft(24f)`；
+  - 每个语言按钮 `size(400f, 50f)`；
+  - 点击不同 locale 后写设置并 `ui.showInfo("@language.restart")`；
+  - `findClosestLocale()` 先 exact，再 same language，最后 `en`。
+- 本轮实现：
+  - `core/src/mindustry/ui/dialogs/language_dialog.rs`
+    - 新增 `LanguageDialog` / `LanguageDialogLocale` / `LanguageDialogRow`；
+    - 固定导出 `LANGUAGE_DIALOG_ROW_WIDTH = 400.0`、`LANGUAGE_DIALOG_ROW_HEIGHT = 50.0`、`LANGUAGE_DIALOG_TABLE_MARGIN_HORIZONTAL = 24.0`、`LANGUAGE_DIALOG_RESTART_MESSAGE_KEY = "@language.restart"`；
+    - 新增 core 测试覆盖按钮 metrics、restart notice、closest locale 顺序。
+  - `core/src/mindustry/ui/dialogs/mod.rs`
+    - 导出 LanguageDialog 模型和常量。
+  - `desktop/src/lib.rs`
+    - Settings/Language 的行高、宽度、左右 margin、restart key 改为引用 core LanguageDialog 常量；
+    - 新增 `settings_language_dialog_model_like_java()`；
+    - `push_settings_language_dialog_content(...)` 改为从 `LanguageDialog::rows()` 读取 display/selected/metric，再由 desktop 负责 ScrollPane 裁剪与绘制。
+- 验证：
+  - `cargo test -p mindustry-core language_dialog_ -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_scrolls_by_subrow_pixels_like_java_scrollpane -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_settings_language_select_persists_locale_and_emits_restart_notice_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_keeps_400x50_rows_and_margin_24_stable_across_window_sizes_and_avoids_page_number_text -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_visible_rows_reach_real_opengl_quads_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_covers_language_dialog_display_names_like_java -- --nocapture`
+  - `cargo fmt --all`
+- 下一步建议继续：
+  1. Load/Save 子菜单视觉：搜索条、filter chip、存档卡片、操作图标和点击穿透；
+  2. Settings/Language 字号、默认字体 shadow、outline 预烘焙字形继续审查；
+  3. Join、CustomGame、Database/ContentInfo 子菜单视觉继续按 Java 源码收口；
+  4. 继续保证所有 core dialog 模型接入 desktop/runtime 主链路，不要做孤立模块。
+
+## 上一闭环：MapLocales 补齐剩余语言显示名
 
 - 当前总体迁移完成度：约 **98.92%**，仍未达到完整可玩。
 - 本轮继续对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/editor/MapLocalesDialog.java` 的 `loc.getDisplayName(Core.bundle.getLocale())`，把剩余 `be/bg/ca/et/eu/fil/lt/sr/th/tk/uk_UA` UI locale 的 Java display-name 表接到 Rust MapLocales 路径。
@@ -49,7 +83,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   3. 继续审查真实字体 atlas 对新增变音符/非拉丁字形的渲染质量；
   4. Load/Save、Join、CustomGame、Database/ContentInfo 子菜单视觉继续按 Java 源码收口。
 
-## 上一闭环：MapLocales 补齐捷克丹麦芬兰匈牙利罗马尼亚瑞典显示名
+## 更早闭环：MapLocales 补齐捷克丹麦芬兰匈牙利罗马尼亚瑞典显示名
 
 - 当前总体迁移完成度：约 **98.91%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/editor/MapLocalesDialog.java` 的 `loc.getDisplayName(Core.bundle.getLocale())`，用本机 JDK 17 生成 `cs/da/fi/hu/ro/sv` display locale 下所有 `core/assets/locales` code 的显示名。

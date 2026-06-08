@@ -35689,3 +35689,45 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings/Language 字号、默认字体 shadow、outline 预烘焙字形仍需继续与 Java `Fonts`/`Styles` 对齐；
   - Load/Save、Join、CustomGame、Database/ContentInfo 子菜单视觉和交互状态仍需继续逐项对照 Java；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1063. 接入 LanguageDialog core 模型
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **98.93%**，仍未达到完整可玩；继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java` 构造函数使用 `super("@settings.language")`；
+  - `setup()` 中 `langs.marginRight(24f).marginLeft(24f)`；
+  - 每个 `TextButton` 使用 `Styles.flatTogglet`，尺寸固定 `400f x 50f`；
+  - 点击不同语言写入 `Core.settings.put("locale", loc.toString())`、更新 `player.locale`，并 `ui.showInfo("@language.restart")`；
+  - `findClosestLocale()` 的顺序是 exact locale、same language、fallback `en`。
+- 本轮主改动：
+  - `core/src/mindustry/ui/dialogs/language_dialog.rs`
+    - 新增 `LanguageDialog` / `LanguageDialogLocale` / `LanguageDialogRow`；
+    - 新增并导出 `LANGUAGE_DIALOG_TITLE_KEY`、`LANGUAGE_DIALOG_RESTART_MESSAGE_KEY`、`LANGUAGE_DIALOG_ROW_WIDTH`、`LANGUAGE_DIALOG_ROW_HEIGHT`、`LANGUAGE_DIALOG_TABLE_MARGIN_HORIZONTAL`；
+    - `rows()` 产出 Java `ButtonGroup<TextButton>` 视角的语言行模型；
+    - `select_locale(...)` 只在切换语言时产出 `@language.restart`；
+    - `find_closest_locale_code(...)` 固化 Java exact → same language → en 顺序；
+    - 新增 3 个 core 单测覆盖 metrics、restart notice、closest locale。
+  - `core/src/mindustry/ui/dialogs/mod.rs`
+    - 导出 LanguageDialog 模型和常量。
+  - `desktop/src/lib.rs`
+    - Settings/Language 的行宽、行高、左右 margin 和 restart key 改为引用 core LanguageDialog 常量；
+    - 新增 `settings_language_dialog_model_like_java()`；
+    - `push_settings_language_dialog_content(...)` 改为读取 `LanguageDialog::rows()` 的 display/selected/metric，再由 desktop 做 ScrollPane 裁剪、滚动条和绘制，避免 LanguageDialog 结构继续散落。
+  - `README.md`
+    - 迁移进度更新到 **98.93%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 LanguageDialog core 模型接入。
+- 已验证：
+  - `cargo test -p mindustry-core language_dialog_ -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_scrolls_by_subrow_pixels_like_java_scrollpane -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_settings_language_select_persists_locale_and_emits_restart_notice_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_keeps_400x50_rows_and_margin_24_stable_across_window_sizes_and_avoids_page_number_text -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_visible_rows_reach_real_opengl_quads_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_covers_language_dialog_display_names_like_java -- --nocapture`
+  - `cargo fmt --all`
+- 仍未完成：
+  - Load/Save 子菜单视觉仍需继续对齐 Java `LoadDialog` / `SaveDialog`：搜索条、filter chip、存档卡片、操作图标、点击穿透；
+  - Settings/Language 字号、默认字体 shadow、outline 预烘焙字形仍需继续审查；
+  - Join、CustomGame、Database/ContentInfo 子菜单视觉和交互状态仍需继续逐项对照 Java；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
