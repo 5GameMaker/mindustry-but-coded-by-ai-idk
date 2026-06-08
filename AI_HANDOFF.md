@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.18%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.19%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，字体与语言链路继续优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：接入 MapLocales addIconDialog 桌面真 UI
+## 最新闭环：收口 Settings Data 长本地化确认弹窗与星球文案兜底
+
+- 当前总体迁移完成度：约 **99.19%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:124-163`：PlanetData 清理确认使用 `Planet.localizedName`，不会把内部 planet id 直接显示到 UI；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:175-289`：Data 页确认流走 `ui.showConfirm(...)` 的 wrapped label/自动布局；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java:63-65`：`in_ID` 需先归一到 `id_ID` 再查 displayNames。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - Settings Data 确认弹窗根据本地化正文估算 wrap 行数并动态增高；
+    - OK/Cancel 命中框与渲染共用同一个动态 dialog rect；
+    - selected planet 文案在陈旧/缺失时回退到 Java 默认 `Planets.serpulo` 的 `localizedName` 与 `iconColor`；
+    - `in_ID -> id_ID` alias 覆盖到静态语言 display-name helper 的测试路径。
+  - `README.md`
+    - 迁移进度更新到 **99.19%**。
+  - `MIGRATION.md`
+    - 新增 `1143. 收口 Settings Data 长本地化确认弹窗与星球文案兜底`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_display_name_falls_back_to_locale_code_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_data_confirm_dialog_wraps_long_locales_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_planet_label_falls_back_to_serpulo_localized_name_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib -- --nocapture`
+- 下一步建议继续：
+  1. LanguageDialog/BaseDialog raw-key 标题链继续核对非 desktop 入口是否会真实落屏；
+  2. Settings 首页/Data 页剩余遮罩层、按钮间距、back 优先级继续按 Java Scene2D 行为收口；
+  3. 主菜单/Join/Host/About 入口若仍有英文 fallback，先确认是否为 upstream bundle 缺项；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 上一闭环：接入 MapLocales addIconDialog 桌面真 UI
 
 - 当前总体迁移完成度：约 **99.18%**，仍未达到完整可玩。
 - 本轮对照：
@@ -54,7 +83,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   3. Settings 首页/Data 页、Load/Save、Mods、ContentInfo 的可见 chrome 继续按 Java 原版逐项收口；
   4. font/icon token gate 与真实渲染字体选择仍需继续接入，不能宣告目标完成。
 
-## 上一闭环：收口 Mods View Content 图标 tooltip chrome
+## 再上一闭环：收口 Mods View Content 图标 tooltip chrome
 
 - 当前总体迁移完成度：约 **99.17%**，仍未达到完整可玩。
 - 本轮对照：

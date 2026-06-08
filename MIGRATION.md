@@ -19,6 +19,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1143. 收口 Settings Data 长本地化确认弹窗与星球文案兜底
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.19%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:124-163`：PlanetData 清理确认使用当前 `Planet.localizedName`，不会把内部 planet id 直接显示到 UI；
+  - `core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:175-289`：Data 页 `ui.showConfirm(...)` 的确认体走 Java/Scene2D wrapped label，而不是固定高度硬裁剪；
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java:63-65`：`in_ID` 需先归一到 `id_ID` 再查 displayNames。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Settings Data 确认弹窗改为按本地化正文估算 wrap 行数并动态增高，同时 OK/Cancel 命中框共用同一个 Java-like rect；
+    - PlanetData 的 selected planet 文案在状态缺失/陈旧时回退到 Java 默认 `Planets.serpulo` 的 `localizedName` 与 `iconColor`，避免暴露 raw id；
+    - 扩展语言 alias 测试，覆盖 `settings_language_display_name_static_for_code("in_ID")`；
+    - 新增长本地化确认弹窗与 selected planet 兜底回归测试。
+  - `README.md`
+    - 迁移进度更新到 **99.19%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 Settings Data 长本地化确认弹窗与星球文案兜底。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_display_name_falls_back_to_locale_code_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_data_confirm_dialog_wraps_long_locales_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_planet_label_falls_back_to_serpulo_localized_name_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib -- --nocapture`
+- 后续继续优先：
+  1. 按子代理审查结果继续排查 LanguageDialog/BaseDialog raw-key 标题链在非 desktop 入口的真实落屏可能；
+  2. Settings 首页/Data 页剩余遮罩层、按钮间距、back 优先级继续按 Java Scene2D 行为收口；
+  3. 主菜单/Join/Host/About 等入口若仍出现英文 fallback，优先确认是否是 upstream bundle 缺项，再决定是否只保留 Java fallback；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1142. 接入 MapLocales addIconDialog 桌面真 UI
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
