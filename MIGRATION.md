@@ -19,6 +19,39 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1148. 收口 Campaign/TechTree 文本防漏与 Settings defaultt 按钮 chrome
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.25%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/ResearchDialog.java`、`ContentInfoDialog.java` 与 `PlanetDialog.java`：TechTree/Database/Campaign 可见标题、按钮与 sector stats 文案应在最终 `DrawText` 前完成 bundle 解析；
+  - `core/src/mindustry/ui/Styles.java`、`SettingsMenuDialog.java`、`KeybindDialog.java`、`BaseDialog.java`：`defaultt` 与 `flatt/grayt/flatTogglet` 一样依赖 Java drawable 自带 chrome，不应额外叠 Rust-only 描边；
+  - `LoadDialog.java`：模式筛选 tooltip 使用本地化 label；Rust 宽度估算不能因 UTF-8 多字节字节数导致中文等 locale tooltip 过宽。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Campaign/TechTree/Database 多个最终 `RenderCommand::DrawText` 路径新增 raw-key 防漏断言，覆盖 `@techtree.select`、`@database`、`@globalitems`、`@info.title`、`@viewfields`、`@campaign.*`、`@sectors.*`、`@sector.abandon` 等；
+    - LoadGame 模式筛选 hover tooltip 宽度从 `label.len()` 改为 `label.chars().count()`，避免多字节本地化文本放大宽度；
+    - Settings `settings_text_button_style_uses_java_drawable_border(...)` 将 `defaultt` 纳入 Java drawable border 白名单，reset/back/BaseDialog back 不再额外绘制 Rust-only `StrokeRect`；
+    - 扩展 Settings reset/back 与 child dialog back 测试，锁住 Java `defaultt` chrome、210x64 footer/back 尺寸与无额外描边。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_menu_route_shell_uses_content_start_sector --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_techtree_route_renders_research_dialog_shell_and_graph --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_techtree_node_detail_opens_content_info_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_database_content_info_dialog_renders_team_extra_after_viewfields --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_renders_planetdialog_like_sector_stats --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_shows_initial_campaign_select_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_shows_serpulo_rework_notice_once_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_opens_sector_submission_link_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_launch_mode_hides_rules_and_sectorlist_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_pages_render_reset_and_back_buttons --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_dialog_back_buttons_use_java_basedialog_metrics --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. 继续收口 Settings/Language/Controls 的最终 `DrawText` raw-key 防漏、字体 fallback、CJK/Unicode fallback 与真实 atlas 表现；
+  2. 继续对照 Java 主菜单、Play/Campaign/CustomGame/JoinHost 全部子菜单的布局、按钮状态、tooltip、hover/pressed/disabled 与语言行为；
+  3. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1147. 收口 Load/Save/Mods 最终文本本地化
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

@@ -10,9 +10,9 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.24%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.25%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
-- 当前短期优先级：原版 UI/前端还原优先，字体与语言链路继续优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
+- 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
@@ -27,7 +27,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 Load/Save/Mods 最终文本本地化
+## 最新闭环：收口 Campaign/TechTree 文本防漏与 Settings defaultt 按钮 chrome
+
+- 当前总体迁移完成度：约 **99.25%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/ResearchDialog.java`、`ContentInfoDialog.java`、`PlanetDialog.java`：TechTree/Database/Campaign 可见标题、按钮与 sector stats 文案应在最终 `DrawText` 前完成 bundle 解析；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Styles.java`、`SettingsMenuDialog.java`、`KeybindDialog.java`、`BaseDialog.java`：`defaultt` 按钮 chrome 依赖 Java drawable 自带边框，不应叠 Rust-only `StrokeRect`；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LoadDialog.java`：模式筛选 tooltip 使用本地化 label，宽度估算不能因 UTF-8 字节数导致中文等 locale 过宽。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - Campaign/TechTree/Database 多个最终 `RenderCommand::DrawText` 路径新增 raw-key 防漏断言；
+    - LoadGame 模式筛选 hover tooltip 宽度从 `label.len()` 改为 `label.chars().count()`；
+    - Settings `defaultt` 纳入 Java drawable border 白名单，reset/back/BaseDialog back 不再额外绘制 Rust-only `StrokeRect`；
+    - 扩展 Settings reset/back 与 child dialog back 测试，锁住 Java `defaultt` chrome、210x64 footer/back 尺寸与无额外描边。
+  - `README.md`
+    - 迁移进度更新到 **99.25%**。
+  - `MIGRATION.md`
+    - 新增 `1148. 收口 Campaign/TechTree 文本防漏与 Settings defaultt 按钮 chrome`。
+- 验证：
+  - 已通过 Campaign/TechTree/Database/Settings/Load tooltip 本轮 12 个定向 UI/语言测试；
+  - 已通过 `cargo build -p mindustry-desktop --features opengl-native-runtime`。
+- 下一步建议继续：
+  1. 优先继续 Settings/Language/Controls 的最终 `DrawText` raw-key 防漏、字体 fallback、CJK/Unicode fallback 与真实 atlas 表现；
+  2. 继续对照 Java 主菜单、Play/Campaign/CustomGame/JoinHost 全部子菜单的布局、按钮状态、tooltip、hover/pressed/disabled 与语言行为；
+  3. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
+## 上一闭环：收口 Load/Save/Mods 最终文本本地化
 
 - 当前总体迁移完成度：约 **99.24%**，仍未达到完整可玩。
 - 本轮对照：
@@ -44,7 +69,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `MIGRATION.md`
     - 新增 `1147. 收口 Load/Save/Mods 最终文本本地化`。
 - 验证：
-  - 已通过 Load/Save/Mods 本轮 10 个定向 UI/语言测试；具体命令见 `MIGRATION.md` 最新条目。
+  - 已通过 Load/Save/Mods 本轮 10 个定向 UI/语言测试；具体命令见 `MIGRATION.md` 对应条目。
 - 下一步建议继续：
   1. 优先继续 Settings 子页字体/图标/按钮节奏、语言默认 locale 落盘、Load/Save tooltip chrome；
   2. 继续推进 Campaign/TechTree/Database/Join 的最终 DrawText 防漏和视觉对齐；
