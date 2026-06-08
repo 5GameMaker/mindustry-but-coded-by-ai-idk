@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1151. 收口 Campaign LaunchLoadout 候选卡片 debug 文案
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.28%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LaunchLoadoutDialog.java:167-201`：候选 loadout 区域通过 `SchematicImage` 按钮展示可选 schematic；
+  - Java 不会在候选卡片上额外绘制 `coreName / size N` 这类 Rust-only 文案。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 移除 Campaign LaunchLoadout 候选卡片第二行 `coreName / size N`；
+    - 扩展 `desktop_launcher_campaign_launch_button_opens_loadout_then_seeds_playable_smoke_world`，断言最终 `DrawText` 不含 ` / size `，并补 `@configure/@resources.max/@resources/@launch.text/@launch.from/@launch.capacity/@sector.missingresources` raw-key 防漏。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_button_opens_loadout_then_seeds_playable_smoke_world --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_picker_supports_more_than_four_candidates_like_java --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. 继续对照 Java LaunchLoadout 的 `SchematicImage` 视觉、资源 item row、disabled/checked 按钮状态；
+  2. 继续补 SectorSelectDialog 搜索/列表弹窗和 Campaign locked hover text；
+  3. Settings/Language/Controls 字体、CJK/Unicode fallback 和所有子菜单视觉仍需继续逐项收口。
+
 ## 1150. 接入 Campaign PlanetDialog hoverLabel 文本
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

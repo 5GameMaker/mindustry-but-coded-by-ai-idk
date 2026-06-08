@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.27%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.28%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：接入 Campaign PlanetDialog hoverLabel 文本
+## 最新闭环：收口 Campaign LaunchLoadout 候选卡片 debug 文案
+
+- 当前总体迁移完成度：约 **99.28%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LaunchLoadoutDialog.java:167-201`：候选 loadout 区域通过 `SchematicImage` 按钮展示可选 schematic；
+  - Java 不会在候选卡片上额外绘制 `coreName / size N` 这类 Rust-only 文案。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 移除 Campaign LaunchLoadout 候选卡片第二行 `coreName / size N`；
+    - 扩展 LaunchLoadout 主测试，断言最终 `DrawText` 不含 ` / size `，并补 `@configure/@resources.max/@resources/@launch.text/@launch.from/@launch.capacity/@sector.missingresources` raw-key 防漏。
+  - `README.md`
+    - 迁移进度更新到 **99.28%**。
+  - `MIGRATION.md`
+    - 新增 `1151. 收口 Campaign LaunchLoadout 候选卡片 debug 文案`。
+- 验证：
+  - 已通过 Campaign LaunchLoadout 本轮 2 个定向 UI 测试；
+  - 已通过 `cargo build -p mindustry-desktop --features opengl-native-runtime`。
+- 下一步建议继续：
+  1. 继续对照 Java LaunchLoadout 的 `SchematicImage` 视觉、资源 item row、disabled/checked 按钮状态；
+  2. 继续补 SectorSelectDialog 搜索/列表弹窗和 Campaign locked hover text；
+  3. Settings/Language/Controls 字体、CJK/Unicode fallback 和所有子菜单视觉仍需继续逐项收口。
+
+## 上一闭环：接入 Campaign PlanetDialog hoverLabel 文本
 
 - 当前总体迁移完成度：约 **99.27%**，仍未达到完整可玩。
 - 本轮对照：
