@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.88%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.89%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：MapLocales 越南语与荷兰语显示名补齐
+## 最新闭环：JoinDialog 卡片列数边界对齐 Java
+
+- 当前总体迁移完成度：约 **98.89%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java` 的 `targetWidth()` / `columns()`：
+  - Java 用 `Core.graphics.getWidth() / Scl.scl() * 0.9f` 计算可用宽度；
+  - `targetWidth()` 上限为 `550f`；
+  - `columns()` 对比例执行 Java `(int)` 截断后 clamp 到 `1..4`。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `join_route_server_card_target_width_for_graphics_width_like_java(...)`；
+    - 新增 `join_route_server_card_columns_for_graphics_width_like_java(...)`；
+    - 新增 `join_route_graphics_width_from_panel_like_java(...)`；
+    - `join_route_server_card_columns_for_panel(...)` 改为显式走 Java helper；
+    - 新增 `desktop_launcher_join_route_saved_server_columns_match_java_at_resize_edges`，锁定 1/2/3/4 列临界点。
+- 验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_server_columns_match_java_at_resize_edges -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_uses_java_like_grid_slots_for_local_and_saved_servers -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_resize_refreshes_when_columns_change_like_java -- --nocapture`
+  - `cargo fmt --all`
+  - `git diff --check`
+  - 说明：宽前缀 `cargo test -p mindustry-desktop desktop_launcher_join_route_ -- --nocapture` 中 42 个通过，既有 `desktop_launcher_join_route_connect_button_uses_connect_target_helper` 在 `state.connect_packet_sent` 失败；该失败与本轮列数 helper 无直接改动关系，后续单独排查。
+- 下一步建议继续：
+  1. JoinDialog 卡片文本按 Java `wrap()` / `ellipsis(true)` 对齐，不动已稳定的 tooltip/命中逻辑；
+  2. 继续补剩余 MapLocales UI family，并保证显示名表和字体 seed 强绑定；
+  3. Load/Save、Settings、CustomGame、Database/ContentInfo 子菜单视觉继续按 Java 源码收口。
+
+## 上一闭环：MapLocales 越南语与荷兰语显示名补齐
 
 - 当前总体迁移完成度：约 **98.88%**，仍未达到完整可玩。
 - 本轮继续对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/editor/MapLocalesDialog.java` 的 `Locale.getDisplayName(Core.bundle.getLocale())`。
@@ -44,8 +70,8 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo fmt`
   - `git diff --check`
 - 下一步建议继续：
-  1. 等待/整合 JoinDialog saved server card explorer 结果；
-  2. 继续补剩余 MapLocales UI family；
+  1. 继续补剩余 MapLocales UI family；
+  2. JoinDialog saved server 卡片文本 wrap/ellipsis 继续按 Java 核对；
   3. Load/Save 和 Database/ContentInfo 子菜单视觉继续按 Java 源码收口。
 
 ## 上一闭环：Mod bundle 覆盖 global.properties 优先级

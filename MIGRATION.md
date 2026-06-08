@@ -35545,3 +35545,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - wrap 后的 markup 分段、更多 Arc color names、嵌套 tag 与非法 tag 的精确 Arc 行为仍需继续对照；
   - UI 文本 markup 的逐菜单视觉审查仍需继续，尤其是 Join/Host/Database/Planet/Mods/ContentInfo 等大量 `[accent]` 文本；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1059. JoinDialog 卡片列数边界对齐 Java
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **98.89%**，仍未达到完整可玩；继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java`：
+    - `targetWidth()` 返回 `Math.min(Core.graphics.getWidth() / Scl.scl() * 0.9f, 550f)`；
+    - `columns()` 返回 `Mathf.clamp((int)((Core.graphics.getWidth() / Scl.scl() * 0.9f) / targetWidth()), 1, 4)`；
+    - 关键是先按 `Core.graphics.getWidth()/Scl.scl()` 计算，再经 Java `(int)` 截断，而不是按 Rust 当前 panel 宽度直接近似。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 拆出 `join_route_server_card_target_width_for_graphics_width_like_java(...)`；
+    - 拆出 `join_route_server_card_columns_for_graphics_width_like_java(...)`；
+    - 拆出 `join_route_graphics_width_from_panel_like_java(...)`，继续从 Join route panel 反推 Java graphics width；
+    - `join_route_server_card_columns_for_panel(...)` 改为显式走 Java helper，降低后续前端缩放和 panel 调整时列数漂移风险；
+    - 新增 `desktop_launcher_join_route_saved_server_columns_match_java_at_resize_edges`，锁定 1/2/3/4 列边界。
+  - `README.md`
+    - 迁移进度更新到 **98.89%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_server_columns_match_java_at_resize_edges -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_uses_java_like_grid_slots_for_local_and_saved_servers -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_resize_refreshes_when_columns_change_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_ -- --nocapture`：42 个通过，既有 `desktop_launcher_join_route_connect_button_uses_connect_target_helper` 失败，失败点为 `state.connect_packet_sent`，与本轮列数/布局 helper 无直接改动关系，后续需单独排查联机 helper 异步状态。
+  - `cargo fmt --all`
+  - `git diff --check`
+- 仍未完成：
+  - JoinDialog 卡片文本仍需继续按 Java `wrap()` / `ellipsis(true)` 对齐，尤其是已保存服务器标题、描述、map/mode 行与 community host 标题；
+  - MapLocales 对剩余 UI locale 的 `Locale.getDisplayName(Core.bundle.getLocale())` 覆盖仍需继续补齐，并保证显示名表和字体 seed 强绑定；
+  - Settings/Load/Save/CustomGame/Database 等前端子菜单视觉、字体、语言和交互状态仍需继续逐项对照 Java；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
