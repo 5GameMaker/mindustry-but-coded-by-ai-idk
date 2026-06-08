@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1176. 补齐 LanguageDialog 行按钮视觉语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.53%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java`：每个 locale 行使用 `new TextButton(getDisplayName(loc), Styles.flatTogglet)`；
+  - Java TextButton 文本走默认 UI 字体 `Fonts.def`，行尺寸 `400f x 50f`，左右 margin `24f`。
+- 本轮主改动：
+  - `core/src/mindustry/ui/dialogs/language_dialog.rs`
+    - 新增 `LANGUAGE_DIALOG_ROW_TEXT_BUTTON_STYLE = "flatTogglet"`；
+    - 新增 `LANGUAGE_DIALOG_ROW_FONT = RenderFontId::Default`；
+    - `LanguageDialogRow` 增加 `button_style` 与 `font` 字段，让 core 模型显式携带 Java 行按钮视觉/字体语义；
+    - 更新 LanguageDialog core 测试期望，锁住 `400x50 + flatTogglet + Fonts.def`。
+  - `README.md`
+    - 迁移进度更新到 **99.53%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 LanguageDialog 行按钮视觉语义补齐。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core language_dialog_rows_match_java_button_group_metrics --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core language_dialog_accepts_prelocalized_title_and_button_texts_before_render --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. 继续补 MapLocalesDialog 中 Java outlineLabel、filterStyle、颜色/disabled 语义；
+  2. 继续审查可见 DrawText 中的 raw key、英文 token、类名和诊断格式；
+  3. Settings/Data 与字体/语言可见层继续隔离 fallback 泄漏。
+
 ## 1175. 清理 CustomRulesDialog 调试类名叠字
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

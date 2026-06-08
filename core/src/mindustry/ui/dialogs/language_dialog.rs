@@ -1,12 +1,15 @@
 //! Language dialog model mirroring upstream `mindustry.ui.dialogs.LanguageDialog`.
 
 use super::BaseDialog;
+use crate::mindustry::graphics::RenderFontId;
 
 pub const LANGUAGE_DIALOG_TITLE_KEY: &str = "@settings.language";
 pub const LANGUAGE_DIALOG_RESTART_MESSAGE_KEY: &str = "@language.restart";
 pub const LANGUAGE_DIALOG_ROW_WIDTH: f32 = 400.0;
 pub const LANGUAGE_DIALOG_ROW_HEIGHT: f32 = 50.0;
 pub const LANGUAGE_DIALOG_TABLE_MARGIN_HORIZONTAL: f32 = 24.0;
+pub const LANGUAGE_DIALOG_ROW_TEXT_BUTTON_STYLE: &str = "flatTogglet";
+pub const LANGUAGE_DIALOG_ROW_FONT: RenderFontId = RenderFontId::Default;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanguageDialogLocale {
@@ -30,6 +33,8 @@ pub struct LanguageDialogRow {
     pub selected: bool,
     pub button_width: f32,
     pub button_height: f32,
+    pub button_style: &'static str,
+    pub font: RenderFontId,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -97,6 +102,8 @@ impl LanguageDialog {
                 selected: locale.code == self.selected_locale,
                 button_width: LANGUAGE_DIALOG_ROW_WIDTH,
                 button_height: LANGUAGE_DIALOG_ROW_HEIGHT,
+                button_style: LANGUAGE_DIALOG_ROW_TEXT_BUTTON_STYLE,
+                font: LANGUAGE_DIALOG_ROW_FONT,
             })
             .collect()
     }
@@ -175,6 +182,8 @@ mod tests {
                     selected: false,
                     button_width: 400.0,
                     button_height: 50.0,
+                    button_style: LANGUAGE_DIALOG_ROW_TEXT_BUTTON_STYLE,
+                    font: RenderFontId::Default,
                 },
                 LanguageDialogRow {
                     code: "zh_CN".into(),
@@ -182,6 +191,8 @@ mod tests {
                     selected: true,
                     button_width: 400.0,
                     button_height: 50.0,
+                    button_style: LANGUAGE_DIALOG_ROW_TEXT_BUTTON_STYLE,
+                    font: RenderFontId::Default,
                 },
             ]
         );
@@ -208,6 +219,8 @@ mod tests {
                     selected: false,
                     button_width: 400.0,
                     button_height: 50.0,
+                    button_style: LANGUAGE_DIALOG_ROW_TEXT_BUTTON_STYLE,
+                    font: RenderFontId::Default,
                 },
                 LanguageDialogRow {
                     code: "zh_CN".into(),
@@ -215,6 +228,8 @@ mod tests {
                     selected: true,
                     button_width: 400.0,
                     button_height: 50.0,
+                    button_style: LANGUAGE_DIALOG_ROW_TEXT_BUTTON_STYLE,
+                    font: RenderFontId::Default,
                 },
             ]
         );
@@ -227,6 +242,8 @@ mod tests {
                     selected: false,
                     button_width: 400.0,
                     button_height: 50.0,
+                    button_style: LANGUAGE_DIALOG_ROW_TEXT_BUTTON_STYLE,
+                    font: RenderFontId::Default,
                 },
                 LanguageDialogRow {
                     code: "zh_CN".into(),
@@ -234,6 +251,8 @@ mod tests {
                     selected: true,
                     button_width: 400.0,
                     button_height: 50.0,
+                    button_style: LANGUAGE_DIALOG_ROW_TEXT_BUTTON_STYLE,
+                    font: RenderFontId::Default,
                 },
             ],
             "the legacy rows() path must remain compatible for existing tests and callers"

@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.52%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.53%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：清理 CustomRulesDialog 调试类名叠字
+## 最新闭环：补齐 LanguageDialog 行按钮视觉语义
+
+- 当前总体迁移完成度：约 **99.53%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java`：每个 locale 行使用 `new TextButton(getDisplayName(loc), Styles.flatTogglet)`；
+  - Java TextButton 文本走默认 UI 字体 `Fonts.def`，行尺寸 `400f x 50f`，左右 margin `24f`。
+- 本轮实现：
+  - `core/src/mindustry/ui/dialogs/language_dialog.rs`
+    - 新增 `LANGUAGE_DIALOG_ROW_TEXT_BUTTON_STYLE = "flatTogglet"`；
+    - 新增 `LANGUAGE_DIALOG_ROW_FONT = RenderFontId::Default`；
+    - `LanguageDialogRow` 增加 `button_style` 与 `font` 字段，让 core 模型显式携带 Java 行按钮视觉/字体语义；
+    - 更新 LanguageDialog core 测试期望，锁住 `400x50 + flatTogglet + Fonts.def`。
+  - `README.md`
+    - 迁移进度更新到 **99.53%**。
+  - `MIGRATION.md`
+    - 新增 `1176. 补齐 LanguageDialog 行按钮视觉语义`。
+- 验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core language_dialog_rows_match_java_button_group_metrics --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-core language_dialog_accepts_prelocalized_title_and_button_texts_before_render --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 下一步建议继续：
+  1. 继续补 MapLocalesDialog 中 Java outlineLabel、filterStyle、颜色/disabled 语义；
+  2. 继续审查可见 DrawText 中的 raw key、英文 token、类名和诊断格式；
+  3. Settings/Data 与字体/语言可见层继续隔离 fallback 泄漏。
+
+## 上一闭环：清理 CustomRulesDialog 调试类名叠字
 
 - 当前总体迁移完成度：约 **99.52%**，仍未达到完整可玩。
 - 本轮对照：
