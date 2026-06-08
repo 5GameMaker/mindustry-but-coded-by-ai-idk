@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.78%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.79%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：LanguageDialog 裁剪外行不再响应 hover/click
+## 最新闭环：JoinDialog 空 saved 列表不再绘制 Rust-only invalid 占位卡
+
+- 当前总体迁移完成度：约 **98.79%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java`：
+  - `setupRemote()` 只给真实 saved server 建卡；
+  - `@host.invalid` 只用于真实 saved server 刷新失败 body，不用于 saved 列表为空的占位卡。
+- 本轮实现：
+  - `push_join_route_page(...)` 移除 saved servers 为空时额外 `pane + @host.invalid` fallback；
+  - 新增 `desktop_launcher_join_route_empty_saved_section_does_not_render_placeholder_like_java`；
+  - 验证 `join_route` 时修复 `last_connect_packet_error` modal detail：保留 `Connection error.` + `send failed`，但 reconnect fallback 仍不暴露 Rust-only ping fallback。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_join_route_empty_saved_section_does_not_render_placeholder_like_java --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_join_route_async_net_errors_open_error_modal --no-default-features -- --test-threads=1`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_join_and_host_fallback_errors_use_java_bundle_messages --no-default-features`
+  - `cargo test -p mindustry-desktop --lib join_route --no-default-features -- --test-threads=1`
+  - `cargo fmt`
+  - `git diff --check`
+- 下一步建议继续前端：
+  1. 主菜单桌面态：按钮状态、黑底面板、子菜单间距/淡入淡出；
+  2. Settings：字体/图标尺寸/主行 chrome 与 Java `Styles.flatt`、`Vars.iconMed` 进一步收口；
+  3. Load/Content/Join 列表卡片密度、scrollbar pressed/drag 与 card shell 继续逐项对齐。
+
+## 上一闭环：LanguageDialog 裁剪外行不再响应 hover/click
 
 - 当前总体迁移完成度：约 **98.78%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java`：

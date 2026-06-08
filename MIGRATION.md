@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1113. JoinDialog 空 saved 列表不再绘制 Rust-only invalid 占位卡
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.79%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java:148-206`：`setupRemote()` 只遍历真实 saved `servers` 创建卡片；没有服务器时 remote 区域不画 `@host.invalid` 空卡；
+  - `JoinDialog.java:235-247`：`@host.invalid` 只属于真实 saved server 刷新失败后的 body placeholder。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 移除 `push_join_route_page(...)` 中 saved servers 为空时额外绘制 `pane + @host.invalid` 的 Rust-only fallback；
+    - 新增 `desktop_launcher_join_route_empty_saved_section_does_not_render_placeholder_like_java`，锁定空 saved 列表不渲染 invalid 文案和空 placeholder card；
+    - 验证 `join_route` 时修复 `last_connect_packet_error` modal detail：异步 connect packet error 仍显示 Java `@disconnect.error`，但保留底层 `send failed` 详情；reconnect fallback 仍不暴露 Rust-only ping fallback 文本。
+  - `README.md`
+    - 迁移进度更新到 **98.79%**。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_join_route_empty_saved_section_does_not_render_placeholder_like_java --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_join_route_async_net_errors_open_error_modal --no-default-features -- --test-threads=1`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_join_and_host_fallback_errors_use_java_bundle_messages --no-default-features`
+  - `cargo test -p mindustry-desktop --lib join_route --no-default-features -- --test-threads=1`
+  - `cargo fmt`
+  - `git diff --check`
+
 ## 1112. LanguageDialog 裁剪外行不再响应 hover/click
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
