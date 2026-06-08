@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.82%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.83%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：MapLocales 静态本地化名称纳入字体 seed
+## 最新闭环：主菜单 submenu 按 Java sibling table 层级绘制
+
+- 当前总体迁移完成度：约 **98.83%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/fragments/MenuFragment.java`：
+  - `buildDesktop()` 先添加 main buttons table，再添加 sibling `submenu` table；
+  - Java Scene2D 绘制顺序是 main panel/buttons 整体早于 submenu panel/buttons。
+- 本轮实现：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuUiRenderCommandGroups::into_render_commands(...)` 从旧顺序 `main_background -> submenu_background -> main_buttons -> submenu_buttons` 改为 `main_background -> main_buttons -> submenu_background -> submenu_buttons`；
+    - 更新 `menu_desktop_submenu_panels_keep_java_black6_layering_and_alpha`，断言 Play/Database 根按钮早于 submenu panel，submenu panel 早于 Campaign/Schematics 子按钮；
+    - 将层级测试收敛为 `menu_ui_plan_desktop_draws_submenu_panel_after_main_buttons_like_java_table_hierarchy`。
+- 验证：
+  - `cargo test -p mindustry-core --lib menu_desktop_submenu_panels_keep_java_black6_layering_and_alpha --no-default-features`
+  - `cargo test -p mindustry-core --lib menu_ui_plan_desktop_draws_submenu_panel_after_main_buttons_like_java_table_hierarchy --no-default-features`
+  - `cargo test -p mindustry-core --lib menu_ui_plan_desktop --no-default-features`
+- 下一步建议继续前端：
+  1. 主菜单剩余可见差异：desktop pressed 状态 release 后不应额外保留多帧；
+  2. JoinDialog 可按子代理清单优先收已保存服务器卡片两层 skin、社区组头、tooltip；
+  3. Load/Save 可按子代理清单优先收预览/nomap、删除/重命名/覆盖确认框。
+
+## 上一闭环：MapLocales 静态本地化名称纳入字体 seed
 
 - 当前总体迁移完成度：约 **98.82%**，仍未达到完整可玩。
 - 本轮对照：

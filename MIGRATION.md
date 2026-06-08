@@ -19,6 +19,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1117. 主菜单 submenu 按 Java sibling table 层级绘制
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.83%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:214-245`：`buildDesktop()` 先 `container.table(background, ...)` 创建 main buttons table，再创建 sibling `submenu` table；
+  - Scene2D 按 sibling table 顺序绘制，因此 main panel/buttons 应整体早于 submenu panel/buttons，而不是先画两个 panel 再画两个 table 的按钮。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuUiRenderCommandGroups::into_render_commands(...)` 顺序改为 `main_background -> main_buttons -> submenu_background -> submenu_buttons`；
+    - 更新 `menu_desktop_submenu_panels_keep_java_black6_layering_and_alpha`，断言 Play/Database 根按钮早于 submenu panel，submenu panel 早于 Campaign/Schematics 子按钮；
+    - 将旧层级测试收敛为 `menu_ui_plan_desktop_draws_submenu_panel_after_main_buttons_like_java_table_hierarchy`，锁定 Java sibling table 绘制语义。
+- 验证：
+  - `cargo test -p mindustry-core --lib menu_desktop_submenu_panels_keep_java_black6_layering_and_alpha --no-default-features`
+  - `cargo test -p mindustry-core --lib menu_ui_plan_desktop_draws_submenu_panel_after_main_buttons_like_java_table_hierarchy --no-default-features`
+  - `cargo test -p mindustry-core --lib menu_ui_plan_desktop --no-default-features`
+
 ## 1116. MapLocales 静态本地化名称纳入字体 seed
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

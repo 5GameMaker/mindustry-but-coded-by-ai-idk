@@ -1127,6 +1127,7 @@ impl MenuUiRenderCommandGroups {
                 + self.submenu_buttons.len(),
         );
         commands.extend(self.main_background);
+        commands.extend(self.main_buttons);
         if submenu_alpha > f32::EPSILON {
             commands.extend(
                 self.submenu_background
@@ -1134,7 +1135,6 @@ impl MenuUiRenderCommandGroups {
                     .map(|command| menu_render_command_with_alpha_scale(command, submenu_alpha)),
             );
         }
-        commands.extend(self.main_buttons);
         if submenu_alpha > f32::EPSILON {
             commands.extend(
                 self.submenu_buttons
@@ -4756,15 +4756,37 @@ mod tests {
             RenderRect::new(128.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
             1.0,
         ));
-        assert!(is_black6_panel_command(
-            &play_commands[1],
-            RenderRect::new(358.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
-            play_alpha,
-        ));
-        assert!(play_commands.iter().any(|command| matches!(
-            command,
-            RenderCommand::DrawText { text, .. } if text == "Campaign"
-        )));
+        let play_button_index = play_commands
+            .iter()
+            .position(|command| matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "Play"
+            ))
+            .expect("Java main MenuFragment table should render the PLAY root before the submenu sibling");
+        let play_submenu_panel_index = play_commands
+            .iter()
+            .position(|command| {
+                is_black6_panel_command(
+                    command,
+                    RenderRect::new(358.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
+                    play_alpha,
+                )
+            })
+            .expect("Java submenu sibling table should render a black6 panel");
+        let campaign_button_index = play_commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawText { text, .. } if text == "Campaign"
+                )
+            })
+            .expect("Java submenu sibling table should render Campaign after its panel");
+        assert!(
+            play_button_index < play_submenu_panel_index
+                && play_submenu_panel_index < campaign_button_index,
+            "Java buildDesktop() adds the main buttons table before the submenu sibling table; submenu panel must draw after root buttons but before submenu children"
+        );
 
         assert!(state.select_desktop_root(MenuButtonRole::Database));
         assert_eq!(state.active_root, Some(MenuButtonRole::Database));
@@ -4809,19 +4831,41 @@ mod tests {
             RenderRect::new(128.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
             1.0,
         ));
-        assert!(is_black6_panel_command(
-            &database_commands[1],
-            RenderRect::new(358.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
-            play_alpha,
-        ));
-        assert!(database_commands.iter().any(|command| matches!(
-            command,
-            RenderCommand::DrawText { text, .. } if text == "Schematics"
-        )));
+        let database_button_index = database_commands
+            .iter()
+            .position(|command| matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "Database"
+            ))
+            .expect("Java main MenuFragment table should render the DATABASE root before the submenu sibling");
+        let database_submenu_panel_index = database_commands
+            .iter()
+            .position(|command| {
+                is_black6_panel_command(
+                    command,
+                    RenderRect::new(358.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
+                    play_alpha,
+                )
+            })
+            .expect("Java submenu sibling table should render a black6 panel");
+        let schematics_button_index = database_commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawText { text, .. } if text == "Schematics"
+                )
+            })
+            .expect("Java submenu sibling table should render Schematics after its panel");
+        assert!(
+            database_button_index < database_submenu_panel_index
+                && database_submenu_panel_index < schematics_button_index,
+            "Java click-switching keeps submenu alpha while preserving main-table-then-submenu-table draw order"
+        );
     }
 
     #[test]
-    fn menu_ui_plan_desktop_emits_black6_panels_before_button_draws_like_java_layering() {
+    fn menu_ui_plan_desktop_draws_submenu_panel_after_main_buttons_like_java_table_hierarchy() {
         let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
         assert!(state.select_desktop_root(MenuButtonRole::Database));
 
@@ -4876,15 +4920,40 @@ mod tests {
             RenderRect::new(128.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
             1.0,
         ));
-        assert!(is_black6_panel_command(
-            &commands[1],
-            RenderRect::new(358.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
-            plan.ui.submenu_alpha,
-        ));
-        assert!(commands.iter().skip(2).any(|command| matches!(
-            command,
-            RenderCommand::DrawText { text, .. } if text == "Play"
-        )));
+        let main_button_index = commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawText { text, .. } if text == "Play"
+                )
+            })
+            .expect("main MenuFragment table should draw root button labels");
+        let submenu_panel_index = commands
+            .iter()
+            .position(|command| {
+                is_black6_panel_command(
+                    command,
+                    RenderRect::new(358.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
+                    plan.ui.submenu_alpha,
+                )
+            })
+            .expect("submenu MenuFragment table should draw its black6 panel");
+        let submenu_button_index = commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawText { text, .. } if text == "Schematics"
+                )
+            })
+            .expect("submenu MenuFragment table should draw its child labels");
+        assert!(
+            0 < main_button_index
+                && main_button_index < submenu_panel_index
+                && submenu_panel_index < submenu_button_index,
+            "Java buildDesktop() adds main and submenu as sibling tables; Rust render commands must preserve main panel/buttons before submenu panel/buttons"
+        );
     }
 
     #[test]
