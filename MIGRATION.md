@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1127. 接入 MapLocales property view 子菜单
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.01%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java:289`：主 property card 的 edit 图标打开 `propEditDialog(...)`；
+  - `core/src/mindustry/editor/MapLocalesDialog.java:376-423`：`propEditDialog` 提供 `@locales.addtoother` 与 `@locales.viewproperty` 等动作；
+  - `core/src/mindustry/editor/MapLocalesDialog.java:483-577`：`viewPropertyDialog` 使用 `Core.bundle.format("locales.viewing", key)`，顶部为 filter + TextField + clear，主体按 locale 渲染 property view cards，missing 行可 `@add` 后进入 textarea。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 为 MapLocales 增加 property edit / property view 桌面状态、action、hit-test、Back/Esc 弹窗栈关闭顺序；
+    - 主 property card 的 edit 图标不再只是渲染，现可打开 `@edit` 子弹窗；
+    - `@locales.viewproperty` 接入真实 property view 子弹窗，渲染 locale 显示名、状态色、value TextField、missing add；
+    - property view 的搜索框、clear、filter toggle、missing add、value 文本输入/Backspace/Delete 都接入真实 `MapLocalesDialog` 数据；
+    - 新增 `desktop_launcher_editor_map_locales_property_view_dialog_renders_and_edits_like_java`，锁住 edit→view→missing add→输入→Back 关闭链路。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_locales_property_view_dialog_renders_and_edits_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_locales_search_filter_and_row_selection_match_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_locales_property_add_panel_mutates_selected_or_all_locales_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_locales_property_trash_removes_selected_or_all_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_locales_renders_java_three_pane_content_like_java -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. MapLocales `addicon` / rollback / locale edit / import-export 子弹窗继续对照 Java；
+  2. ModsBrowser selection / release / detail 子弹窗字号、outline 与按钮样式继续收口；
+  3. Host / Join 与主菜单 skin 资源层继续按 Java 原版截图/command diff 收口；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1126. 收口 ModsBrowser 搜索排序与卡片视觉节奏
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
