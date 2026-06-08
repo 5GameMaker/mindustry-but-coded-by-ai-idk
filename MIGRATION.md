@@ -35808,6 +35808,41 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Join、CustomGame、Database/ContentInfo 子菜单视觉和交互状态仍需继续逐项对照 Java；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
 
+## 1065. 收口 ModsDialog 主页面字体节奏与 content icon 字体计数
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **98.98%**，仍未达到完整可玩；继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/ModsDialog.java` 构造使用 `super("@mods")` 与 `addCloseButton()`，主页面标题不是 Rust-only 小号 outline 文本；
+  - `setup()` 中模组卡片使用 `Styles.grayt`，`h = 110f`，图标 `size(h - 8f)`，右侧操作按钮 `Styles.clearNonei` / `50f`；
+  - 模组卡文本是一个默认 labelWrap 节奏的 `[accent]displayName` + `[lightgray]shortDescription` + disabled 文案，而不是 10/10.5/12/13 的压缩小字号；
+  - `Fonts.registerIcon(...)` 会把同一个 content icon glyph 同时写入 `Fonts.def` 和 `Fonts.outline`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `MODS_ROUTE_FONT_SIZE_LIKE_JAVA = SETTINGS_JAVA_DEFAULT_FONT_SIZE`；
+    - ModsRoute 标题、reload required、搜索图标/文本、empty/none-found、卡片标题、短描述、状态文本、操作图标统一回到 Java 默认 UI 字号节奏；
+    - 去掉 Mods 普通 Label 上的额外 runtime outline，并为卡片标题/短描述/状态文本补上 wrap width；
+    - 新增 `DESKTOP_CONTENT_ICON_FONT_GLYPHS_PER_ICON_LIKE_JAVA = 2`，使字体计划中 content icon 按 Default + Outline 两份 glyph 统计；
+    - 扩展 Mods 和字体测试，锁住默认字号、非 outline、wrap 与 content icon 双 glyph 计数。
+  - `README.md`
+    - 迁移进度更新到 **98.98%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 ModsDialog 主页面字体节奏与 content icon 字体计数收口。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_renders_java_like_card_icon_and_short_description -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_search_filters_installed_mod_cards_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_empty_state_uses_java_black6_row -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_renders_state_and_reload_required_like_java_dialog -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_font_rasterization_plan_bridges_fonts_icons_and_texture_atlas -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_font_glyph_upload_plan_emits_runtime_texture_upload_when_ready -- --nocapture`
+- 仍未完成：
+  - ModsBrowser / release / detail 子页面仍需继续按 Java `ModsDialog` 收口；
+  - MapLocalesDialog 桌面层硬编码小字号与 property view dialog 接线仍需继续补齐；
+  - Database/ContentInfo 的 `UnlockableContent.displayDescription()` mod displayName 追加语义仍需继续对齐；
+  - LanguageDialog / Settings 语言视觉仍需在子代理审查失败后重新审查；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1064. 收口 LoadDialog 搜索框视觉
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

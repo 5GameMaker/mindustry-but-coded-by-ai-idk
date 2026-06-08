@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.97%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.98%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,45 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 AboutDialog 默认字体节奏
+## 最新闭环：收口 ModsDialog 主页面字体节奏与 content icon 字体计数
+
+- 当前总体迁移完成度：约 **98.98%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/ModsDialog.java` 与 `core/src/mindustry/ui/Fonts.java`：
+  - `ModsDialog.setup()` 的模组卡片使用 `Styles.grayt`、`h = 110f`、图标 `size(h - 8f)`、右侧 `Styles.clearNonei` / `50f`；
+  - 卡片文本是默认 labelWrap 节奏的 displayName / shortDescription / disabled/state 文案，不是 Rust-only 的 10/10.5/12/13 小字号；
+  - `Fonts.registerIcon(...)` 把 content icon 同时写入 `Fonts.def` 和 `Fonts.outline`，因此 Rust 字体计划统计要按每个 icon 两份 glyph。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `MODS_ROUTE_FONT_SIZE_LIKE_JAVA = SETTINGS_JAVA_DEFAULT_FONT_SIZE`；
+    - ModsRoute 标题、reload required、搜索图标/文本、empty/none-found、卡片标题、短描述、状态文本、操作图标统一回到 Java 默认 UI 字号；
+    - 去掉 Mods 普通 Label 上的 runtime outline，并为卡片标题/短描述/状态文本补 wrap width；
+    - 新增 `DESKTOP_CONTENT_ICON_FONT_GLYPHS_PER_ICON_LIKE_JAVA = 2`，使 content icon 在字体计划中按 Default + Outline 两份 glyph 统计；
+    - 扩展 Mods 与字体测试，锁住默认字号、非 outline、wrap 与双 glyph 计数。
+  - `README.md`
+    - 迁移进度更新到 **98.98%**。
+  - `MIGRATION.md`
+    - 新增 `1065. 收口 ModsDialog 主页面字体节奏与 content icon 字体计数`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_renders_java_like_card_icon_and_short_description -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_search_filters_installed_mod_cards_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_empty_state_uses_java_black6_row -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_renders_state_and_reload_required_like_java_dialog -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_font_rasterization_plan_bridges_fonts_icons_and_texture_atlas -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_font_glyph_upload_plan_emits_runtime_texture_upload_when_ready -- --nocapture`
+- 子代理审查结论摘要：
+  1. MapLocales：尺寸多数已对齐，下一步优先收口 desktop 渲染层硬编码小字号，并补 property view dialog 接线/测试。
+  2. Database/ContentInfo：标题块已在 ScrollPane 内；真实缺口是 `displayDescription()` 还需追加 mod displayName，并覆盖所有 UnlockableContent 语义。
+  3. Fonts：Default/Outline/content icon/router glyph 主链已基本对齐；本轮已修 content icon 字体计划双 glyph 计数。
+  4. Language：本轮 explorer 因模型容量失败，下一轮需要重新派只读审查 LanguageDialog/Settings language。
+- 下一步建议继续：
+  1. ModsBrowser / release / detail 子页面继续按 Java `ModsDialog` 收口；
+  2. MapLocalesDialog 硬编码小字号与 property view dialog 桌面接线；
+  3. Database / ContentInfo 的 `displayDescription()` mod displayName 追加语义；
+  4. 重新审查 LanguageDialog / Settings 语言视觉与 fallback；
+  5. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 上一闭环：收口 AboutDialog 默认字体节奏
 
 - 当前总体迁移完成度：约 **98.97%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/AboutDialog.java`：
@@ -46,11 +84,6 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo test -p mindustry-desktop desktop_launcher_about_menu_route_renders_upstream_credits_links_and_contributors -- --nocapture`
   - `cargo test -p mindustry-desktop desktop_launcher_about_route_scrolls_links_and_credits_like_scrollpane -- --nocapture`
   - `git diff --check`
-- 下一步建议继续：
-  1. ModsRoute / ModsBrowser 卡片字号、搜索条和列表密度按 Java `ModsDialog` 收口；
-  2. Database / ContentInfo 标题、正文、ScrollPane 节奏按 Java `DatabaseDialog` / `ContentInfoDialog` 收口；
-  3. MapLocalesDialog 语言行/属性卡字号继续向 Java 默认 label/button 节奏靠拢；
-  4. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
 
 ## 上一闭环：接入 JoinDialog 字体 dirty 抑制窗口
 
