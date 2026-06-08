@@ -19,6 +19,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1131. 收口 ModsDialog 缺值占位与错误文本 raw bundle 语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.05%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/ModsDialog.java:552-554`：browser selection 使用 `BaseDialog(mod.name)`，正文直接拼 `mod.description`、本地化 `editor.author` 标签与原始 `mod.author`；
+  - `core/src/mindustry/core/UI.java:499-509`：`showErrorMessage(String text)` 正文直接显示 `text`；
+  - `core/src/mindustry/core/UI.java:518-531`：`showException(String text, Throwable exc)` 只有 `text.startsWith("@")` 时才对开头 key 做 bundle 查找。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `mods_browser_selection_description_at_index(...)` 缺 description 时不再注入 `@none`；
+    - ModsBrowser selection 弹窗缺 author 时不再注入 `@unknown`，保持 Java 直接拼接动态值的语义；
+    - 新增 `localize_leading_bundle_key_text_like_java(...)`，仅在错误文本开头是 `@bundle.key` 时本地化开头 key，中间出现的 `@error.title` 等动态错误片段保持 raw；
+    - LoadGame error、Mods GitHub import error、Mods directory error 弹窗统一使用 Java 式 leading-key 本地化语义，避免 raw exception 中间的 `@token` 被误翻译。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_import_github_error_dialog_keeps_raw_inline_at_tokens_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_directory_error_opens_modal_instead_of_inline_banner -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_selection_dialog_omits_missing_author_and_description_placeholders_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_selection_dialog_renders_details_and_buttons -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. Settings/Language：`default` locale 打开语言页时应物化为 closest locale，并避免 `LANGUAGE` 环境变量覆盖 Java `Locale.getDefault()` 路径；
+  2. Settings 子页通用按钮字号、图标字号、icon/label 间距继续按 Java `TextButtonStyle` 收口；
+  3. 字体/内容图标：收紧 content icon 注册与 `:token:` 替换 gate，继续对齐 Java `Fonts.registerIcon` / `Iconc.codes`；
+  4. 主菜单 chrome：Logo/版本、Discord/info/BE 按钮、mobile gutter 继续补齐；
+  5. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1130. 收口 JoinDialog 动态描述与 modeName 本地化语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
