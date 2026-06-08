@@ -3,7 +3,13 @@
 use std::collections::BTreeMap;
 
 use super::BaseDialog;
-use crate::mindustry::{graphics::Pal, r#type::MapLocales};
+use crate::mindustry::{
+    ctype::ContentType,
+    game::TeamRegistry,
+    graphics::Pal,
+    r#type::MapLocales,
+    ui::fonts::{UpstreamContentIcon, UPSTREAM_UI_ICON_GLYPHS},
+};
 
 pub const MAP_LOCALES_CARD_WIDTH: f32 = 400.0;
 pub const MAP_LOCALES_LOCALE_ITEM_WIDTH: f32 = 200.0;
@@ -19,6 +25,16 @@ pub const MAP_LOCALES_MAIN_PROPERTY_VALUE_HEIGHT: f32 = 140.0;
 pub const MAP_LOCALES_PROPERTY_VIEW_ADD_BUTTON_WIDTH: f32 = 160.0;
 pub const MAP_LOCALES_PROPERTY_VIEW_ADD_BUTTON_HEIGHT: f32 = 50.0;
 pub const MAP_LOCALES_PROPERTY_VIEW_VALUE_HEIGHT: f32 = 140.0;
+pub const MAP_LOCALES_ICON_BUTTON_SIZE: f32 = 48.0;
+pub const MAP_LOCALES_ICON_CELL_WIDTH: f32 = 52.0;
+pub const MAP_LOCALES_ICON_MAX_COLUMNS: usize = 20;
+pub const MAP_LOCALES_CONTENT_ICON_TYPES: [ContentType; 5] = [
+    ContentType::Item,
+    ContentType::Block,
+    ContentType::Liquid,
+    ContentType::Status,
+    ContentType::Unit,
+];
 pub const MAP_LOCALES_MISSING_PLACEHOLDER: &str = "moai";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,6 +116,60 @@ pub struct MapLocalesDialogPropertyViewCard {
     pub add_button_width: Option<f32>,
     pub add_button_height: Option<f32>,
     pub value_area_height: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MapLocalesDialogIconSectionKind {
+    Iconc,
+    Content(ContentType),
+    Team,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapLocalesDialogIconCandidate {
+    pub section: MapLocalesDialogIconSectionKind,
+    pub name: String,
+    pub tooltip: String,
+    pub output: String,
+    pub drawable_symbol: Option<String>,
+    pub button_size: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapLocalesDialogContentIconSource {
+    pub content_type: ContentType,
+    pub name: String,
+    pub localized_name: String,
+    pub output: String,
+    pub drawable_symbol: String,
+    pub ui_icon_found: bool,
+}
+
+impl MapLocalesDialogContentIconSource {
+    pub fn from_upstream_content_icon(
+        content_type: ContentType,
+        localized_name: impl Into<String>,
+        icon: &UpstreamContentIcon,
+        ui_icon_found: bool,
+    ) -> Self {
+        Self {
+            content_type,
+            name: icon.name.clone(),
+            localized_name: localized_name.into(),
+            output: icon.emoji_string().unwrap_or_default(),
+            drawable_symbol: icon.atlas_symbol.clone(),
+            ui_icon_found,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapLocalesDialogTeamIconSource {
+    pub name: String,
+    pub localized_name: String,
+    pub output: String,
+    pub drawable_symbol: String,
+    pub atlas_found: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -233,6 +303,111 @@ impl MapLocalesDialog {
 
     pub fn property_view_column_count(screen_width: f32, scale: f32) -> usize {
         Self::column_count_with_offsets(screen_width, scale, 100.0, false)
+    }
+
+    pub fn add_icon_column_count(screen_width: f32, scale: f32) -> usize {
+        if !screen_width.is_finite() || !scale.is_finite() || scale <= 0.0 {
+            return 1;
+        }
+
+        ((screen_width / (MAP_LOCALES_ICON_CELL_WIDTH * scale)) as usize)
+            .min(MAP_LOCALES_ICON_MAX_COLUMNS)
+            .max(1)
+    }
+
+    pub fn add_icon_search_key(search: &str) -> String {
+        search.replace(' ', "").to_lowercase()
+    }
+
+    pub fn team_icon_sources_from_registry<F, G>(
+        teams: &TeamRegistry,
+        mut localized_name: F,
+        mut atlas_has: G,
+    ) -> Vec<MapLocalesDialogTeamIconSource>
+    where
+        F: FnMut(&str) -> String,
+        G: FnMut(&str) -> bool,
+    {
+        teams
+            .base_teams()
+            .iter()
+            .map(|team| {
+                let drawable_symbol = format!("team-{}", team.name);
+                MapLocalesDialogTeamIconSource {
+                    name: team.name.clone(),
+                    localized_name: localized_name(&team.name),
+                    output: team.emoji.clone(),
+                    atlas_found: atlas_has(&drawable_symbol),
+                    drawable_symbol,
+                }
+            })
+            .collect()
+    }
+
+    pub fn add_icon_dialog_candidates(
+        search: &str,
+        content_icons: &[MapLocalesDialogContentIconSource],
+        team_icons: &[MapLocalesDialogTeamIconSource],
+    ) -> Vec<MapLocalesDialogIconCandidate> {
+        let search = Self::add_icon_search_key(search);
+        let mut out = Vec::new();
+
+        for glyph in UPSTREAM_UI_ICON_GLYPHS {
+            if !glyph.java_name.to_lowercase().contains(&search) {
+                continue;
+            }
+            if let Some(output) = glyph.glyph_string() {
+                out.push(MapLocalesDialogIconCandidate {
+                    section: MapLocalesDialogIconSectionKind::Iconc,
+                    name: glyph.java_name.to_string(),
+                    tooltip: glyph.java_name.to_string(),
+                    output,
+                    drawable_symbol: Some(glyph.java_name.to_string()),
+                    button_size: MAP_LOCALES_ICON_BUTTON_SIZE,
+                });
+            }
+        }
+
+        for content_type in MAP_LOCALES_CONTENT_ICON_TYPES {
+            for icon in content_icons
+                .iter()
+                .filter(|icon| icon.content_type == content_type)
+            {
+                if !icon.ui_icon_found {
+                    continue;
+                }
+                if !Self::add_icon_search_key(&icon.localized_name).contains(&search) {
+                    continue;
+                }
+                out.push(MapLocalesDialogIconCandidate {
+                    section: MapLocalesDialogIconSectionKind::Content(content_type),
+                    name: icon.name.clone(),
+                    tooltip: icon.localized_name.clone(),
+                    output: icon.output.clone(),
+                    drawable_symbol: Some(icon.drawable_symbol.clone()),
+                    button_size: MAP_LOCALES_ICON_BUTTON_SIZE,
+                });
+            }
+        }
+
+        for team in team_icons {
+            if !team.atlas_found {
+                continue;
+            }
+            if !team.localized_name.to_lowercase().contains(&search) {
+                continue;
+            }
+            out.push(MapLocalesDialogIconCandidate {
+                section: MapLocalesDialogIconSectionKind::Team,
+                name: team.name.clone(),
+                tooltip: team.localized_name.clone(),
+                output: team.output.clone(),
+                drawable_symbol: Some(team.drawable_symbol.clone()),
+                button_size: MAP_LOCALES_ICON_BUTTON_SIZE,
+            });
+        }
+
+        out
     }
 
     pub fn locale_rows<F>(&mut self, mut display_name: F) -> Vec<MapLocalesDialogLocaleEntry>
@@ -510,6 +685,70 @@ impl MapLocalesDialog {
         self.selected_locale_map_mut()
             .insert(key.into(), value.into());
         self.saved = false;
+    }
+
+    pub fn add_property_to_missing_locales_like_java(
+        &mut self,
+        key: &str,
+        value: impl Into<String>,
+    ) -> usize {
+        let value = value.into();
+        let mut added = 0;
+        for bundle in self.locales.locales.values_mut() {
+            if !bundle.contains_key(key) {
+                bundle.insert(key.to_string(), value.clone());
+                added += 1;
+            }
+        }
+        if added > 0 {
+            self.saved = false;
+        }
+        added
+    }
+
+    pub fn append_icon_to_selected_locale_property_like_java(
+        &mut self,
+        key: &str,
+        icon: &str,
+    ) -> bool {
+        let Some(value) = self.selected_locale_map_mut().get_mut(key) else {
+            return false;
+        };
+        value.push_str(icon);
+        self.saved = false;
+        true
+    }
+
+    pub fn can_rollback_selected_property_like_java(&self, key: &str) -> bool {
+        let Some(saved_map) = self.last_saved.locales.get(&self.selected_locale) else {
+            return false;
+        };
+        let Some(saved_value) = saved_map.get(key) else {
+            return false;
+        };
+        self.locales
+            .locales
+            .get(&self.selected_locale)
+            .and_then(|props| props.get(key))
+            .is_some_and(|value| value != saved_value)
+    }
+
+    pub fn rollback_selected_property_like_java(&mut self, key: &str) -> bool {
+        let Some(saved_value) = self
+            .last_saved
+            .locales
+            .get(&self.selected_locale)
+            .and_then(|props| props.get(key))
+            .cloned()
+        else {
+            return false;
+        };
+        if !self.can_rollback_selected_property_like_java(key) {
+            return false;
+        }
+        self.selected_locale_map_mut()
+            .insert(key.to_string(), saved_value);
+        true
     }
 
     pub fn set_property_value(
@@ -803,7 +1042,94 @@ mod tests {
         assert_eq!(MapLocalesDialog::main_column_count(2399.0, 1.0), 3);
         assert_eq!(MapLocalesDialog::property_view_column_count(80.0, 1.0), 1);
         assert_eq!(MapLocalesDialog::property_view_column_count(900.0, 1.0), 2);
+        assert_eq!(MapLocalesDialog::add_icon_column_count(1920.0, 1.0), 20);
+        assert_eq!(MapLocalesDialog::add_icon_column_count(520.0, 1.0), 10);
         assert_eq!(MAP_LOCALES_CARD_WIDTH, 400.0);
+        assert_eq!(MAP_LOCALES_ICON_BUTTON_SIZE, 48.0);
+        assert_eq!(MAP_LOCALES_ICON_CELL_WIDTH, 52.0);
+    }
+
+    #[test]
+    fn add_icon_dialog_candidates_follow_java_icons_table_sources_and_search() {
+        let copper = UpstreamContentIcon {
+            unicode: 0xf8ff,
+            name: "copper".into(),
+            atlas_symbol: "item-copper".into(),
+        };
+        let hidden = UpstreamContentIcon {
+            unicode: 0xf8fe,
+            name: "hidden-wall".into(),
+            atlas_symbol: "block-hidden-wall".into(),
+        };
+        let dagger = UpstreamContentIcon {
+            unicode: 0xf8fd,
+            name: "dagger".into(),
+            atlas_symbol: "unit-dagger".into(),
+        };
+        let content_icons = vec![
+            MapLocalesDialogContentIconSource::from_upstream_content_icon(
+                ContentType::Item,
+                "Copper Ore",
+                &copper,
+                true,
+            ),
+            MapLocalesDialogContentIconSource::from_upstream_content_icon(
+                ContentType::Block,
+                "Hidden Wall",
+                &hidden,
+                false,
+            ),
+            MapLocalesDialogContentIconSource::from_upstream_content_icon(
+                ContentType::Unit,
+                "Dagger",
+                &dagger,
+                true,
+            ),
+        ];
+        let mut teams = crate::mindustry::game::vanilla_teams();
+        teams.base_teams_mut()[2].emoji = "⚔".into();
+        let team_icons = MapLocalesDialog::team_icon_sources_from_registry(
+            &teams,
+            |name| match name {
+                "crux" => "Crux".into(),
+                other => other.into(),
+            },
+            |symbol| symbol == "team-crux",
+        );
+
+        let iconc = MapLocalesDialog::add_icon_dialog_candidates("right open", &[], &[]);
+        assert!(iconc.iter().any(|candidate| {
+            candidate.section == MapLocalesDialogIconSectionKind::Iconc
+                && candidate.name == "rightOpen"
+                && candidate.tooltip == "rightOpen"
+                && candidate.button_size == MAP_LOCALES_ICON_BUTTON_SIZE
+        }));
+
+        let content =
+            MapLocalesDialog::add_icon_dialog_candidates("copper ore", &content_icons, &[]);
+        assert_eq!(content.len(), 1);
+        assert_eq!(
+            content[0].section,
+            MapLocalesDialogIconSectionKind::Content(ContentType::Item)
+        );
+        assert_eq!(content[0].name, "copper");
+        assert_eq!(content[0].tooltip, "Copper Ore");
+        assert_eq!(content[0].output, "\u{f8ff}");
+        assert_eq!(content[0].drawable_symbol.as_deref(), Some("item-copper"));
+
+        let missing_hidden =
+            MapLocalesDialog::add_icon_dialog_candidates("hidden wall", &content_icons, &[]);
+        assert!(
+            missing_hidden.is_empty(),
+            "Java iconsTable filters content icons with u.uiIcon.found()"
+        );
+
+        let team = MapLocalesDialog::add_icon_dialog_candidates("crux", &[], &team_icons);
+        assert_eq!(team.len(), 1);
+        assert_eq!(team[0].section, MapLocalesDialogIconSectionKind::Team);
+        assert_eq!(team[0].name, "crux");
+        assert_eq!(team[0].output, "⚔");
+        assert_eq!(team[0].drawable_symbol.as_deref(), Some("team-crux"));
     }
 
     #[test]
@@ -978,5 +1304,35 @@ mod tests {
         imported.locales.put_property("en", "changed", "x");
         imported.rollback_all();
         assert!(!imported.locales.locales["en"].contains_key("changed"));
+    }
+
+    #[test]
+    fn property_edit_actions_match_java_addtoother_addicon_and_rollback() {
+        let mut dialog = MapLocalesDialog::new();
+        dialog.show(sample_locales());
+        dialog.selected_locale = "en".into();
+
+        let added = dialog.add_property_to_missing_locales_like_java("charlie", "correct-en");
+        assert_eq!(added, 1);
+        assert_eq!(dialog.locales.locales["fr"]["charlie"], "correct-en");
+        assert_eq!(
+            dialog.locales.locales["zh"]["charlie"], "zh-different",
+            "Java @locales.addtoother only fills bundles that do not contain the key"
+        );
+        assert!(dialog.is_dirty());
+
+        assert!(dialog.append_icon_to_selected_locale_property_like_java("charlie", "★"));
+        assert_eq!(dialog.locales.locales["en"]["charlie"], "correct-en★");
+        assert!(dialog.can_rollback_selected_property_like_java("charlie"));
+        assert!(dialog.rollback_selected_property_like_java("charlie"));
+        assert_eq!(dialog.locales.locales["en"]["charlie"], "correct-en");
+        assert!(!dialog.can_rollback_selected_property_like_java("charlie"));
+        assert!(
+            dialog.is_dirty(),
+            "Java propEditDialog rollback restores the value but does not flip saved=true; only full editDialog rollback does"
+        );
+
+        assert!(!dialog.append_icon_to_selected_locale_property_like_java("missing", "★"));
+        assert!(!dialog.rollback_selected_property_like_java("missing"));
     }
 }

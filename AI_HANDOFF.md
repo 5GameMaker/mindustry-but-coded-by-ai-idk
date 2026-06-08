@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.15%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.16%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，字体与语言链路继续优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,46 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 ModsBrowser selection 详情 pane 节奏
+## 最新闭环：收口 MapLocales 图标/属性编辑、Settings/ContentInfo 与 noBarPane 细节
+
+- 当前总体迁移完成度：约 **99.16%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/editor/MapLocalesDialog.java:376-422`：`propEditDialog(...)` 提供 add-to-other、add icon、rollback 当前属性；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/editor/MapLocalesDialog.java:619-706`：`iconsTable(...)` 使用 `Iconc.codes`、content icon、`Team.baseTeams` 三段候选，搜索去空格小写，按钮 48f、列宽 52f；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java:91-127`：`default` locale 打开语言页时物化；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/ContentInfoDialog.java`：header 与正文同在 ScrollPane table；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Styles.java`：`noBarPane` 无滚动条 drawable。
+- 本轮实现：
+  - `core/src/mindustry/ui/dialogs/map_locales_dialog.rs`
+    - 新增 MapLocales add-icon 候选模型，覆盖 Iconc/content/team 三段；
+    - 新增 prop edit add-to-other、append icon、rollback selected property 行为；
+    - 扩展 core 测试锁定 Java 语义。
+  - `core/src/mindustry/ui/styles.rs`
+    - 显式断言 `noBarPane` 四个 scrollbar/knob 槽均为 `None`。
+  - `desktop/src/lib.rs`
+    - LanguageDialog 打开路径物化 `default`，render model 保持纯读取；
+    - Settings 子页面按钮布局指标统一为 Java-like helper；
+    - ContentInfo scrolled content rect 改为整张 ScrollPane table，header 随正文滚动。
+  - `README.md`
+    - 迁移进度更新到 **99.16%**。
+  - `MIGRATION.md`
+    - 新增 `1140. 收口 MapLocales 图标/属性编辑、Settings/ContentInfo 与 noBarPane 细节`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core map_locales_dialog --lib -- --nocapture`
+  - `cargo test -p mindustry-core upstream_widget_style_skins_match_java_scroll_slider_check_and_field_names --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_language_dialog_model_reads_materialized_default_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_language_default_locale_materializes_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_text_button_layout_metrics_match_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_database_content_info_header_scrolls_like_java_scrollpane --lib -- --nocapture`
+  - `git diff --check`
+- 下一步建议继续：
+  1. Mods View Content 图标 tooltip chrome 改为 Java `Tooltip(c.localizedName)` 风格；
+  2. ModsBrowser selection 继续清查是否仍有 Rust-only name/version 行；
+  3. MapLocales addIconDialog 继续接入 desktop 真 UI、点击命中与真实 content registry；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
+## 上一闭环：收口 ModsBrowser selection 详情 pane 节奏
 
 - 当前总体迁移完成度：约 **99.15%**，仍未达到完整可玩。
 - 本轮对照：

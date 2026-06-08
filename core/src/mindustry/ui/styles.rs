@@ -1502,6 +1502,12 @@ mod tests {
         assert_eq!(horizontal.h_scroll, Some("scrollHorizontal"));
         assert_eq!(horizontal.h_scroll_knob, Some("scrollKnobHorizontalBlack"));
 
+        let no_bar = upstream_scroll_pane_style_skin("noBarPane").unwrap();
+        assert_eq!(no_bar.v_scroll, None);
+        assert_eq!(no_bar.v_scroll_knob, None);
+        assert_eq!(no_bar.h_scroll, None);
+        assert_eq!(no_bar.h_scroll_knob, None);
+
         let tree = upstream_tree_style_skin("defaultTree").unwrap();
         assert_eq!(tree.plus, "downOpen");
         assert_eq!(tree.minus, "upOpen");
