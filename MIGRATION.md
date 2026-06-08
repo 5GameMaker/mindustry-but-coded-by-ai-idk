@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1133. 收紧内容图标字体注册与 token 替换边界
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.07%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/Fonts.java` 的 `loadContentIcons()` 只有 atlas region 落在 UI texture page 时才 `registerIcon(...)`；
+  - `core/src/mindustry/core/UI.java` 的 `formatIcons()` 只替换 `Iconc.codes` 或 `Fonts.hasUnicodeStr(token)` 已注册图标；
+  - 缺失 atlas symbol 应继续作为资源诊断，而不是伪装成可注册内容图标。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `desktop_content_icon_glyph_registerable_like_java(...)` 收紧为只接受 UI page 已解析内容图标；
+    - `format_icons_like_java(...)` 的内容图标 `:token:` 替换也必须通过同一 registerable gate，built-in `Iconc` 图标仍保持优先；
+    - `DesktopFontRasterizationPlan` 新增独立 `missing_icon_atlas_symbols`，缺失 atlas 只用于诊断和阻止 real upload，不再进入 `content_icons` / glyph 计数；
+    - 更新 token、非 UI page、missing atlas、font plan、team emoji、glyph upload 相关测试。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_localized_text_formats_icon_tokens_like_java_ui_format_icons -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_content_icon_glyph_registry_skips_non_ui_page_icons_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_font_rasterization_plan_bridges_fonts_icons_and_texture_atlas -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_team_base_emoji_is_populated_from_content_icons_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_font_glyph_upload_plan_emits_runtime_texture_upload_when_ready -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_exposes_content_icon_glyph_registry_report -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. Settings 子页通用按钮字号、图标字号、icon/label 间距按 Java `TextButtonStyle` 收口；
+  2. 主菜单 chrome：Logo/版本、Discord/info/BE 按钮、mobile gutter 继续补齐；
+  3. 字体剩余：Tech fallback、IconLarge atlas fallback、unicodeToName 链路继续对齐；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1132. 收口 LanguageDialog 默认 locale 物化语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
