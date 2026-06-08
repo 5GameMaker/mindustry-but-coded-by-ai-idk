@@ -19,6 +19,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1107. MapLocales 与 About 图标按钮状态色/语言顺序继续贴近 Java
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.73%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/AboutDialog.java` 的链接 action 是 `Styles.clearNonei` 的 icon-only `ImageButton`，hover 使用 `flatOver`，图标色走 style 的 `imageUpColor`；
+  - `core/src/mindustry/editor/MapLocalesDialog.java`：左侧 locale 行是 `Styles.flatTogglet` 并 `setChecked(selectedLocale.equals(name))`；顶部折叠和属性卡折叠是 `Styles.emptyTogglei`；filter/cancel 是 `Styles.emptyi`；locale 行遍历 Java `Vars.locales` 的显示名排序。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - About 链接右侧 action 背景和 link icon 色改为消费 `clearNonei` 的 hover/background/image color；
+    - MapLocales 顶部折叠、filter、search clear、属性卡折叠图标改为消费 `emptyTogglei` / `emptyi` 的 Java image color；
+    - MapLocales 左侧 locale 行改为真正走 `flatTogglet` checked 分支，而不是把 selected 当 hover；
+    - MapLocales 左侧 locale rows 在渲染、hit-test、dispatch 三处统一按 Java `Vars.locales` / LanguageDialog display-name 顺序排序，`id_ID` 等别名顺序不再被 `BTreeMap` code order 扭曲。
+  - `README.md`
+    - 迁移进度更新到 **98.73%**。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_about_route_uses_upstream_link_cards_and_hitboxes --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_editor_map_locales_search_filter_and_row_selection_match_java --no-default-features`
+
 ## 1106. Mods 卡片 action 图标消费 Java clearNonei 状态色
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

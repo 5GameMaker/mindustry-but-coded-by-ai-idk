@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **86.3%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.73%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,23 +27,23 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：JoinDialog 即时连接失败改为错误 modal
+## 最新闭环：MapLocales 与 About 图标按钮状态色/语言顺序继续贴近 Java
 
-- 当前总体迁移完成度：约 **86.3%**，仍未达到完整可玩。
-- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java` 与 `core/src/mindustry/core/UI.java`：
-  - Rust 现在用 `join_connection_error_dialog_message` 承接即时 `net.connect(...)` 错误；
-  - `connect_to_target(...)` 出错会 `disconnect_quietly()`、停止 connecting 状态并打开 `@host.invalid` modal；
-  - 错误 modal 阻断底层 Join 按钮，`@ok` / enter / escape / back 关闭后保留 Join 页面。
+- 当前总体迁移完成度：约 **98.73%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/AboutDialog.java` 与 `core/src/mindustry/editor/MapLocalesDialog.java`：
+  - About 链接 action 改为消费 `Styles.clearNonei` hover/background/image color；
+  - MapLocales 左侧 locale 行改为真正走 `Styles.flatTogglet` checked 分支；
+  - MapLocales 折叠/filter/search clear/属性卡折叠图标改为消费 `emptyTogglei` / `emptyi` image color；
+  - MapLocales locale rows 在渲染、hit-test、dispatch 三处统一按 Java `Vars.locales` / LanguageDialog display-name 顺序排序。
 - 验证：
-  - `cargo fmt --all`
-  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_error_uses_java_like_error_modal --lib -- --test-threads=1 --nocapture`
-  - `cargo test -p mindustry-desktop join_route --lib -- --test-threads=1 --nocapture`
-  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_about_route_uses_upstream_link_cards_and_hitboxes --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_editor_map_locales_search_filter_and_row_selection_match_java --no-default-features`
   - `git diff --check`
 - 下一步建议继续前端：
-  1. JoinDialog `@reconnecting` / pingHost 重连流程继续对齐 Java；
-  2. 异步连接超时、world data 失败和 server kick 统一映射到错误 modal；
-  3. Controls 分类标题/搜索框/ScrollPane clip 再做像素级收口。
+  1. 继续补 Settings/Language 字体与 restart 提示视觉回归；
+  2. 收口 CustomGame/LoadDialog 搜索栏、filter 按钮、ScrollPane/空态；
+  3. Join/Mods/About 剩余 icon button hover/pressed/image color 做统一消费端审查。
 
 ## 上一闭环：JoinDialog 连接中接入 LoadingFragment 遮罩与取消
 
