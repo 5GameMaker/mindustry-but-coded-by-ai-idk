@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1165. 收口 JoinDialog 确认弹窗正文
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.42%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java`：删除保存服务器使用 `ui.showConfirm("@confirm", "@server.delete", ...)`；
+  - 社区服务器免责声明使用 `ui.showCustomConfirm("@warning", "@servers.disclaimer", "@ok", "@back", ...)`；
+  - 两处确认弹窗正文都只使用 bundle 文案，不拼接服务器地址、index 或 target。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_join_delete_dialog(...)` 正文从 `@server.delete | {server}` 改为纯 `@server.delete`；
+    - `push_join_server_disclaimer_dialog(...)` 正文从 `@servers.disclaimer | host:port` 改为纯 `@servers.disclaimer`；
+    - `active_menu_route_shell_lines(Join)` 中对应诊断行同步去掉 `index=` / `target=`，避免测试/诊断文本继续固化非 Java 文案；
+    - 更新 Join 删除确认和免责声明测试断言。
+  - `README.md`
+    - 迁移进度更新到 **99.42%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 JoinDialog 确认弹窗正文收口。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_follow_reorder_delete_and_poll --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group --lib -- --test-threads=1 --nocapture`
+- 后续继续优先：
+  1. 继续 JoinDialog Add/Edit/Delete 弹窗按钮、textfield、row padding 和 card density；
+  2. 按字体子代理建议拆分静态/动态 font seed；
+  3. Settings/Data 诊断文本保持不进入 RenderCommand 可见层。
+
 ## 1164. 收口 HostDialog 信息弹窗视觉
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
