@@ -19,6 +19,44 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1158. 收口 UI 文案本地化、Join 动画点与字体测量
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.35%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java:240`：保存服务器刷新态显示 `Core.bundle.get("server.refreshing") + Strings.animated(Time.time, 4, 11, ".")`；
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java:384`：本地发现空态显示 `[accent] + @hosts.discovering.any + Strings.animated(Time.time, 4, 10f, ".")`；
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java:471-498`：社区服务器 group header 是 label + `head.image().height(3f).growX()` + 按钮，分割线应跟随真实 label 布局而不是字符数猜宽；
+  - `core/src/mindustry/ui/dialogs/SchematicsDialog.java:765-780`：`SchematicInfoDialog` 需求表直接显示物品图标/数量，不显示 Rust-only 英文 `requirements:` 标题；
+  - `core/src/mindustry/ui/dialogs/LaunchLoadoutDialog.java:213-216`：发射载荷缺资源提示使用 `@sector.missingresources`；
+  - `core/src/mindustry/ui/dialogs/LoadoutDialog.java` 与 Java `Icon.pencil` 语义：资源编辑按钮应走 Icon 字体而不是裸 Unicode 文本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Join 主 route primary label 从硬编码 `CONNECT` 改为 `@joingame`，通过当前 locale bundle 渲染；
+    - 保存服务器刷新态和本地发现空态补上 Java `Strings.animated(...)` 风格动态点；
+    - 社区服务器 group header 分割线改为优先用当前 locale 字体 atlas 的实际文本宽度计算，无法测量时才回退宽/窄字形估算；
+    - Discord/route shell 复制链接按钮改为 `@copylink` 本地化文本；
+    - `SchematicInfoDialog` 移除 Rust-only `requirements:` 英文标题，并把需求物品起点回到 Java 纯 table 节奏；
+    - `LaunchLoadoutDialog` 空候选提示改为 `@sector.missingresources`；
+    - 发射资源编辑按钮改为 `push_settings_icon_button(..., "pencil", ...)`，使用 Java Icon 字体路径而不是裸 `✎` 文本；
+    - 补/改测试锁住 Join 动态点、社区 header 字体测量、蓝图需求表无英文标题、资源编辑图标和本地化标题。
+  - `README.md`
+    - 迁移进度更新到 **99.35%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematics_info_dialog_renders_and_dispatches_buttons --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematic_info_dialog_renders_power_balance_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_drive_server_cards_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_picker_selects_and_commits_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_resources_opens_child_loadout_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. `CampaignRulesDialog` 难度按钮和规则开关继续改成 Java `flatTogglet` / checkbox checked 视觉；
+  2. `PlanetDialog` sector list、`LaunchLoadoutDialog` 资源汇总和 `LoadoutDialog` 资源编辑列表继续从硬截断推进到 ScrollPane 语义；
+  3. Settings/Language 顶层壳与可交互语言列表继续补齐，确保所有子菜单视觉、字体和文案消费点接入整体前端。
+
 ## 1157. 对齐菜单 Icon 字体与 LaunchLoadout 200f 方卡
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
