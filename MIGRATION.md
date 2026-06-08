@@ -19,6 +19,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1142. 接入 MapLocales addIconDialog 桌面真 UI
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.18%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java:384-404`：`propEditDialog(...)` 的 `@locales.addicon` 需打开 `addIconDialog(...)`，选择后追加到当前 selected locale 的属性值；
+  - `core/src/mindustry/editor/MapLocalesDialog.java:619-706`：`addIconDialog(...)` / `iconsTable(...)` 使用搜索框、clear 按钮、`Iconc.codes`、content icon、`Team.baseTeams` 三段候选，按钮 48f、cell 52f、最多 20 列。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `editor_map_locales_add_icon_*` 状态、MapCard action、关闭清理、滚轮/键盘输入；
+    - `@locales.addicon` 从 disabled placeholder 改为真实可点，打开 Java-like addIcon chooser；
+    - 候选源接入当前 `content_loader`、`content_icon_glyph_registry`、`texture_atlas` 与 base team emoji；
+    - add-icon 弹窗按 Java 尺寸渲染搜索框、clear 按钮、48f `Styles.flati` 图标格、black6 tooltip，并在点击候选后调用 core append 行为写回 selected locale 属性值。
+  - `README.md`
+    - 迁移进度更新到 **99.18%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 MapLocales addIconDialog 桌面真 UI 接入。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_locales_add_icon_button_opens_picker_and_appends_icon_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_locales --lib -- --nocapture`
+  - `cargo test -p mindustry-core map_locales_dialog --lib -- --nocapture`
+- 后续继续优先：
+  1. About links 的 `link.*.title`/description bundle 解析继续按 Java `Links.java` 收口；
+  2. LanguageDialog displayNames 与 `in_ID -> id_ID` alias 映射继续对齐 Java；
+  3. Settings 首页/Data 页、Load/Save、Mods、ContentInfo 的可见 chrome 继续按 Java 原版逐项收口；
+  4. font/icon token gate 与真实渲染字体选择仍需继续接入，不能宣告目标完成。
+
 ## 1141. 收口 Mods View Content 图标 tooltip chrome
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
