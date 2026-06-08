@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1155. 接入 Campaign LaunchLoadout SchematicImage 预览
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.32%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LaunchLoadoutDialog.java:167-201`：候选 loadout 通过 `t.button(b -> b.add(new SchematicImage(s)), Styles.togglet, ...)` 渲染，按钮 `size(200f)`，不是 core icon + 文本标签；
+  - `core/src/mindustry/ui/dialogs/SchematicsDialog.java:684-745`：`SchematicImage` 绘制 `schematic-background`、preview texture/refresh 和边框。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopCampaignLaunchLoadoutCandidate` 增加 schematic `width/height/tile_count/preview_tiles`；
+    - `campaign_launch_loadout_candidate_from_loadout(...)` 从 `Loadout.schematic.tiles` 生成 `DesktopSchematicPreviewTile`；
+    - LaunchLoadout picker 候选项从 `button + core icon + display_name` 改为 `Styles.togglet` checked 底图 + `schematic-background` + 真实 schematic tile preview，preview 缺失时显示 refresh 图像；
+    - 扩展 picker 测试，锁定 candidate preview 有 `schematic-background` 和真实 core block sprite，且不再依赖可见 Rust-only 候选名标签；第五个候选仍可 hit-test、选择、提交。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_picker_selects_and_commits_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_picker_supports_more_than_four_candidates_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_button_opens_loadout_then_seeds_playable_smoke_world --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. 继续把 LaunchLoadout picker 几何从当前压缩预览过渡到 Java `size(200f)` 方卡和完整横向/纵向滚动；
+  2. 继续收紧 Controls 子菜单未知 keybind raw fallback；
+  3. 继续补 SectorSelectDialog 完整滚动结果、Settings/Language/Controls 字体与所有子菜单视觉。
+
 ## 1154. 接入 Campaign locked hoverLabel canSelect 分支
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

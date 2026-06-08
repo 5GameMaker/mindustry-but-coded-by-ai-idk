@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.31%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.32%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：接入 Campaign locked hoverLabel canSelect 分支
+## 最新闭环：接入 Campaign LaunchLoadout SchematicImage 预览
+
+- 当前总体迁移完成度：约 **99.32%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LaunchLoadoutDialog.java:167-201`：候选 loadout 使用 `new SchematicImage(s)` + `Styles.togglet`；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SchematicsDialog.java:684-745`：`SchematicImage` 绘制 `schematic-background`、preview/refresh 和边框。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - Campaign LaunchLoadout candidate 模型携带 schematic 尺寸和 preview tiles；
+    - picker 候选项改为 `togglet` checked 底图 + `schematic-background` + 真实 schematic tile preview；
+    - 删除候选项主视觉里的 core icon + display label 依赖，测试改为验证 SchematicImage 背景/tiles 与第五候选 hit-test/提交。
+  - `README.md`
+    - 迁移进度更新到 **99.32%**。
+  - `MIGRATION.md`
+    - 新增 `1155. 接入 Campaign LaunchLoadout SchematicImage 预览`。
+- 验证：
+  - 已通过本轮 3 个 Campaign LaunchLoadout 定向测试；
+  - 已通过 `cargo build -p mindustry-desktop --features opengl-native-runtime`；
+  - 已执行 `cargo fmt`。
+- 下一步建议继续：
+  1. LaunchLoadout picker 几何继续扩展到 Java `size(200f)` 方卡/滚动；
+  2. Controls 子菜单未知 keybind raw fallback 收紧；
+  3. SectorSelectDialog 完整滚动结果与 Settings/Language/Controls 字体继续收口。
+
+## 上一闭环：接入 Campaign locked hoverLabel canSelect 分支
 
 - 当前总体迁移完成度：约 **99.31%**，仍未达到完整可玩。
 - 本轮对照：
