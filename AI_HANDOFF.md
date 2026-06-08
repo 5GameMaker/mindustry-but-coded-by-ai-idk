@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.81%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.82%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：ContentInfoDialog header 纳入 Java ScrollPane
+## 最新闭环：MapLocales 静态本地化名称纳入字体 seed
+
+- 当前总体迁移完成度：约 **98.82%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/Vars.java:312-325`：`Vars.locales` 由 `core/assets/locales` 构造、按 `LanguageDialog.getDisplayName` 排序并追加 `router`；
+  - Java FreeType 字体 incremental 可逐步补 glyph；Rust 为避免首帧缺字/placeholder，需要把硬编码 UI 显示名表提前纳入 font seed。
+- 本轮实现：
+  - `desktop/src/lib.rs` 新增 `desktop_extend_font_seed_characters_from_language_options(...)`；
+  - 新增 `desktop_extend_font_seed_characters_from_map_locale_display_names(...)`，覆盖 English、简中、繁中、日文、韩文、俄文、德文、法文 MapLocales 静态显示名表；
+  - `desktop_real_font_atlas_seed_characters()` 接入 MapLocales 静态显示名 seed，避免地图本地化编辑器在多语言 UI 下缺 glyph；
+  - 扩展 `desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames`，锁定 viewport resize 不触发字体 upload plan 重建；
+  - 新增 `desktop_frame_loop_resize_and_scale_factor_reuse_font_upload_plan_like_java`，锁定 DPI scale-factor / resize 不触发低帧率字体重建循环；
+  - 新增 `desktop_graphics_font_seed_covers_map_locales_display_names_like_java`，枚举所有 MapLocales 静态显示名并断言进入 seed。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_graphics_font_seed_covers_map_locales_display_names_like_java --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_frame_loop_resize_and_scale_factor_reuse_font_upload_plan_like_java --no-default-features`
+- 下一步建议继续前端：
+  1. 继续按子代理结果收口主菜单、Join、Load/Save、MapList/Settings/Database 等高可见子菜单差异；
+  2. MapLocales property view 的顺序/回退语义仍可继续对照 Java `MapLocalesDialog`；
+  3. 前端低帧率方向继续补 shader/font 混合缺失 fallback、DPI 点击命中和 0x0 surface 防黑屏测试。
+
+## 上一闭环：ContentInfoDialog header 纳入 Java ScrollPane
 
 - 当前总体迁移完成度：约 **98.81%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/ContentInfoDialog.java`：

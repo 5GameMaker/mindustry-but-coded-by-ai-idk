@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1116. MapLocales 静态本地化名称纳入字体 seed
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.82%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/Vars.java:312-325`：`Vars.locales` 来自 `core/assets/locales`，再按 `LanguageDialog.getDisplayName` 排序并追加 `router`；
+  - Java FreeType 字体是 incremental，但 Rust 当前为避免首帧缺字，需要把硬编码 UI locale 名称表提前纳入真实 font atlas seed。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_extend_font_seed_characters_from_language_options(...)`；
+    - 新增 `desktop_extend_font_seed_characters_from_map_locale_display_names(...)`，覆盖 English、简中、繁中、日文、韩文、俄文、德文、法文 MapLocales 静态显示名表；
+    - `desktop_real_font_atlas_seed_characters()` 接入上述 helper，避免 MapLocalesDialog 在这些 UI locale 下首次渲染本地化地区名时缺 glyph；
+    - 扩展 `desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames`，锁定 viewport resize 不触发字体 upload plan 重建；
+    - 新增 `desktop_frame_loop_resize_and_scale_factor_reuse_font_upload_plan_like_java`，锁定 DPI scale-factor / resize 不导致低帧率字体重建循环；
+    - 新增 `desktop_graphics_font_seed_covers_map_locales_display_names_like_java`，枚举所有 MapLocales 静态显示名并断言已进入 seed。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_graphics_font_seed_covers_map_locales_display_names_like_java --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_frame_loop_resize_and_scale_factor_reuse_font_upload_plan_like_java --no-default-features`
+
 ## 1115. ContentInfoDialog header 纳入 Java ScrollPane
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
