@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.74%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.75%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,22 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：CustomGame/MapList filter 图标按钮改回 Java emptyi/emptyTogglei
+## 最新闭环：LoadDialog 模式筛选与存档 action 图标改回 Java emptyTogglei/emptyi
+
+- 当前总体迁移完成度：约 **98.75%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LoadDialog.java`：
+  - mode filter 改为 `Styles.emptyTogglei` image color，checked 语义是 `!hidden.contains(mode)`；
+  - autosave action 改为 `Styles.emptyTogglei` checked image color；
+  - trash/pencil/export action 改为 `Styles.emptyi` image color；
+  - icon-only ImageButton 不再带 Rust-only outline。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib load_game_route --no-default-features`
+- 下一步建议继续前端：
+  1. Settings/Language：语言列表排序、checked 行、restart 提示与 18px 级按钮字体；
+  2. Fonts：日文/CJK override、missing glyph fallback 与 icon/outline/monospace 链路；
+  3. JoinDialog/MapList 继续收口子菜单卡片与 ScrollPane 视觉。
+
+## 上一闭环：CustomGame/MapList filter 图标按钮改回 Java emptyi/emptyTogglei
 
 - 当前总体迁移完成度：约 **98.74%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/MapListDialog.java`：
@@ -38,10 +53,6 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo fmt`
   - `cargo test -p mindustry-desktop --lib desktop_launcher_map_list_route_controls_dispatch_actions --no-default-features`
   - `git diff --check`
-- 下一步建议继续前端：
-  1. 收口 CustomGame 列表 ScrollPane/空态与 Java table flow；
-  2. 收口 LoadDialog Rust-only 文本/空态/ScrollPane；
-  3. 继续补 Settings/Language 字体与 restart 提示视觉回归。
 
 ## 上一闭环：JoinDialog 连接中接入 LoadingFragment 遮罩与取消
 

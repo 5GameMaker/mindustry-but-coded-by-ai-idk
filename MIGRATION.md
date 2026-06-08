@@ -19,6 +19,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1109. LoadDialog 模式筛选与存档 action 图标改回 Java emptyTogglei/emptyi
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.75%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java:58-73`：搜索行的 Gamemode filter 是 `Styles.emptyTogglei`，`checked = !hidden.contains(mode)`；
+  - `LoadDialog.java:116-138`：slot action 中 autosave 是 `Styles.emptyTogglei`，trash/pencil/export 是 `Styles.emptyi`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - LoadDialog 模式筛选图标颜色改为消费 `settings_image_button_image_color("emptyTogglei", ...)`，不再使用 Rust 手写蓝白/暗灰三态色；
+    - slot action 图标按 Java 风格分流：autosave 使用 `emptyTogglei` checked image color，delete/rename/export 使用 `emptyi` image color；
+    - 移除这些 icon-only ImageButton 上的 Rust-only outline，避免视觉比 Java 原版更粗；
+    - 回归测试锁定 checked/unchecked/hover 状态色与 icon font/outline 行为。
+  - `README.md`
+    - 迁移进度更新到 **98.75%**。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib load_game_route --no-default-features`
+
 ## 1108. CustomGame/MapList filter 图标按钮改回 Java emptyi/emptyTogglei
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
