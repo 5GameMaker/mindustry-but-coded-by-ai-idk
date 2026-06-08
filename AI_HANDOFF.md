@@ -10,9 +10,9 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.10%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.13%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
-- 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
+- 当前短期优先级：原版 UI/前端还原优先，字体与语言链路继续优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
@@ -27,7 +27,40 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口字体大图标链路、语言未知 locale 选中态与 ContentInfo mod 来源
+## 最新闭环：接入战役星球大图标、模组选择缺值与 About/Discord 本地化文案
+
+- 当前总体迁移完成度：约 **99.13%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/PlanetDialog.java:554-559,591-594`：sector projection 通过 `Fonts.getLargeIcon("warning"/"terrain"/"lock")` 渲染大图标；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/ModsDialog.java:552-554`：browser selection 直接使用 description/author，不额外注入 `@none` / `@unknown`；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Links.java:16-53`：About links 的 title/description 由 `Core.bundle` runtime 解析，title 缺失时 Java capitalize fallback；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/DiscordDialog.java:13-46`：Discord dialog 标题为空，正文使用 `@discord`。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - Campaign/PlanetDialog sector card 与 sector list 接入 Java 式 large icon source，不再用 raw `⚠` 文本前缀；
+    - Mods browser selection 缺失描述/作者时不渲染 `@none` / `@unknown` / `Author` 占位；
+    - About link title/description 改为 bundle runtime 解析，description 缺失回空串，title 缺失走 Java capitalize fallback；
+    - Discord route 正文改为 `@discord` bundle 文案，primary label 改为 `@openlink`；
+    - 新增/扩展对应回归测试。
+  - `README.md`
+    - 迁移进度更新到 **99.13%**。
+  - `MIGRATION.md`
+    - 新增 `1137. 接入战役星球大图标、模组选择缺值与 About/Discord 本地化文案`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_ --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_records_discord_and_becheck_actions --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_ --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_selection_dialog_ --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_route_titles_use_settings_locale_bundle_like_java_dialogs --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_fonts_ --lib -- --nocapture`
+- 下一步建议继续：
+  1. MapLocales `filterDialog` 优先接入真实 UI 路径；
+  2. Load/Save tooltip chrome 与剩余子菜单视觉继续收口；
+  3. ModsBrowser release/detail 字体和布局继续补更细断言；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
+## 上一闭环：收口字体大图标链路、语言未知 locale 选中态与 ContentInfo mod 来源
 
 - 当前总体迁移完成度：约 **99.10%**，仍未达到完整可玩。
 - 本轮对照：
@@ -39,9 +72,10 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
     - 新增 Java 式 large icon source seam：`unicodeToName()`、`getLargeIcon()`、IconLarge glyph 与 atlas fallback；
     - LanguageDialog 选中态保留未知 raw locale，避免错误勾选 English；
     - Database/ContentInfo 描述追加 mod displayName 来源行；
-    - 新增/扩展对应回归测试。
+    - 新增/扩展对应回归测试；
+    - 已通过：campaign large icons、mods selection placeholders。
   - `README.md`
-    - 迁移进度更新到 **99.10%**。
+    - 迁移进度更新到 **99.12%**。
   - `MIGRATION.md`
     - 新增 `1136. 收口字体大图标链路、语言未知 locale 选中态与 ContentInfo mod 来源`。
 - 验证：

@@ -19,10 +19,43 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1137. 接入战役星球大图标、模组选择缺值与 About/Discord 本地化文案
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.13%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/PlanetDialog.java:554-559,591-594` 与 `core/src/mindustry/ui/Fonts.java:125-132`：sector projection 通过 `Fonts.getLargeIcon("warning"/"terrain"/"lock")` 渲染大图标；
+  - `core/src/mindustry/ui/dialogs/ModsDialog.java:552-554`：browser selection 直接拼接 `mod.description` / `mod.author`，缺值时不注入 `@none` / `@unknown`；
+  - `core/src/mindustry/ui/Links.java:16-53`：About links 的 title/description 在运行时从 `Core.bundle` 读取，title 缺失时回退 `Strings.capitalize(name.replace("-", " "))`；
+  - `core/src/mindustry/ui/dialogs/DiscordDialog.java:13-46`：Discord dialog 标题为空，正文使用 `@discord`，按钮为 `@back`、`@copylink`、`@openlink`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `campaign` 路径把 attacked/unlocked/locked/preset sector 的图标选择接入真实 `push_campaign_route_page(...)` 与 sector list 渲染，不再使用 raw `⚠` 文本前缀；
+    - Mods browser selection 缺失描述/作者时不再渲染 `@none` / `@unknown` / `Author` 占位；
+    - About link title/description 改为 Java 式 bundle runtime 解析，description 缺失回空串，title 缺失走 Java capitalize fallback；
+    - Discord route 正文改为 `@discord` bundle 文案，primary label 改为 `@openlink`。
+  - `README.md`
+    - 迁移进度更新到 **99.13%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为战役星球大图标、模组选择缺值与 About/Discord 本地化文案收口。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_ --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_records_discord_and_becheck_actions --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_ --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_selection_dialog_ --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_route_titles_use_settings_locale_bundle_like_java_dialogs --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_fonts_ --lib -- --nocapture`
+- 后续继续优先：
+  1. MapLocales `filterDialog` 先按 Java `MapLocalesDialog` 控件树接入真实 UI 路径；
+  2. Load/Save tooltip chrome 与剩余子菜单视觉继续按 Java `LoadDialog` / `SaveDialog` 收口；
+  3. ModsBrowser selection/release/detail 字体节奏继续补更细断言；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1136. 收口字体大图标链路、语言未知 locale 选中态与 ContentInfo mod 来源
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
-- 本轮总体进度更新：约 **99.10%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- 本轮总体进度更新：约 **99.12%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
 - Java 对照依据：
   - `core/src/mindustry/ui/Fonts.java:121-133`：`unicodeToName()` 先查内容图标注册表再回退 `Iconc.codeToName`，`getLargeIcon()` 先取 `Fonts.iconLarge` glyph，glyph 缺失时 fallback 到 `Core.atlas.find(name)`；
   - `core/src/mindustry/ui/dialogs/LanguageDialog.java:91-108`：非 `default` 的 raw locale 不走 `findClosestLocale()`，未知 locale 打开语言列表时不应错误勾选英语或同语种 fallback；
@@ -35,7 +68,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
     - LanguageDialog 选中态新增 raw-locale helper：只有 `default`/空值才走 closest locale，未知 raw locale 保留原值并让列表无误勾选；
     - Database/ContentInfo 描述新增 mod source → mod metadata displayName 解析，并追加本地化 `mod.display` 行。
   - `README.md`
-    - 迁移进度更新到 **99.10%**。
+    - 迁移进度更新到 **99.12%**。
   - `AI_HANDOFF.md`
     - 最新闭环更新为字体大图标链路、语言未知 locale 选中态与 ContentInfo mod 来源收口。
 - 验证：
@@ -44,6 +77,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_preserves_unknown_raw_locale_without_forcing_checked_row_like_java -- --nocapture`
   - `cargo test -p mindustry-desktop desktop_launcher_database_content_description_appends_mod_display_like_java -- --nocapture`
   - `cargo test -p mindustry-desktop desktop_launcher_database_content_info_stats_keep_java_stat_categories -- --nocapture`
+  - 已通过：campaign large icons、mods selection placeholders。
   - `git diff --check`
 - 后续继续优先：
   1. 把 `unicodeToName()` → `getLargeIcon()` seam 继续接入 MapProcessorsDialog / LogicBlock / PlanetDialog 等真实消费端渲染路径；
