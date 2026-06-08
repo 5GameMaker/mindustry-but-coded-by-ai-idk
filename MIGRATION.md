@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1125. 收口 AboutDialog 默认字体节奏
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.97%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/AboutDialog.java` 的 `setup()` 中 link card 标题使用默认 label 文本、描述使用 `labelWrap(...)`；
+  - `showCredits()` 使用 `BaseDialog("@credits")`、默认 label/table、`add("[lightgray]" + contributor)` 三列排布；
+  - Java 没有给 About link title / credits 文本额外压小字号或附加 runtime outline。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 About 专用 Java-like typography 常量：link title/description、credits 文本、contributors 均接到 `SETTINGS_JAVA_DEFAULT_FONT_SIZE = 18.0`；
+    - contributors 行高从 15 收口为 24，避免 credits 三列表格过密；
+    - About link title、description、credits 标题/正文去掉额外 runtime outline；
+    - 更新 About link card 测试，断言 title/description 使用默认 label 尺寸并且非 outline。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_route_uses_upstream_link_cards_and_hitboxes -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_menu_route_renders_upstream_credits_links_and_contributors -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_route_scrolls_links_and_credits_like_scrollpane -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. ModsRoute / ModsBrowser 卡片字号、搜索条和列表密度按 Java `ModsDialog` 收口；
+  2. Database / ContentInfo 标题、正文、ScrollPane 节奏按 Java `DatabaseDialog` / `ContentInfoDialog` 收口；
+  3. MapLocalesDialog 语言行/属性卡字号继续向 Java 默认 label/button 节奏靠拢；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1124. 接入 JoinDialog 字体 dirty 抑制窗口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

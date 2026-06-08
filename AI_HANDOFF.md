@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.96%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.97%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：接入 JoinDialog 字体 dirty 抑制窗口
+## 最新闭环：收口 AboutDialog 默认字体节奏
+
+- 当前总体迁移完成度：约 **98.97%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/AboutDialog.java`：
+  - link card 标题使用默认 label 文本，描述使用 `labelWrap(...)`；
+  - credits 使用 `BaseDialog("@credits")`、默认 label/table 与三列 contributor 单元格；
+  - Java 没有给 About 文本额外压小字号或附加 runtime outline。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 About Java-like typography 常量，link title/description、credits 文本、contributors 均接默认 UI 字号 18；
+    - contributors 行高从 15 提到 24，避免 credits 三列表格过密；
+    - About link title、description、credits 标题/正文去掉额外 runtime outline；
+    - 更新 About link card 测试，锁住默认 label 字号与非 outline。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_route_uses_upstream_link_cards_and_hitboxes -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_menu_route_renders_upstream_credits_links_and_contributors -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_route_scrolls_links_and_credits_like_scrollpane -- --nocapture`
+  - `git diff --check`
+- 下一步建议继续：
+  1. ModsRoute / ModsBrowser 卡片字号、搜索条和列表密度按 Java `ModsDialog` 收口；
+  2. Database / ContentInfo 标题、正文、ScrollPane 节奏按 Java `DatabaseDialog` / `ContentInfoDialog` 收口；
+  3. MapLocalesDialog 语言行/属性卡字号继续向 Java 默认 label/button 节奏靠拢；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 上一闭环：接入 JoinDialog 字体 dirty 抑制窗口
 
 - 当前总体迁移完成度：约 **98.96%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java`：
@@ -48,13 +73,8 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo test -p mindustry-desktop desktop_launcher_join_route_community_search_filters_only_on_refresh_like_java -- --nocapture`
   - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
   - `git diff --check`
-- 下一步建议继续：
-  1. LanguageDialog 语言名来源继续收口，减少手工静态表维护面；
-  2. Settings/Language 字号、默认字体 shadow、outline 预烘焙字形继续审查；
-  3. Load/Save、Join、CustomGame、Database/ContentInfo 子菜单视觉继续按 Java 源码收口；
-  4. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
 
-## 上一闭环：收口 LoadDialog 存档卡片描边
+## 上二闭环：收口 LoadDialog 存档卡片描边
 
 - 当前总体迁移完成度：约 **98.95%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LoadDialog.java`：
