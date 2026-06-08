@@ -28,6 +28,10 @@ pub const MAP_LOCALES_PROPERTY_VIEW_VALUE_HEIGHT: f32 = 140.0;
 pub const MAP_LOCALES_ICON_BUTTON_SIZE: f32 = 48.0;
 pub const MAP_LOCALES_ICON_CELL_WIDTH: f32 = 52.0;
 pub const MAP_LOCALES_ICON_MAX_COLUMNS: usize = 20;
+pub const MAP_LOCALES_FILTER_BUTTON_WIDTH: f32 = 450.0;
+pub const MAP_LOCALES_FILTER_BUTTON_HEIGHT: f32 = 100.0;
+pub const MAP_LOCALES_FILTER_BUTTON_PAD_TOP: f32 = 65.0;
+pub const MAP_LOCALES_FILTER_STYLE_NAME: &str = "filterStyle";
 pub const MAP_LOCALES_CONTENT_ICON_TYPES: [ContentType; 5] = [
     ContentType::Item,
     ContentType::Block,
@@ -36,6 +40,34 @@ pub const MAP_LOCALES_CONTENT_ICON_TYPES: [ContentType; 5] = [
     ContentType::Unit,
 ];
 pub const MAP_LOCALES_MISSING_PLACEHOLDER: &str = "moai";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MapLocalesDialogFilterStyle {
+    pub java_name: &'static str,
+    pub font_color: &'static str,
+    pub over_font_color: &'static str,
+    pub disabled_font_color: &'static str,
+    pub disabled_drawable: &'static str,
+}
+
+pub const MAP_LOCALES_FILTER_STYLE: MapLocalesDialogFilterStyle = MapLocalesDialogFilterStyle {
+    java_name: MAP_LOCALES_FILTER_STYLE_NAME,
+    font_color: "lightGray",
+    over_font_color: "accent",
+    disabled_font_color: "gray",
+    disabled_drawable: "black",
+};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapLocalesDialogFilterButton {
+    pub label: &'static str,
+    pub checked: bool,
+    pub style: MapLocalesDialogFilterStyle,
+    pub width: f32,
+    pub height: f32,
+    pub pad_top: f32,
+    pub color: [f32; 4],
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MapLocalesDialogPropertyStatus {
@@ -295,6 +327,38 @@ impl MapLocalesDialog {
         } else {
             "@locales.searchlocale"
         }
+    }
+
+    pub fn filter_buttons_like_java(&self) -> [MapLocalesDialogFilterButton; 3] {
+        [
+            MapLocalesDialogFilterButton {
+                label: "@locales.showcorrect",
+                checked: self.show_correct,
+                style: MAP_LOCALES_FILTER_STYLE,
+                width: MAP_LOCALES_FILTER_BUTTON_WIDTH,
+                height: MAP_LOCALES_FILTER_BUTTON_HEIGHT,
+                pad_top: MAP_LOCALES_FILTER_BUTTON_PAD_TOP,
+                color: [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, Pal::ACCENT.a],
+            },
+            MapLocalesDialogFilterButton {
+                label: "@locales.showmissing",
+                checked: self.show_missing,
+                style: MAP_LOCALES_FILTER_STYLE,
+                width: MAP_LOCALES_FILTER_BUTTON_WIDTH,
+                height: MAP_LOCALES_FILTER_BUTTON_HEIGHT,
+                pad_top: MAP_LOCALES_FILTER_BUTTON_PAD_TOP,
+                color: [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, Pal::ACCENT.a],
+            },
+            MapLocalesDialogFilterButton {
+                label: "@locales.showsame",
+                checked: self.show_same,
+                style: MAP_LOCALES_FILTER_STYLE,
+                width: MAP_LOCALES_FILTER_BUTTON_WIDTH,
+                height: MAP_LOCALES_FILTER_BUTTON_HEIGHT,
+                pad_top: MAP_LOCALES_FILTER_BUTTON_PAD_TOP,
+                color: [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, Pal::ACCENT.a],
+            },
+        ]
     }
 
     pub fn main_column_count(screen_width: f32, scale: f32) -> usize {
@@ -1130,6 +1194,36 @@ mod tests {
         assert_eq!(team[0].name, "crux");
         assert_eq!(team[0].output, "⚔");
         assert_eq!(team[0].drawable_symbol.as_deref(), Some("team-crux"));
+    }
+
+    #[test]
+    fn filter_buttons_use_java_filter_style_and_metrics() {
+        let mut dialog = MapLocalesDialog::new();
+        dialog.set_filter_flags(true, false, true);
+        let buttons = dialog.filter_buttons_like_java();
+
+        assert_eq!(buttons[0].label, "@locales.showcorrect");
+        assert_eq!(buttons[1].label, "@locales.showmissing");
+        assert_eq!(buttons[2].label, "@locales.showsame");
+        assert!(buttons[0].checked);
+        assert!(!buttons[1].checked);
+        assert!(buttons[2].checked);
+
+        for button in buttons {
+            assert_eq!(button.style, MAP_LOCALES_FILTER_STYLE);
+            assert_eq!(button.style.java_name, "filterStyle");
+            assert_eq!(button.style.font_color, "lightGray");
+            assert_eq!(button.style.over_font_color, "accent");
+            assert_eq!(button.style.disabled_font_color, "gray");
+            assert_eq!(button.style.disabled_drawable, "black");
+            assert_eq!(button.width, 450.0);
+            assert_eq!(button.height, 100.0);
+            assert_eq!(button.pad_top, 65.0);
+            assert_eq!(
+                button.color,
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, Pal::ACCENT.a]
+            );
+        }
     }
 
     #[test]

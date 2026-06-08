@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.53%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.54%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：补齐 LanguageDialog 行按钮视觉语义
+## 最新闭环：补齐 MapLocalesDialog filterStyle 视觉语义
+
+- 当前总体迁移完成度：约 **99.54%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/editor/MapLocalesDialog.java`：`filterStyle` 使用 `fontColor=Color.lightGray`、`overFontColor=Pal.accent`、`disabledFontColor=Color.gray`、`disabled=Styles.black`；
+  - `@locales.showcorrect` / `@locales.showmissing` / `@locales.showsame` filter 按钮为 `size(450f, 100f).color(Pal.accent).padTop(65f)`。
+- 本轮实现：
+  - `core/src/mindustry/ui/dialogs/map_locales_dialog.rs`
+    - 新增 `MapLocalesDialogFilterStyle` 与 `MAP_LOCALES_FILTER_STYLE`；
+    - 新增 `MapLocalesDialogFilterButton` 与 `filter_buttons_like_java()`；
+    - 新增 `filter_buttons_use_java_filter_style_and_metrics`，锁住 filterStyle 颜色、disabled drawable、按钮尺寸与 checked 状态。
+  - `README.md`
+    - 迁移进度更新到 **99.54%**。
+  - `MIGRATION.md`
+    - 新增 `1177. 补齐 MapLocalesDialog filterStyle 视觉语义`。
+- 验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core filter_buttons_use_java_filter_style_and_metrics --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 下一步建议继续：
+  1. 继续补 MapLocalesDialog outlineLabel、property cards 颜色/disabled/empty 状态；
+  2. 继续审查可见 DrawText 中的 raw key、英文 token、类名和诊断格式；
+  3. Settings/Data 与字体/语言可见层继续隔离 fallback 泄漏。
+
+## 上一闭环：补齐 LanguageDialog 行按钮视觉语义
 
 - 当前总体迁移完成度：约 **99.53%**，仍未达到完整可玩。
 - 本轮对照：

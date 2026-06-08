@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1177. 补齐 MapLocalesDialog filterStyle 视觉语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.54%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/editor/MapLocalesDialog.java`：`filterStyle` 使用 `fontColor=Color.lightGray`、`overFontColor=Pal.accent`、`disabledFontColor=Color.gray`、`disabled=Styles.black`；
+  - `@locales.showcorrect` / `@locales.showmissing` / `@locales.showsame` filter 按钮为 `size(450f, 100f).color(Pal.accent).padTop(65f)`。
+- 本轮主改动：
+  - `core/src/mindustry/ui/dialogs/map_locales_dialog.rs`
+    - 新增 `MapLocalesDialogFilterStyle` 与 `MAP_LOCALES_FILTER_STYLE`；
+    - 新增 `MapLocalesDialogFilterButton` 与 `filter_buttons_like_java()`；
+    - 新增 `filter_buttons_use_java_filter_style_and_metrics`，锁住 filterStyle 颜色、disabled drawable、按钮尺寸与 checked 状态。
+  - `README.md`
+    - 迁移进度更新到 **99.54%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 MapLocalesDialog filterStyle 视觉语义补齐。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core filter_buttons_use_java_filter_style_and_metrics --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. 继续补 MapLocalesDialog outlineLabel、property cards 颜色/disabled/empty 状态；
+  2. 继续审查可见 DrawText 中的 raw key、英文 token、类名和诊断格式；
+  3. Settings/Data 与字体/语言可见层继续隔离 fallback 泄漏。
+
 ## 1176. 补齐 LanguageDialog 行按钮视觉语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
