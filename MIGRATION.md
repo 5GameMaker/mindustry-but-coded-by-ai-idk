@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1120. MapLocales 常见 UI 语言显示名补齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.86%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java`：locale 行显示名使用 `loc.getDisplayName(Core.bundle.getLocale())`；
+  - Rust 之前只覆盖 `en/zh/ja/ko/ru/de/fr`，其余 UI locale 会回落到 LanguageDialog native name，导致 MapLocalesDialog 的语言列表不像 Java。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 使用本机 JDK 17 的 `Locale.getDisplayName(displayLocale)` 生成并补入高收益显示名表：`id_ID/es/it/pt_BR/pt_PT/pl/tr`；
+    - `map_locales_display_names_for_ui_locale(...)` 新增 `id/es/it/pt/pl/tr` family 分支，其中 `pt_BR` 与 `pt_PT` 保持 Java 差异；
+    - `desktop_extend_font_seed_characters_from_map_locale_display_names(...)` 接入新增表，避免 MapLocalesDialog 新增语言行 lookup 正确但缺 glyph；
+    - 扩展 `desktop_map_locales_display_name_matches_java_for_non_english_ui_locales` 与 `desktop_graphics_font_seed_covers_map_locales_display_names_like_java`。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_map_locales_display_name_matches_java_for_non_english_ui_locales --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_graphics_font_seed_covers_map_locales_display_names_like_java --no-default-features`
+  - `cargo fmt`
+  - `git diff --check`
+- 后续继续优先：
+  1. 剩余 `be/bg/ca/cs/da/et/eu/fi/fil/hu/lt/nl/ro/sr/sv/th/tk/uk/vi` 等 UI family 仍需继续按 Java 生成补齐；
+  2. Bundle 优先级已发现 `mod` 应压过 `global.properties`，下一轮优先修；
+  3. 所有新增 UI 文本源都必须继续接入真实字体 seed/atlas 和实际 MapLocalesDialog render 路径。
+
 ## 1119. global.properties 文案纳入默认字体 seed
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

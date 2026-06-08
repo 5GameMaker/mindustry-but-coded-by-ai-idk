@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.85%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.86%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：global.properties 文案纳入默认字体 seed
+## 最新闭环：MapLocales 常见 UI 语言显示名补齐
+
+- 当前总体迁移完成度：约 **98.86%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/editor/MapLocalesDialog.java`：
+  - Java 使用 `loc.getDisplayName(Core.bundle.getLocale())` 生成 MapLocalesDialog 中 locale 行显示名；
+  - Rust 之前只覆盖 `en/zh/ja/ko/ru/de/fr`，其他 UI locale 会退回 LanguageDialog native name。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 用本机 JDK 17 生成 `id_ID/es/it/pt_BR/pt_PT/pl/tr` 的 Java display-name 表；
+    - `map_locales_display_names_for_ui_locale(...)` 新增 `id/es/it/pt/pl/tr` family，`pt_BR` 与 `pt_PT` 分表；
+    - 新增表接入 `desktop_extend_font_seed_characters_from_map_locale_display_names(...)`；
+    - 扩展 `desktop_map_locales_display_name_matches_java_for_non_english_ui_locales` 和 `desktop_graphics_font_seed_covers_map_locales_display_names_like_java`。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_map_locales_display_name_matches_java_for_non_english_ui_locales --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_graphics_font_seed_covers_map_locales_display_names_like_java --no-default-features`
+  - `cargo fmt`
+  - `git diff --check`
+- 下一步建议继续：
+  1. 最高优先修 Bundle 优先级：Java 应为 `mod > global.properties > external/internal/routerized internal`，Rust 当前 explorer 指出 `global > mod`；
+  2. 继续补 MapLocales 剩余 UI family：`be/bg/ca/cs/da/et/eu/fi/fil/hu/lt/nl/ro/sr/sv/th/tk/uk/vi`；
+  3. Join/Load/Database 子菜单视觉继续按 Java 源码逐项收口。
+
+## 上一闭环：global.properties 文案纳入默认字体 seed
 
 - 当前总体迁移完成度：约 **98.85%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/Vars.java`：
