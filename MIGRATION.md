@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1154. 接入 Campaign locked hoverLabel canSelect 分支
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.31%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/PlanetDialog.java:414-435`：`canSelect(Sector)` 决定 sector 是否可选；
+  - `core/src/mindustry/ui/dialogs/PlanetDialog.java:952-973`：不可选 hovered sector 在 `planetLaunch` 显示 `Iconc.cancel`，普通 look 模式通过 generator locked text 显示锁定文案，可选时才显示 `[accent][[ [white]{name}[accent] ]`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `campaign_runtime_sector_by_id(...)`、`campaign_sector_can_select_like_java(...)` 与 `campaign_sector_hover_label_like_java(...)`，把 Campaign hoverLabel 从固定显示 sector 名字改为按 Java `canSelect`/locked/cancel 分支决策；
+    - locked preset sector hover 现在显示本地化 `[gray]Locked`，不再误渲染为可选 sector-name hoverLabel；
+    - `PlanetLaunch` 被拦截 sector 的 hover 文案走 `Iconc.cancel` 对应 icon glyph，并明确使用 `RenderFontId::Icon`；
+    - 扩展 Campaign route 回归测试，锁定 locked 文案本地化、旧 selectable hover 文案不再泄漏、cancel glyph 使用 icon font。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_selecting_sector_updates_dialog_state_and_launch --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_uses_large_icons_like_java_for_sector_states --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_sectorlist_expands_searches_and_selects_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. 继续对照 Java LaunchLoadout 的 `SchematicImage` 预览和候选项 200 方卡；
+  2. 继续收紧 Controls 子菜单未知 keybind raw fallback；
+  3. 继续补 SectorSelectDialog 完整滚动结果、Settings/Language/Controls 字体与所有子菜单视觉。
+
 ## 1153. 收口 MapPlay help 弹窗 ScrollPane 与正文字号
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
