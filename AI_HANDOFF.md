@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.13%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.14%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，字体与语言链路继续优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：接入战役星球大图标、模组选择缺值与 About/Discord 本地化文案
+## 最新闭环：收口 Load/Save 模式过滤 tooltip chrome
+
+- 当前总体迁移完成度：约 **99.14%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LoadDialog.java:65-72`：Gamemode 过滤按钮是 `Styles.emptyTogglei`，并挂 `.tooltip("@mode." + mode.name() + ".name")`。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - `push_load_game_mode_filter_hover_tooltip(...)` 改成 Java tooltip 风格：`black6` 背景、4f margin、28f 高度、11f 文本；
+    - 移除原先 Rust-only 的 `pane + StrokeRect` 蓝色描边；
+    - 扩展 LoadDialog mode filter 测试，锁定黑底、无描边、文字位置与字号。
+  - `README.md`
+    - 迁移进度更新到 **99.14%**。
+  - `MIGRATION.md`
+    - 新增 `1138. 收口 Load/Save 模式过滤 tooltip chrome`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog --lib -- --nocapture`
+  - `git diff --check`
+- 下一步建议继续：
+  1. ModsBrowser selection/detail 的 `pane + wrap + pad` 文本节奏继续按 Java `ModsDialog` 收口；
+  2. Load/Save 其它 tooltip/按钮 hover 细节继续对照 Java `LoadDialog` / `SaveDialog`；
+  3. MapLocales 继续补 addIcon/rollback/editDialog 更重分支；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
+## 上一闭环：接入战役星球大图标、模组选择缺值与 About/Discord 本地化文案
 
 - 当前总体迁移完成度：约 **99.13%**，仍未达到完整可玩。
 - 本轮对照：

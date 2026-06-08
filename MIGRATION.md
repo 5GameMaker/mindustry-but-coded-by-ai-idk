@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1138. 收口 Load/Save 模式过滤 tooltip chrome
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.14%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java:65-72`：Gamemode 过滤按钮为 `Styles.emptyTogglei`，并通过 `.tooltip("@mode." + mode.name() + ".name")` 展示模式名；
+  - Java tooltip 语义是紧凑黑底 tooltip，不是 Rust-only 的 `pane + stroke` 蓝色描边提示框。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_load_game_mode_filter_hover_tooltip(...)` 改为 Java tooltip 风格：`Styles.black6` 等价背景、4f margin、28f 高度、11f 文本；
+    - 移除同一 tooltip rect 上的 Rust-only `StrokeRect`；
+    - 扩展 `desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog`，锁定 tooltip 背景、尺寸、文字位置与无描边行为。
+  - `README.md`
+    - 迁移进度更新到 **99.14%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 Load/Save 模式过滤 tooltip chrome 收口。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog --lib -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. ModsBrowser selection/detail 的 `pane + wrap + pad` 文本节奏继续按 Java `ModsDialog` 收口；
+  2. Load/Save 其它 tooltip/按钮 hover 细节继续对照 Java `LoadDialog` / `SaveDialog`；
+  3. MapLocales 已有 filterDialog 主链路，后续继续补 addIcon/rollback/editDialog 更重分支；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1137. 接入战役星球大图标、模组选择缺值与 About/Discord 本地化文案
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
