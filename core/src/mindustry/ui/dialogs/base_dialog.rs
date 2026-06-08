@@ -426,12 +426,27 @@ impl BaseDialog {
     }
 
     pub fn shell_render_commands(&self, layout: DialogShellLayout) -> Vec<RenderCommand> {
+        self.shell_render_commands_with_title_text(layout, self.title.clone())
+    }
+
+    /// Java-style render seam that accepts a pre-localized title copy right
+    /// before the dialog shell is materialized.
+    ///
+    /// This keeps the stored `title` key/value unchanged for compatibility,
+    /// while allowing callers to avoid painting raw markup keys like
+    /// `@settings.language` when the render path already resolved them.
+    pub fn shell_render_commands_with_title_text(
+        &self,
+        layout: DialogShellLayout,
+        title_text: impl Into<String>,
+    ) -> Vec<RenderCommand> {
         let mut commands = self.style.skin_commands(layout);
-        if !self.title.is_empty() {
+        let title_text = title_text.into();
+        if !title_text.is_empty() {
             commands.insert(
                 2.min(commands.len()),
                 RenderCommand::draw_text_styled(
-                    self.title.clone(),
+                    title_text,
                     layout.title_position,
                     self.style
                         .title
@@ -664,6 +679,31 @@ mod tests {
         assert!(
             !title_style.outline,
             "Java Styles.defaultDialog.titleFont is Fonts.def; BaseDialog title must not add a Rust-only runtime outline pass"
+        );
+    }
+
+    #[test]
+    fn base_dialog_shell_commands_accept_prelocalized_title_without_mutating_source_title() {
+        let dialog = BaseDialog::new("@settings.language");
+        let layout = DialogShellLayout::from_stage_and_panel(
+            RenderRect::new(0.0, 0.0, 800.0, 600.0),
+            RenderRect::new(140.0, 160.0, 520.0, 220.0),
+        );
+
+        let commands = dialog.shell_render_commands_with_title_text(layout, "语言");
+
+        assert_eq!(dialog.title, "@settings.language");
+        assert!(
+            commands.iter().any(
+                |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "语言")
+            ),
+            "the render seam should draw the prelocalized title copy"
+        );
+        assert!(
+            commands
+                .iter()
+                .all(|command| !matches!(command, RenderCommand::DrawText { text, .. } if text == "@settings.language")),
+            "the render seam should not leak the raw title key onto screen"
         );
     }
 

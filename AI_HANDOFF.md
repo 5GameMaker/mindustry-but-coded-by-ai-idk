@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.19%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.20%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，字体与语言链路继续优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,55 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 Settings Data 长本地化确认弹窗与星球文案兜底
+## 最新闭环：收口语言标题、properties UTF-8 边界与 UI 资源诊断
+
+- 当前总体迁移完成度：约 **99.20%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/BaseDialog.java`：dialog 标题应在真实绘制前显示当前 bundle 文案，不能把 raw `@settings.language` 落屏；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java`：语言页标题与 400x50 行按钮保留 Java 数据模型，desktop 渲染入口传入本地化显示文本；
+  - Java `.properties` 语义：UTF-8 BOM 与 surrogate pair 必须按 Java properties 解码；
+  - Java UI 显式弹窗入口：只解析 leading bundle key，后续 literal `@token` 不应递归展开；
+  - 上游 UI skin 资源：缺失时需要在启动诊断中明确显示缺失 sprite，便于排查黑屏/空白。
+- 本轮实现：
+  - `core/src/mindustry/ui/dialogs/base_dialog.rs`
+    - 新增 `shell_render_commands_with_title_text(...)`，保持 raw title 状态不变但允许绘制预本地化标题；
+    - 新增 raw `@settings.language` 不落屏回归。
+  - `core/src/mindustry/ui/dialogs/language_dialog.rs`
+    - 新增 `new_with_title_text(...)` 与 `rows_with_display_names(...)`，为 LanguageDialog 标题/按钮文案提供渲染前本地化 seam。
+  - `desktop/src/lib.rs`
+    - Settings 子弹窗标题走预本地化 BaseDialog seam，避免 `@settings.language` / `@settings.data` 落屏；
+    - Java properties 解析补 UTF-8 BOM 与 surrogate pair 合并；
+    - Join/错误弹窗 raw error key 改走 leading-key 本地化边界；
+    - Database `ContentInfoDialog` stat label 绘制前本地化，避免 `@stat.range` 可见；
+    - 桌面主菜单最终 `RenderCommand::DrawText` 级断言覆盖 Settings/Mods/Database/Schematics/About 在 `zh_CN` 下不漏 raw key；
+    - About credits footer 按钮尺寸收口到 Java-like 200x64；
+    - 启动诊断增加 UI skin sprite 缺失统计和首个缺失路径。
+  - `README.md`
+    - 迁移进度更新到 **99.20%**。
+  - `MIGRATION.md`
+    - 新增 `1144. 收口语言标题、properties UTF-8 边界与 UI 资源诊断`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core base_dialog --lib -- --nocapture`
+  - `cargo test -p mindustry-core language_dialog --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_leading_bundle_key_localization_keeps_literal_mid_string_keys_like_java_dialogs --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_uses_settings_locale_bundle_for_menu_buttons --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_bundle_properties_parser_handles_java_escape_semantics --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_frame_draws_visible_asset_diagnostics_when_assets_are_missing --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_database_search_matches_java_localized_name_only --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_database_content_info_stats_keep_java_stat_categories --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_shows_join_info_once_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_blocks_version_mismatch_like_java_safe_connect --lib -- --nocapture`
+  - `git diff --check`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 下一步建议继续：
+  1. 继续逐页扫描实际 `RenderCommand::DrawText`，补齐 Settings/Join/Host/About/Database/Load/Save/Mods/Planet/TechTree 子菜单 raw-key 防漏断言；
+  2. 继续按 Java `Skin`/`Styles` 对齐 UI skin 九宫格、tooltip、按钮 hover/pressed/disabled、字体 shadow/outline 与行高；
+  3. `ContentInfoDialog` 通用 `content.displayExtra(table)` 仍需继续补齐；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 上一闭环：收口 Settings Data 长本地化确认弹窗与星球文案兜底
 
 - 当前总体迁移完成度：约 **99.19%**，仍未达到完整可玩。
 - 本轮对照：

@@ -42,9 +42,22 @@ pub struct LanguageDialog {
 
 impl LanguageDialog {
     pub fn new(locales: Vec<LanguageDialogLocale>, selected_locale: impl Into<String>) -> Self {
+        Self::new_with_title_text(LANGUAGE_DIALOG_TITLE_KEY, locales, selected_locale)
+    }
+
+    /// Java-style render seam that allows the caller to supply a localized
+    /// dialog title before the dialog shell is drawn.
+    ///
+    /// The default `new(...)` constructor still keeps the raw key for
+    /// compatibility with the existing tests and upstream-like state model.
+    pub fn new_with_title_text(
+        title_text: impl Into<String>,
+        locales: Vec<LanguageDialogLocale>,
+        selected_locale: impl Into<String>,
+    ) -> Self {
         let selected_locale = selected_locale.into();
         Self {
-            base: BaseDialog::new(LANGUAGE_DIALOG_TITLE_KEY),
+            base: BaseDialog::new(title_text),
             locales,
             selected_locale,
             last_restart_message: None,
@@ -52,11 +65,35 @@ impl LanguageDialog {
     }
 
     pub fn rows(&self) -> Vec<LanguageDialogRow> {
+        self.rows_with_display_names(
+            self.locales
+                .iter()
+                .map(|locale| locale.display_name.clone()),
+        )
+    }
+
+    /// Java-style render seam for pre-localized button copy.
+    ///
+    /// The row metadata stays tied to the locale list and selected state, while
+    /// the caller may swap in already-localized button labels at render time.
+    pub fn rows_with_display_names<I, S>(&self, display_names: I) -> Vec<LanguageDialogRow>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let display_names = display_names
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<_>>();
         self.locales
             .iter()
-            .map(|locale| LanguageDialogRow {
+            .enumerate()
+            .map(|(index, locale)| LanguageDialogRow {
                 code: locale.code.clone(),
-                display_name: locale.display_name.clone(),
+                display_name: display_names
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| locale.display_name.clone()),
                 selected: locale.code == self.selected_locale,
                 button_width: LANGUAGE_DIALOG_ROW_WIDTH,
                 button_height: LANGUAGE_DIALOG_ROW_HEIGHT,
@@ -147,6 +184,59 @@ mod tests {
                     button_height: 50.0,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn language_dialog_accepts_prelocalized_title_and_button_texts_before_render() {
+        let dialog = LanguageDialog::new_with_title_text(
+            "语言",
+            vec![
+                LanguageDialogLocale::new("en", "English"),
+                LanguageDialogLocale::new("zh_CN", "简体中文"),
+            ],
+            "zh_CN",
+        );
+
+        assert_eq!(dialog.base.title, "语言");
+        assert_eq!(
+            dialog.rows_with_display_names(["English", "简体中文"]),
+            vec![
+                LanguageDialogRow {
+                    code: "en".into(),
+                    display_name: "English".into(),
+                    selected: false,
+                    button_width: 400.0,
+                    button_height: 50.0,
+                },
+                LanguageDialogRow {
+                    code: "zh_CN".into(),
+                    display_name: "简体中文".into(),
+                    selected: true,
+                    button_width: 400.0,
+                    button_height: 50.0,
+                },
+            ]
+        );
+        assert_eq!(
+            dialog.rows(),
+            vec![
+                LanguageDialogRow {
+                    code: "en".into(),
+                    display_name: "English".into(),
+                    selected: false,
+                    button_width: 400.0,
+                    button_height: 50.0,
+                },
+                LanguageDialogRow {
+                    code: "zh_CN".into(),
+                    display_name: "简体中文".into(),
+                    selected: true,
+                    button_width: 400.0,
+                    button_height: 50.0,
+                },
+            ],
+            "the legacy rows() path must remain compatible for existing tests and callers"
         );
     }
 

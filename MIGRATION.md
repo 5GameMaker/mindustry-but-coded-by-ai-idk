@@ -19,6 +19,56 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1144. 收口语言标题、properties UTF-8 边界与 UI 资源诊断
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.20%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/BaseDialog.java`：dialog 标题最终进入 Scene2D label 前应使用当前 bundle 文案，不能把 `@settings.language` 等 raw key 画到客户端；
+  - `core/src/mindustry/ui/dialogs/LanguageDialog.java`：语言页标题与 400x50 行按钮仍保留 Java 数据模型，但 desktop 渲染入口需要传入已本地化显示文本；
+  - `java.util.Properties` / 上游 bundle 文件：UTF-8 BOM 与 `\uD83D\uDE80` 这类 surrogate pair 需要按 Java properties 语义解析；
+  - `core/assets/sprites/ui/*` 与 Java skin：前端缺 UI skin 贴图时应在启动诊断中明确暴露缺失资源，而不是继续表现为黑屏/纯空白。
+- 本轮主改动：
+  - `core/src/mindustry/ui/dialogs/base_dialog.rs`
+    - 新增 `shell_render_commands_with_title_text(...)`，允许 desktop 在不改写 raw title 状态的前提下绘制已本地化标题；
+    - 新增回归测试，锁住预本地化标题不会把 raw `@settings.language` 落屏。
+  - `core/src/mindustry/ui/dialogs/language_dialog.rs`
+    - 新增 `new_with_title_text(...)` 与 `rows_with_display_names(...)`，为 LanguageDialog 标题/按钮文案提供渲染前本地化 seam；
+    - 保持 legacy `new(...)` / `rows()` 的 raw key 与行模型兼容。
+  - `desktop/src/lib.rs`
+    - Settings 子弹窗标题绘制改走 `shell_render_commands_with_title_text(...)`，避免 `@settings.language` / `@settings.data` 等 raw key 可见；
+    - `LanguageDialog` desktop 行渲染使用已本地化显示名；
+    - Java properties 解析补 UTF-8 BOM 与 surrogate pair 合并；
+    - Join/错误弹窗中的 raw error key 改走 `localize_leading_bundle_key_text_like_java(...)`，只解析 leading bundle key，保留后续 literal `@token`；
+    - 扩展桌面主菜单最终 `RenderCommand::DrawText` 级断言，覆盖 Settings/Mods/Database/Schematics/About 在 `zh_CN` 下不漏 raw key；
+    - `ContentInfoDialog` 的 stat label 绘制前走 bundle 本地化，不再显示 `@stat.range` 等 raw key；
+    - About credits footer 按钮尺寸收口到 Java-like 200x64；
+    - 启动诊断增加 UI skin sprite 缺失统计与首个缺失路径，辅助继续排查黑屏/资源缺失。
+  - `README.md`
+    - 迁移进度更新到 **99.20%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为语言标题、properties UTF-8 边界与 UI 资源诊断收口。
+- 已验证：
+  - `cargo test -p mindustry-core base_dialog --lib -- --nocapture`
+  - `cargo test -p mindustry-core language_dialog --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_leading_bundle_key_localization_keeps_literal_mid_string_keys_like_java_dialogs --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_uses_settings_locale_bundle_for_menu_buttons --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_bundle_properties_parser_handles_java_escape_semantics --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_frame_draws_visible_asset_diagnostics_when_assets_are_missing --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_database_search_matches_java_localized_name_only --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_database_content_info_stats_keep_java_stat_categories --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_shows_join_info_once_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_blocks_version_mismatch_like_java_safe_connect --lib -- --nocapture`
+  - `cargo fmt --all`
+  - `git diff --check`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. 继续逐页扫描实际 `RenderCommand::DrawText`，保证 Settings/Join/Host/About/Database/Load/Save/Mods/Planet/TechTree 子菜单不再漏 raw bundle key；
+  2. 继续按 Java `Skin`/`Styles` 对齐 UI skin 九宫格、tooltip、按钮 hover/pressed/disabled、字体 shadow/outline 与行高；
+  3. `ContentInfoDialog` 仍需补齐通用 `content.displayExtra(table)`，当前只覆盖部分可见 extra；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1143. 收口 Settings Data 长本地化确认弹窗与星球文案兜底
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
