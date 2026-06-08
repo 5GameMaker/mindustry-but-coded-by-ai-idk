@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.37%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.38%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 LaunchLoadoutDialog 底部按钮与缺资源提示
+## 最新闭环：清理 DiscordDialog route debug 与 BE 检查英文断言
+
+- 当前总体迁移完成度：约 **99.38%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/DiscordDialog.java`：标题为空，正文卡片 `520x70`，左侧 Discord 蓝条，底部按钮为 `@back`、`@copylink`、`@openlink`，按钮尺寸 `170x50`；
+  - Java `MenuFragment` 的 BE check 文案走 bundle key `@be.check`，测试不应硬编码英文。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - Discord route 不再渲染 `upstream:` / `discord:` / `url:` / `button:` 等 route-shell 调试文本；
+    - 为 Discord route 增加 Java-like `Tex.button` 正文卡片、Discord 蓝色左条、icon font glyph 和本地化 `@discord` 文案；
+    - 保留底部 `@back` / `@copylink` / `@openlink` 三按钮主链路；
+    - BE check 相关测试改为使用 `localize_bundle_markup_text("@be.check")`，避免英文硬编码导致语言/字体回归误判。
+  - `README.md`
+    - 迁移进度更新到 **99.38%**。
+  - `MIGRATION.md`
+    - 新增 `1161. 清理 DiscordDialog route debug 与 BE 检查英文断言`。
+- 验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_desktop_and_discord_chrome_buttons --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_records_discord_and_becheck_actions --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_narrow_desktop_viewport_keeps_desktop_chrome_like_java_platform_branch --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_hit_test_and_actions_share_layout --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 下一步建议继续：
+  1. 按并行 explorer 输出优先收 Settings/Data、About/Credits、Join/Host/Multiplayer、字体/语言资源链；
+  2. 继续清理 raw icon/name fallback、英文硬编码和 route debug 文案；
+  3. 继续以 Java 原版子菜单为准补 UI chrome、字体大小、颜色、行距和按钮尺寸。
+
+## 上一闭环：收口 LaunchLoadoutDialog 底部按钮与缺资源提示
 
 - 当前总体迁移完成度：约 **99.37%**，仍未达到完整可玩。
 - 本轮对照：
