@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1129. 接入 MapLocales filterDialog 子弹窗
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.03%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java:114-136`：主界面顶部 `Icon.filter` 打开 `filterDialog(this::buildMain)`，不是直接切换搜索模式；
+  - `core/src/mindustry/editor/MapLocalesDialog.java:483-508`：property view 顶部 `Icon.filter` 打开同一个 `filterDialog(() -> buildPropView(key))`；
+  - `core/src/mindustry/editor/MapLocalesDialog.java:580-617`：`BaseDialog("@locales.filter")` 内含 `@search`、`@locales.byname`、`@locales.byvalue`、`@locales.showcorrect`、`@locales.showmissing`、`@locales.showsame` 与 `@back`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 为 MapLocales 增加 `editor_map_locales_filter_open` 桌面状态、打开/关闭动作、`SetEditorLocalesSearchByValue(bool)` 与三种状态开关 action；
+    - 主 MapLocales 顶部 filter 图标与 property view filter 图标改为打开 Java 式独立 `@locales.filter` 子弹窗，不再直接 toggle `search_by_value`；
+    - 新增 filterDialog 几何、modal hit-test、Back/Esc 栈关闭顺序和 BaseDialog shell 渲染；
+    - filterDialog 内的 by name/by value 使用 `Styles.togglet` 选中态，show correct/missing/same 使用 `whitePane` + `Pal.gray/accent/techBlue` 状态色与 `ok/cancel` 图标；
+    - 子弹窗状态直接调用现有 `MapLocalesDialog::set_search_by_value(...)` 与 `set_filter_flags(...)`，继续接入真实 main/property view filtering。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_locales -- --nocapture`
+  - `cargo test -p mindustry-core map_locales -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. MapLocales `addIconDialog` / rollback / locale edit / import-export 子弹窗继续对照 Java；
+  2. 子代理审查出的 JoinDialog 动态描述、`modeName`、ModsDialog displayName/author 缺失、错误文本原样显示等本地化缺口继续收口；
+  3. Settings / Join / Database / ContentInfo / Host / Load 等用户可见子菜单继续按 Java 视觉和默认字体节奏对齐；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
 ## 1128. 收口 ModsBrowser 子弹窗字体与动态语言值
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
