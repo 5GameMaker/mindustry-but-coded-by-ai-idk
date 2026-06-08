@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.99%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.00%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,38 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 MapLocalesDialog 主弹窗字体节奏
+## 最新闭环：收口 ModsBrowser 搜索排序与卡片视觉节奏
+
+- 当前总体迁移完成度：约 **99.00%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/ModsDialog.java`：
+  - browser 顶部 search 是 TextField 语义，不应使用 `grayt` 按钮背景；
+  - sort 控件是 `Styles.emptyi` 图标按钮，`size(40f)`，文字只属于 tooltip；
+  - browser entry 是 `TextButton(..., Styles.grayt)`，卡片边框由 drawable 自带；
+  - entry `infoText` 使用换行拼接，保持默认 label 节奏。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 将 `grayt` / `flatBordert` 纳入 Java drawable 自带边框样式，防止 Rust 额外 stroke；
+    - ModsBrowser 标题、搜索图标/文本、卡片标题/info 回到默认 UI 字号并去掉额外 runtime outline；
+    - 搜索背景切回 TextField，sort 改为 40x40 `emptyi` icon-only；
+    - card 背景切回 `grayt`，info 文本改为 Java-like 多行 label 并补 wrap width；
+    - 扩展 `desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries` 锁住上述视觉/字体行为。
+  - `README.md`
+    - 迁移进度更新到 **99.00%**。
+  - `MIGRATION.md`
+    - 新增 `1126. 收口 ModsBrowser 搜索排序与卡片视觉节奏`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_scrolls_all_matching_cards_like_java_scrollpane -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_sortdate_uses_last_updated_like_java_listing -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_card_click_only_opens_selection_modal_like_java -- --nocapture`
+  - `git diff --check`
+- 下一步建议继续：
+  1. ModsBrowser selection / release / detail 子弹窗字号、outline 与按钮样式继续按 Java `ModsDialog` 收口；
+  2. MapLocalesDialog property view dialog 桌面接线；
+  3. 字体/语言资源加载链路与所有可达子菜单继续审查；完整可玩与 Java↔Rust 联机兼容仍需推进，不能宣告目标完成。
+
+## 上一闭环：收口 MapLocalesDialog 主弹窗字体节奏
 
 - 当前总体迁移完成度：约 **98.99%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/editor/MapLocalesDialog.java`：

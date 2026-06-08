@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1126. 收口 ModsBrowser 搜索排序与卡片视觉节奏
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.00%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/ModsDialog.java` 的 browser 顶部搜索区使用 TextField，排序按钮是 `Styles.emptyi` 图标按钮且 `size(40f)`；
+  - browser entry 是 `TextButton(..., Styles.grayt)`，卡片边框由 `grayt` drawable 自身负责；
+  - `infoText` 是多行 label：已安装提示、星数、版本警告按换行拼接，不是 Rust-only 的 pipe 小字说明。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `grayt` / `flatBordert` 归入 Java drawable 自带边框样式，避免额外 stroke；
+    - ModsBrowser 搜索框改回 TextField 背景，排序按钮改为 40x40 `emptyi` icon-only；
+    - Browser 标题、搜索文本、卡片标题和 info 文本回到 Java 默认 UI 字号，并去掉额外 runtime outline；
+    - Browser card 改回 `Styles.grayt` 语义，info 文本从 pipe 拼接改为 Java-like 多行 label，并补 wrap width；
+    - 扩展 ModsBrowser 测试，锁住搜索框背景、sort 尺寸/样式、grayt 卡片、无额外 stroke、默认字号和多行 info。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_scrolls_all_matching_cards_like_java_scrollpane -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_sortdate_uses_last_updated_like_java_listing -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_card_click_only_opens_selection_modal_like_java -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. ModsBrowser selection / release / detail 子弹窗字号、outline、按钮样式继续按 Java `ModsDialog` 收口；
+  2. MapLocalesDialog property view dialog 桌面接线与 property view cards；
+  3. 字体/语言资源加载链路与所有子菜单视觉继续审查，不能宣告完整目标完成。
+
 ## 1125. 收口 AboutDialog 默认字体节奏
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
