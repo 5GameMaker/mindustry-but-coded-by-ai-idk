@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1122. MapLocales 越南语与荷兰语显示名补齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.88%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java`：locale 行显示名继续按 `Locale.getDisplayName(Core.bundle.getLocale())`；
+  - 上轮补了 `id/es/it/pt/pl/tr`，本轮补 explorer 建议的高收益追加项 `vi/nl`，其中 `nl_BE` 作为具体 UI locale 保持单独入口。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 用本机 JDK 17 生成并补入 `MAP_LOCALES_VIETNAMESE_DISPLAY_NAMES`、`MAP_LOCALES_DUTCH_DISPLAY_NAMES`、`MAP_LOCALES_DUTCH_BELGIUM_DISPLAY_NAMES`；
+    - `map_locales_display_names_for_ui_locale(...)` 新增 `vi` 与 `nl/nl_BE` 分支；
+    - `desktop_extend_font_seed_characters_from_map_locale_display_names(...)` 接入新增表；
+    - 扩展 MapLocales 显示名与字体 seed 回归测试。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_map_locales_display_name_matches_java_for_non_english_ui_locales --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_graphics_font_seed_covers_map_locales_display_names_like_java --no-default-features`
+  - `cargo fmt`
+  - `git diff --check`
+- 后续继续优先：
+  1. 继续补剩余 MapLocales UI family；
+  2. 整合 JoinDialog saved server card explorer 结果；
+  3. 保持所有新增 UI 文本源进入真实字体 seed/atlas 和实际渲染链路。
+
 ## 1121. Mod bundle 覆盖 global.properties 优先级
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
