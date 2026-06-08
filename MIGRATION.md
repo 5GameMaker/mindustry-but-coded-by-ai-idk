@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1152. 收口 UI 图标字体、toggle 状态与数据页 chrome
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.29%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/SectorSelectDialog.java:24-82`：搜索区使用 `Icon.zoom` 与 Java icon font，列表控件不应依赖普通字体里的 raw 符号；
+  - `core/src/mindustry/ui/dialogs/LaunchLoadoutDialog.java:124-143`：`@resources.max` 使用 `Styles.togglet` checked 状态，`@resources` 在 max 开启时 disabled，不用 raw `✓` 文本前缀；
+  - `core/src/mindustry/ui/dialogs/ResearchDialog.java`：research progress 走 `Core.bundle.format("research.progress", percent)`；
+  - `core/src/mindustry/ui/dialogs/SettingsMenuDialog.java`：Data/PlanetData 以 `Tex.button` 作为 table 背景，不额外叠 Rust-only container stroke。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Campaign sector list 的搜索、折叠/展开、清除控件改用 Java icon font glyph，避免 `⌕/⌃/⌄/×` 这类 raw Unicode 普通字体依赖；
+    - `push_settings_text_button_enabled_checked_with_style(...)` 接入 checked style seam，并将 LaunchLoadout `@resources.max` 改为 `togglet` checked 按钮；
+    - TechTree 节点详情的 progress 文案改为 bundle format 输出；
+    - 删除 Settings Data/PlanetData 容器上的额外 stroke，保留 Java `Tex.button`/`Styles.flatt` 语义；
+    - 扩展对应 UI 回归测试，锁定 icon font、toggle checked、progress 本地化和容器无额外 stroke。
+  - `core/assets/icons/icons.properties`
+    - 与上游 LF 字节级对齐，避免图标属性资源 hash/EOL 漂移继续干扰字体/图标链路核对。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_sectorlist_expands_searches_and_selects_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_button_opens_loadout_then_seeds_playable_smoke_world --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_techtree_node_detail_renders_cost_weighted_progress_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_data_confirm_dialog_wraps_long_locales_like_java --lib -- --test-threads=1 --nocapture`
+- 后续继续优先：
+  1. 继续补 Campaign locked hover text 与 SectorSelectDialog 完整滚动结果；
+  2. 继续对照 Java LaunchLoadout 的 `SchematicImage` 预览和候选项 checked/disabled 视觉；
+  3. 继续精修 MapPlayDialog help、Settings/Language/Controls 字体与所有子菜单视觉。
+
 ## 1151. 收口 Campaign LaunchLoadout 候选卡片 debug 文案
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
