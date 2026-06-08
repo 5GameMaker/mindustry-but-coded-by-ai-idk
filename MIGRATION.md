@@ -35808,6 +35808,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Join、CustomGame、Database/ContentInfo 子菜单视觉和交互状态仍需继续逐项对照 Java；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
 
+## 1066. 收口 MapLocalesDialog 主弹窗字体节奏
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **98.99%**，仍未达到完整可玩；继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/editor/MapLocalesDialog.java` 构造使用 `super("@editor.locales")`，标题应继承 BaseDialog 默认标题节奏；
+  - `buildLocalesTable()` 的 locale 行是 `Styles.flatTogglet` TextButton，宽 `200f`、最小高 `50f`，显示 `loc.getDisplayName(Core.bundle.getLocale())`；
+  - 主区域 `buildMain()` 的属性 key/value 使用 TextField/TextArea 默认字体节奏；
+  - 右侧 property addition 面板使用 `t.field(...)`、`t.area(...)` 与 `t.button("@add", Icon.add, ...)`，不是 9～11px 的 Rust-only caption。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `MAP_LOCALES_TITLE_FONT_SIZE_LIKE_JAVA = 24.0` 与 `MAP_LOCALES_TEXT_FONT_SIZE_LIKE_JAVA = SETTINGS_JAVA_DEFAULT_FONT_SIZE`；
+    - MapLocales 主弹窗标题去掉额外 runtime outline，并回到 BaseDialog 默认标题字号；
+    - 搜索图标/文本、apply-to-all、语言分组标题、locale 行、property name/value placeholder、property card key/value、empty 文本统一回到默认 UI 字号节奏；
+    - 扩展 `desktop_launcher_editor_map_locales_renders_java_three_pane_content_like_java`，锁住 title/locale/apply/property/card 文本字号与非 outline。
+  - `README.md`
+    - 迁移进度更新到 **98.99%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 MapLocalesDialog 主弹窗字体节奏收口；同时记录 Language/Settings 审查无硬差异。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_locales_renders_java_three_pane_content_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_locales_search_filter_and_row_selection_match_java -- --nocapture`
+- 仍未完成：
+  - MapLocalesDialog property view dialog 桌面接线和 property view cards 渲染仍需继续补齐；
+  - ModsBrowser / release / detail 子页面仍需继续按 Java `ModsDialog` 收口；
+  - Database/ContentInfo 的 `UnlockableContent.displayDescription()` mod displayName 追加语义仍需继续对齐；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1065. 收口 ModsDialog 主页面字体节奏与 content icon 字体计数
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

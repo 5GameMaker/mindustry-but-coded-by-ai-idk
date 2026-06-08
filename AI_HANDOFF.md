@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.98%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.99%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,38 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 ModsDialog 主页面字体节奏与 content icon 字体计数
+## 最新闭环：收口 MapLocalesDialog 主弹窗字体节奏
+
+- 当前总体迁移完成度：约 **98.99%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/editor/MapLocalesDialog.java`：
+  - `MapLocalesDialog` 使用 `super("@editor.locales")`，标题应继承 BaseDialog 默认标题节奏；
+  - locale 行是 `Styles.flatTogglet` TextButton，宽 `200f`、最小高 `50f`，显示 `loc.getDisplayName(Core.bundle.getLocale())`；
+  - property add 面板使用默认 TextField/TextArea/Button，主区域 property cards 也依赖默认字段/文本节奏，不应压成 9～11px 小字。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `MAP_LOCALES_TITLE_FONT_SIZE_LIKE_JAVA = 24.0` 与 `MAP_LOCALES_TEXT_FONT_SIZE_LIKE_JAVA = SETTINGS_JAVA_DEFAULT_FONT_SIZE`；
+    - MapLocales 主弹窗标题去掉额外 runtime outline，并回到 BaseDialog 默认标题字号；
+    - 搜索图标/文本、apply-to-all、语言分组标题、locale 行、property placeholder、property card key/value、empty 文本统一回到默认 UI 字号；
+    - 扩展 `desktop_launcher_editor_map_locales_renders_java_three_pane_content_like_java`，锁住 title/locale/apply/property/card 文本字号与非 outline。
+  - `README.md`
+    - 迁移进度更新到 **98.99%**。
+  - `MIGRATION.md`
+    - 新增 `1066. 收口 MapLocalesDialog 主弹窗字体节奏`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_locales_renders_java_three_pane_content_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_map_locales_search_filter_and_row_selection_match_java -- --nocapture`
+- 子代理审查结论摘要：
+  1. Language/Settings：只读审查未发现硬差异；LanguageDialog 400x50 行、24 margin、`flatTogglet`、restart、router/in_ID/id_ID、bundle/global fallback 均已有实现和测试，暂不改。
+  2. Mods：后续重点是 ModsBrowser/search/sort/detail/release 的样式语义，尤其 `grayt`/`flatBordert` 额外 stroke、browser sort 40x40 `Styles.emptyi`、默认 label rhythm。
+  3. Database/ContentInfo：标题块已在 ScrollPane 内；真实缺口是 `displayDescription()` 还需追加 mod displayName，并覆盖所有 UnlockableContent 语义。
+- 下一步建议继续：
+  1. MapLocalesDialog property view dialog 桌面接线与 property view cards；
+  2. ModsBrowser / release / detail 子页面继续按 Java `ModsDialog` 收口；
+  3. Database / ContentInfo 的 `displayDescription()` mod displayName 追加语义；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 上一闭环：收口 ModsDialog 主页面字体节奏与 content icon 字体计数
 
 - 当前总体迁移完成度：约 **98.98%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/ModsDialog.java` 与 `core/src/mindustry/ui/Fonts.java`：
@@ -53,19 +84,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `cargo test -p mindustry-desktop desktop_launcher_mods_route_renders_state_and_reload_required_like_java_dialog -- --nocapture`
   - `cargo test -p mindustry-desktop desktop_font_rasterization_plan_bridges_fonts_icons_and_texture_atlas -- --nocapture`
   - `cargo test -p mindustry-desktop desktop_font_glyph_upload_plan_emits_runtime_texture_upload_when_ready -- --nocapture`
-- 子代理审查结论摘要：
-  1. MapLocales：尺寸多数已对齐，下一步优先收口 desktop 渲染层硬编码小字号，并补 property view dialog 接线/测试。
-  2. Database/ContentInfo：标题块已在 ScrollPane 内；真实缺口是 `displayDescription()` 还需追加 mod displayName，并覆盖所有 UnlockableContent 语义。
-  3. Fonts：Default/Outline/content icon/router glyph 主链已基本对齐；本轮已修 content icon 字体计划双 glyph 计数。
-  4. Language：本轮 explorer 因模型容量失败，下一轮需要重新派只读审查 LanguageDialog/Settings language。
-- 下一步建议继续：
-  1. ModsBrowser / release / detail 子页面继续按 Java `ModsDialog` 收口；
-  2. MapLocalesDialog 硬编码小字号与 property view dialog 桌面接线；
-  3. Database / ContentInfo 的 `displayDescription()` mod displayName 追加语义；
-  4. 重新审查 LanguageDialog / Settings 语言视觉与 fallback；
-  5. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
-
-## 上一闭环：收口 AboutDialog 默认字体节奏
+## 上二闭环：收口 AboutDialog 默认字体节奏
 
 - 当前总体迁移完成度：约 **98.97%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/AboutDialog.java`：
