@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.84%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.85%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：主菜单按钮释放后 pressed 视觉立即回落
+## 最新闭环：global.properties 文案纳入默认字体 seed
+
+- 当前总体迁移完成度：约 **98.85%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/Vars.java`：
+  - `Vars.loadSettings` 载入内部 bundle 后会读取 `bundles/global.properties`；
+  - `global.properties` 会 `putAll` 合入 `Core.bundle`，其中 sector credit/name 等文案会进入前端显示链路。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - `desktop_real_font_atlas_bundle_seed_characters()` 继续扫描 `bundle*.properties`，并额外扫描 `desktop_upstream_global_bundle_asset_source_paths()`；
+    - 新增 `desktop_graphics_font_seed_covers_global_bundle_values_like_java_vars_load_settings`，锁定非 ASCII global 文案进入默认字体 seed；
+    - 收到 JoinDialog 子代理结果后已对照 Java 撤回误改：favorite 星标无 tooltip，只有 eye 按钮有 `Styles.black6.margin(4)` tooltip。
+- 验证：
+  - `cargo test -p mindustry-desktop --lib desktop_graphics_font_seed_covers_global_bundle_values_like_java_vars_load_settings --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_join_route_tracks_community_groups_like_java_server_group --no-default-features`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_language_dialog_display_names_reach_real_opengl_glyph_quads_like_java --no-default-features`
+  - `cargo fmt`
+  - `git diff --check`
+- 下一步建议继续前端/字体/语言：
+  1. MapLocales 显示名覆盖：继续从有限静态表逼近 Java `Locale.getDisplayName(Core.bundle.getLocale())` 任意 UI locale 行为；
+  2. 字体 seed/atlas：继续把所有前端可见文本源自然纳入 seed/动态补字闭环；
+  3. Bundle fallback：继续核对外部 bundle、mod bundle、locale/English/global 与 router 的 Java `I18NBundle` 叠层语义。
+
+## 上一闭环：主菜单按钮释放后 pressed 视觉立即回落
 
 - 当前总体迁移完成度：约 **98.84%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/fragments/MenuFragment.java`：
