@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.44%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.45%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：清理 AboutDialog upstream 调试行
+## 最新闭环：清理 PausedDialog upstream 调试行
+
+- 当前总体迁移完成度：约 **99.45%**，仍未达到完整可玩。
+- 本轮对照：
+  - Java `PausedDialog` / 暂停菜单只显示 `@menu`、返回、设置、保存、读取、主机、退出等按钮，不显示 `upstream: PausedDialog` 这类 Rust 调试文案；
+  - 暂停菜单是高频前端入口，测试/调试路径也不应把英文类名叠字固化为可见 UI。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 删除暂停 overlay 中 `desktop_show_upstream_route_debug()` 下的 `upstream: PausedDialog` DrawText；
+    - 暂停菜单回归测试改为断言不渲染该调试文案，同时继续检查 Java 原有按钮文案与 SaveGame 路由行为。
+  - `README.md`
+    - 迁移进度更新到 **99.45%**。
+  - `MIGRATION.md`
+    - 新增 `1168. 清理 PausedDialog upstream 调试行`。
+- 验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_renders_save_and_load_entries --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 下一步建议继续：
+  1. 继续按 route 清理 Save/Database/Planet 等剩余 upstream 调试行；
+  2. JoinDialog Add/Edit 子弹窗继续细化 field padding 与 BaseDialog chrome；
+  3. Settings/Data 与字体/语言可见层继续隔离 raw diagnostics、英文 token 和 fallback 泄漏。
+
+## 上一闭环：清理 AboutDialog upstream 调试行
 
 - 当前总体迁移完成度：约 **99.44%**，仍未达到完整可玩。
 - 本轮对照：
