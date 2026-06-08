@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.26%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.27%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 Campaign PlanetDialog 可见文案与 debug 残差
+## 最新闭环：接入 Campaign PlanetDialog hoverLabel 文本
+
+- 当前总体迁移完成度：约 **99.27%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/PlanetDialog.java:952-978`：hovered sector 存在且当前星球有 grid 时，`hoverLabel` 置顶显示；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/PlanetDialog.java:972-974`：可选 sector 的 hoverLabel 文案为 `[accent][[ [white]{sector.name}[accent] ]`，不是 debug id 或 Rust-only 说明。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - Campaign route 在 `hovered_sector_id` 有效时绘制 Java-like hoverLabel 文案；
+    - hoverLabel 接入现有 Campaign render pass，不做独立模块；
+    - 同步修正旧测试，不再要求 sector card 常规显示 `saltFlats #101`，只保留 selector strip 的 `#101`。
+  - `README.md`
+    - 迁移进度更新到 **99.27%**。
+  - `MIGRATION.md`
+    - 新增 `1150. 接入 Campaign PlanetDialog hoverLabel 文本`。
+- 验证：
+  - 已通过 Campaign 本轮 2 个定向 UI 测试；
+  - 已通过 `cargo build -p mindustry-desktop --features opengl-native-runtime`。
+- 下一步建议继续：
+  1. 继续对照 Java locked hover text、sector select dialog、launch loadout 与 `ui.announce(...)` 新 sector 短暂提示；
+  2. 继续清理正常 UI 中的 route title fallback 风险，并确保 `upstream:*` 只保留在调试路径；
+  3. Settings/Language/Controls 字体、CJK/Unicode fallback 和所有子菜单视觉仍需继续逐项收口。
+
+## 上一闭环：收口 Campaign PlanetDialog 可见文案与 debug 残差
 
 - 当前总体迁移完成度：约 **99.26%**，仍未达到完整可玩。
 - 本轮对照：

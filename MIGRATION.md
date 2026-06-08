@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1150. 接入 Campaign PlanetDialog hoverLabel 文本
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.27%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/PlanetDialog.java:952-978`：hovered sector 存在且当前星球有 grid 时，`hoverLabel` 置顶显示；
+  - `core/src/mindustry/ui/dialogs/PlanetDialog.java:972-974`：可选 sector 的 hoverLabel 文案为 `[accent][[ [white]{sector.name}[accent] ]`，不是 debug id 或 Rust-only 说明。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Campaign route 在 `hovered_sector_id` 有效时绘制 Java-like hoverLabel 文案；
+    - hoverLabel 走默认 outline 文本样式，并接入现有 Campaign render pass；
+    - 同步修正旧测试，不再要求 sector card 常规显示 `saltFlats #101`，只保留 selector strip 的 `#101`。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_selecting_sector_updates_dialog_state_and_launch --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_menu_route_shell_uses_content_start_sector --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. 继续对照 Java locked hover text、sector select dialog、launch loadout 与 `ui.announce(...)` 新 sector 短暂提示；
+  2. 继续清理正常 UI 中的 route title fallback 风险，并确保 `upstream:*` 只保留在调试路径；
+  3. Settings/Language/Controls 字体、CJK/Unicode fallback 和所有子菜单视觉仍需继续逐项收口。
+
 ## 1149. 收口 Campaign PlanetDialog 可见文案与 debug 残差
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
