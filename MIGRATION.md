@@ -35731,3 +35731,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings/Language 字号、默认字体 shadow、outline 预烘焙字形仍需继续审查；
   - Join、CustomGame、Database/ContentInfo 子菜单视觉和交互状态仍需继续逐项对照 Java；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 1064. 收口 LoadDialog 搜索框视觉
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **98.94%**，仍未达到完整可玩；继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- Java 对照证据：
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java:58-64`：`search.image(Icon.zoom)` 后直接 `search.field("", ...)`，并设置 `searchField.setMessageText("@save.search")`；
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java:65-73`：mode filter 是 `Styles.emptyTogglei` 按钮，位于搜索 TextField 之外；
+  - Java TextField 使用自身 Scene2D style，不会在 focused 时额外画一圈完整矩形描边。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 删除 `push_load_game_route_page(...)` 中搜索框 focused 状态的 Rust-only `stroke_rect(search_field, ...)`；
+    - 保留 `settings_text_field_background_symbol()` 绘制搜索 TextField 本身；
+    - 扩展 `desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click`，断言搜索框不再出现额外 `StrokeRect`；
+    - 原有搜索、mode filter、slot card、loading overlay、点击动作和 modal 阻断逻辑保持不变。
+  - `README.md`
+    - 迁移进度更新到 **98.94%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 LoadDialog 搜索框视觉收口。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog -- --nocapture`
+  - `cargo fmt --all`
+- 仍未完成：
+  - Load/Save 子菜单视觉仍需继续对齐 Java `LoadDialog` / `SaveDialog`：过滤 chip 背景/tooltip、存档卡片 `grayt` 层级、操作图标颜色、点击穿透；
+  - Settings/Language 字号、默认字体 shadow、outline 预烘焙字形仍需继续审查；
+  - Join、CustomGame、Database/ContentInfo 子菜单视觉和交互状态仍需继续逐项对照 Java；
+  - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。

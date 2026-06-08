@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **98.93%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **98.94%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：接入 LanguageDialog core 模型
+## 最新闭环：收口 LoadDialog 搜索框视觉
+
+- 当前总体迁移完成度：约 **98.94%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LoadDialog.java`：
+  - `setup()` 中 `search.image(Icon.zoom)`；
+  - `search.field("", ...)` + `searchField.setMessageText("@save.search")`；
+  - `search.button(..., Styles.emptyTogglei, ...)`；
+  - Java TextField 自身提供输入框样式，不会在 focused 时额外画一圈 Rust-only `StrokeRect`。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 删除 `push_load_game_route_page(...)` 中搜索框 focused 状态额外 `stroke_rect(search_field, ...)`；
+    - 扩展 `desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click`，断言 `@save.search` TextField 只画自身 drawable，不再额外出现搜索框 `StrokeRect`；
+    - 保留原有搜索、mode filter、slot card、loading overlay 和点击行为。
+- 验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog -- --nocapture`
+  - `cargo fmt --all`
+- 下一步建议继续：
+  1. Load/Save 子菜单继续收口：过滤 chip 背景/tooltip、存档卡片 `grayt` 层级、操作图标颜色和点击穿透；
+  2. Settings/Language 字号、默认字体 shadow、outline 预烘焙字形继续审查；
+  3. Join、CustomGame、Database/ContentInfo 子菜单视觉继续按 Java 源码收口；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
+## 上一闭环：接入 LanguageDialog core 模型
 
 - 当前总体迁移完成度：约 **98.93%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java`：
@@ -61,7 +84,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   3. Join、CustomGame、Database/ContentInfo 子菜单视觉继续按 Java 源码收口；
   4. 继续保证所有 core dialog 模型接入 desktop/runtime 主链路，不要做孤立模块。
 
-## 上一闭环：MapLocales 补齐剩余语言显示名
+## 更早闭环：MapLocales 补齐剩余语言显示名
 
 - 当前总体迁移完成度：约 **98.92%**，仍未达到完整可玩。
 - 本轮继续对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/editor/MapLocalesDialog.java` 的 `loc.getDisplayName(Core.bundle.getLocale())`，把剩余 `be/bg/ca/et/eu/fil/lt/sr/th/tk/uk_UA` UI locale 的 Java display-name 表接到 Rust MapLocales 路径。
