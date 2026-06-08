@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1123. 收口 LoadDialog 存档卡片描边
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **98.95%**，仍未达到完整可玩；当前继续优先补前端视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，最终仍必须保持整体化、可游玩的 Rust Mindustry/MDT。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java` 中存档卡片使用 `new TextButton("", Styles.grayt)`，卡片背景来自 `Styles.grayt`；
+  - 预览图仍由 `BorderImage(def, 4f)` 包边，Java 没有再给整张存档卡片额外画一圈外框描边。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 删除 `push_load_game_route_page(...)` 中每张存档卡片额外的 Rust-only `stroke_rect(rect, ...)`；
+    - 保留预览区域 `BorderImage(def, 4f)` 等价的 `preview_rect` 灰色 4px 描边；
+    - 扩展 `desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click`，断言初始 LoadDialog 帧中 `slot_card` 不再收到整卡 `StrokeRect`。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. Settings/Language 字号、默认字体 shadow、outline 预烘焙字形、真实 glyph atlas 落点继续收口；
+  2. Load/Save 过滤 chip tooltip/颜色、操作图标 image color、点击穿透继续按 Java 对齐；
+  3. Join、CustomGame、MapList/MapPlay、Database/ContentInfo 子菜单视觉继续按 Java 源码收口；
+  4. 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1122. MapLocales 越南语与荷兰语显示名补齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
