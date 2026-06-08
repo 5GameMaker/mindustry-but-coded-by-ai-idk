@@ -19,6 +19,37 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1159. 对齐 CampaignRulesDialog 难度按钮与规则 checkbox
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.36%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/CampaignRulesDialog.java:29-48`：难度按钮位于 `Tex.button` table 内，按钮使用 `Styles.flatTogglet`，固定 `size(140f, 50f)`，portrait 下每两个换行；
+  - `core/src/mindustry/ui/dialogs/CampaignRulesDialog.java:87-94`：规则项使用 `current.check(text, cons)` 的 Java CheckBox 行，存在 `.info` bundle key 时挂 tooltip；
+  - `Difficulty.info()` 是 hover tooltip 文案，不应作为 Rust-only 常驻正文占位。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `CampaignRulesDialog` 对话框尺寸略扩展，难度按钮改为 Java 固定 `140x50`，并通过 `push_settings_text_button_enabled_checked_with_style(..., "flatTogglet")` 走 Java `Styles.flatTogglet` 的 checked/hover 皮肤；
+    - 难度排布补 portrait 两列换行语义的几何基础，landscape 保持一排 5 个；
+    - 规则行从两列按钮块和裸 `☑/☐` 前缀改为单列 Java CheckBox drawable + label；
+    - 难度 info 与 `@rules.*.info` 改为 hover tooltip，使用现有 Java-like tooltip chrome，不再占用正文；
+    - 扩展 CampaignRulesDialog 回归测试，锁定 `flatTogglet` checked drawable、`140x50` 难度按钮、checkbox sprite、无裸 Unicode checkbox 文本和 hover tooltip 本地化。
+  - `README.md`
+    - 迁移进度更新到 **99.36%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 `CampaignRulesDialog` 视觉/tooltip 收口，并记录下一步优先处理 LaunchLoadout、主菜单 chrome、Settings/About/Join 等 UI 缺口。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_opens_campaign_rules_dialog_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_rules_dialog_filters_planet_specific_rules_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_rules_dialog_persists_changes_when_hidden_like_java --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_rules_dialog_open_action_respects_java_visibility_guard --lib -- --test-threads=1 --nocapture`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 后续继续优先：
+  1. `LaunchLoadoutDialog` 底部按钮 `160x64`、missing resources 单处提示和候选 ScrollPane 继续贴 Java；
+  2. 主菜单 chrome、Settings、About、Join 按子代理审查结果继续收口字体/按钮皮肤/本地化；
+  3. Discord route debug 行、icon raw-name fallback、About link fallback 继续清理，避免可见英文/图标名泄漏。
+
 ## 1158. 收口 UI 文案本地化、Join 动画点与字体测量
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.33%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.36%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,30 +27,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收紧 Controls keybind Rust-only raw fallback
+## 最新闭环：对齐 CampaignRulesDialog 难度按钮与规则 checkbox
 
-- 当前总体迁移完成度：约 **99.33%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.36%**，仍未达到完整可玩。
 - 本轮对照：
-  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/KeybindDialog.java:109-121`：Controls 值列来自 Java `KeyCode.getName()`；
-  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/KeybindDialog.java:128-150`：rebind 后通过 Java keybind settings 形态保存。
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/CampaignRulesDialog.java:29-48`：难度按钮使用 `Styles.flatTogglet`，固定 `size(140f, 50f)`，portrait 每两个换行；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/CampaignRulesDialog.java:87-94`：规则项是 Java `CheckBox` 行，`.info` bundle key 只挂 hover tooltip。
 - 本轮实现：
   - `desktop/src/lib.rs`
-    - 不再写入或显示迁移期私有 `keybind-default-keyboard-*-rust-display`；
-    - 旧 `-rust-display` 不再作为 UI 可见 fallback；
-    - rebind 输入必须能映射到 Java KeyCode ordinal，未知 key 名直接拒绝；
-    - 扩展 Delete/Backspace/Mouse Back/Mouse Forward 等 keycode roundtrip 测试。
+    - `CampaignRulesDialog` 难度按钮改为固定 `140x50` + `flatTogglet` checked/hover 皮肤；
+    - 规则行从两列按钮块和裸 `☑/☐` 前缀改成单列 Java CheckBox drawable + label；
+    - 难度说明与 `@rules.*.info` 改为 hover tooltip，不再作为正文常驻文本；
+    - 扩展测试锁定 flatTogglet、checkbox sprite、无裸 Unicode checkbox、tooltip 本地化和 hit-test。
   - `README.md`
-    - 迁移进度更新到 **99.33%**。
+    - 迁移进度更新到 **99.36%**。
   - `MIGRATION.md`
-    - 新增 `1156. 收紧 Controls keybind Rust-only raw fallback`。
+    - 新增 `1159. 对齐 CampaignRulesDialog 难度按钮与规则 checkbox`。
 - 验证：
-  - 已通过本轮 4 个 Controls/keybind 定向测试；
+  - 已通过 4 个 CampaignRulesDialog 定向测试；
   - 已通过 `cargo build -p mindustry-desktop --features opengl-native-runtime`；
   - 已执行 `cargo fmt`。
 - 下一步建议继续：
-  1. LaunchLoadout picker 几何扩展到 Java `size(200f)` 方卡/滚动；
-  2. SectorSelectDialog 完整滚动结果；
-  3. Settings/Language/Controls 字体、icon fallback 与所有子菜单视觉继续收口。
+  1. `LaunchLoadoutDialog` 底部按钮 `160x64`、missing resources 单处提示、候选 ScrollPane 继续对齐 Java；
+  2. 主菜单 chrome、Settings、About、Join 按子代理审查结果继续收口按钮皮肤、字体和本地化；
+  3. Discord route debug 行、icon raw-name fallback、About link fallback 继续清理，避免可见英文/图标名泄漏。
 
 ## 上一闭环：接入 Campaign LaunchLoadout SchematicImage 预览
 
