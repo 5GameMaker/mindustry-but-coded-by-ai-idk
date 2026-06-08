@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1162. 收口 About 链接过滤与图标 fallback
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.39%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/AboutDialog.java`：`Links.getLinks()` 在 `ios || steam` 时跳过 `Links.bannedItems`；
+  - `core/src/mindustry/ui/Links.java`：About link title/description 走 bundle，图标是 `Icon.*` drawable，不应把 icon Java 名当成可见文案 fallback。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `platform_ios_enabled()`，通过 `platform/ios` setting override 表达 Java `OS.isIos` 分支；
+    - `visible_about_links()` 现在按 `about_filter_banned_links || host_steam_enabled() || platform_ios_enabled()` 过滤 banned links；
+    - `push_about_link_card(...)` 中 About link 主 icon 与右侧 link action icon 的 glyph fallback 改为空字符串，避免缺 glyph 时把 `list`、`trello`、`githubSquare`、`link` 等英文 token 画到界面；
+    - 扩展 About 链接测试，锁定 iOS 自动过滤和 raw icon token 防漏。
+  - `README.md`
+    - 迁移进度更新到 **99.39%**。
+  - `AI_HANDOFF.md`
+    - 最新闭环更新为 About 链接过滤与图标 fallback 收口。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_route_uses_upstream_link_cards_and_hitboxes --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_menu_route_filters_banned_links_for_ios_or_steam_mode --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_links_resolve_bundle_text_like_java_links --lib -- --test-threads=1 --nocapture`
+- 后续继续优先：
+  1. Settings/Data route 诊断文本继续隔离到测试域，避免 raw key/类名重新进入可见层；
+  2. Join/Host/Paused 的 Java 对话框结构仍是前端大缺口，优先补 HostDialog/JoinDialog 子弹窗与 card/header；
+  3. 字体 seed 硬编码可继续改成由 bundle 生成，降低语言漂移风险。
+
 ## 1161. 清理 DiscordDialog route debug 与 BE 检查英文断言
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

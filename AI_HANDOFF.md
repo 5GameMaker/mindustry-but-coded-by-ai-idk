@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.38%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.39%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：清理 DiscordDialog route debug 与 BE 检查英文断言
+## 最新闭环：收口 About 链接过滤与图标 fallback
+
+- 当前总体迁移完成度：约 **99.39%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/AboutDialog.java`：`Links.getLinks()` 在 `ios || steam` 时过滤 banned links；
+  - Java About 链接卡片使用 `Icon.*` drawable，不会在缺 glyph 时把 `list`、`trello`、`githubSquare`、`link` 等英文 icon token 直接画到界面。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `platform_ios_enabled()`，`visible_about_links()` 现在按 `about_filter_banned_links || steam || ios` 过滤 banned links；
+    - About 链接主 icon 与右侧 link action icon 的 glyph fallback 改为空字符串，避免缺图标时泄漏英文 token；
+    - 扩展 About 链接测试，覆盖 iOS 自动过滤与 raw icon token 防漏。
+  - `README.md`
+    - 迁移进度更新到 **99.39%**。
+  - `MIGRATION.md`
+    - 新增 `1162. 收口 About 链接过滤与图标 fallback`。
+- 验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_route_uses_upstream_link_cards_and_hitboxes --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_menu_route_filters_banned_links_for_ios_or_steam_mode --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_links_resolve_bundle_text_like_java_links --lib -- --test-threads=1 --nocapture`
+- 下一步建议继续：
+  1. Settings/Data route 诊断文本继续隔离到测试域，避免后续 raw key/类名重新进入可见层；
+  2. Join/Host/Paused 的 Java 对话框结构仍是前端大缺口，优先补 HostDialog/JoinDialog 子弹窗与 card/header；
+  3. 字体 seed 硬编码可继续改成由 bundle 生成，降低语言漂移风险。
+
+## 上一闭环：清理 DiscordDialog route debug 与 BE 检查英文断言
 
 - 当前总体迁移完成度：约 **99.38%**，仍未达到完整可玩。
 - 本轮对照：
