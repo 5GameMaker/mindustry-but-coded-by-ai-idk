@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1188. 修正 Controls 设置行内字体节奏
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.65%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/KeybindDialog.java`：`rebuildBinds()` 中分类行和按键行均通过 Scene2D `Label` / `labelWrap` / table `add` 的默认 label style 呈现；
+  - 原版 Controls 行内 key name / bound value 不使用 Rust 旧实现里硬编码的 10.5px 小字号。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `SETTINGS_KEYBIND_CATEGORY_FONT_SIZE_LIKE_JAVA`、`SETTINGS_KEYBIND_LABEL_FONT_SIZE_LIKE_JAVA`、`SETTINGS_KEYBIND_VALUE_FONT_SIZE_LIKE_JAVA`；
+    - `push_settings_controls_dialog_content(...)` 的分类行、key label、value label 统一回到 Java 默认 UI 字号节奏；
+    - 新增 `desktop_launcher_settings_controls_row_typography_matches_java`，锁住分类/key/value 三类行内文本字号和左对齐语义，避免前端 Controls 页面再次退回 Rust-only 小字。
+  - `README.md`
+    - 迁移进度更新到 **99.65%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_controls_row_typography_matches_java -- --nocapture`
+  - `cargo test -p mindustry-desktop settings_keybind -- --nocapture`
+- 后续继续优先：
+  1. 继续收口 Settings/Language 的 scrollpane 极限尺寸、语言 row hover/check 与字体 glyph seed；
+  2. 继续补 Mods Browser / release / detail 子页面的 row/icon/pad/按钮布局；
+  3. 继续扫所有子菜单最终 `DrawText` 的 raw key、英文 fallback 与图标 raw token 泄漏。
+
 ## 1187. 收口 Join 标题条和分隔线视觉
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。

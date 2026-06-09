@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.64%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.65%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -26,6 +26,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
+
+## 最新闭环：修正 Controls 设置行内字体节奏
+
+- 当前总体迁移完成度：约 **99.65%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/KeybindDialog.java`
+  - `rebuildBinds()` 中分类、key name、bound value 都走 Scene2D 默认 `Label` / `labelWrap` / table `add` 节奏，不应是 Rust 旧实现的 10.5px 小字。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `SETTINGS_KEYBIND_CATEGORY_FONT_SIZE_LIKE_JAVA`、`SETTINGS_KEYBIND_LABEL_FONT_SIZE_LIKE_JAVA`、`SETTINGS_KEYBIND_VALUE_FONT_SIZE_LIKE_JAVA`；
+    - Controls dialog 的分类行、按键名、绑定值字号统一使用 Java-like 默认 UI 字号；
+    - 新增 `desktop_launcher_settings_controls_row_typography_matches_java` 回归测试，锁住字号和左对齐。
+  - `README.md`
+    - 迁移进度更新到 **99.65%**。
+  - `MIGRATION.md`
+    - 新增 `1188. 修正 Controls 设置行内字体节奏`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_controls_row_typography_matches_java -- --nocapture`
+  - `cargo test -p mindustry-desktop settings_keybind -- --nocapture`
+- 下一步优先级：
+  1. Settings/Language：继续对齐 Language scrollpane 极限尺寸、row hover/check 与字体 glyph seed；
+  2. Mods Browser：继续收口 row 80f / icon 64f / 8f pad 和 selection detail 按钮排布；
+  3. 全局扫 raw key / 英文 fallback / 图标 token 泄漏，避免语言/字体可见缺口。
 
 ## 最新闭环：收口 Join 标题条和分隔线视觉
 
