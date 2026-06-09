@@ -19,6 +19,41 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1181. 下沉 Fonts.loadContentIcons 运行时 registry 并修复语言 raw locale 勾选状态
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.58%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Fonts.java`：`loadContentIcons()` 只注册 UI atlas page 上的内容图标，`registerIcon()` 写入 `unicodeIcons`、`stringIcons`、`unicodeToName`，`unicodeToName(int)` 先查内容图标再回退 `Iconc.codeToName`；
+  - `loadContentIconsHeadless()` 不写 `unicodeToName`，但会写 `unicodeIcons` / `stringIcons`，并执行 `alphachan -> alphaaaa` 的 `stringIcons` alias；
+  - `ObjectMap.put` 后写覆盖前写；`core/assets/icons/icons.properties` 中 `sand` 存在重名行，必须保持 Java 的 last-write-wins；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java`：`getLocale()` 只在 `settings.locale == "default"` 时调用 `findClosestLocale()`；未知 raw locale 不应在语言弹窗打开时被强制勾选 English。
+- 本轮主改动：
+  - `core/src/mindustry/ui/fonts.rs`
+    - 新增 `UpstreamRegisteredContentIcon`、`UpstreamContentIconRuntimeRegistry`；
+    - 新增 `upstream_content_icon_runtime_registry_like_java()`、`upstream_ui_icon_glyph_name_by_unicode()`、`upstream_unicode_to_name_like_java()`；
+    - runtime registry 支持 `name/unicode/atlas_symbol` 查询，UI page predicate 控制是否注册，`unicodeToName` 回退到 `Iconc`，重复 key 使用 Java `put` 的后写覆盖语义；
+    - `alphachan` alias 改为覆盖式写入，保持 Java `stringIcons.put(...)` 语义。
+  - `core/src/mindustry/ui/mod.rs`
+    - 公开新的 content icon runtime registry 与 unicode/name 查询 API，供 desktop/runtime 统一消费。
+  - `desktop/src/lib.rs`
+    - `desktop_unicode_to_name_like_java()`、`format_icons_like_java()`、字体 rasterization plan、team emoji、campaign content icon source 改为消费 core runtime registry；
+    - `DesktopContentIconGlyphRegistry::new()` 的 name/unicode/atlas_symbol 索引改为后写覆盖，修复重复内容图标名与 Java `ObjectMap.put` 的差异；
+    - `settings_language_dialog_model_like_java()` 打开弹窗时只 materialize `default/空值`，未知 raw locale 保留给 ButtonGroup checked state，避免错误勾选 English。
+  - `README.md`
+    - 迁移进度更新到 **99.58%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core content_icon -- --nocapture`
+  - `cargo test -p mindustry-desktop content_icon -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_preserves_unknown_raw_locale_without_forcing_checked_row_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop language_dialog -- --nocapture`
+  - `cargo test -p mindustry-desktop settings_main_page -- --nocapture`
+- 后续继续优先：
+  1. 按 UI/UX 子代理审查结果继续收口 Settings 主菜单 chrome、LanguageDialog scrollbar/row hover、Data/Planet 子对话框按钮布局；
+  2. 继续把 Join / About / Database / CampaignRules / LaunchLoadout 等子菜单的 Scene2D 尺寸、tooltip、checkbox/toggle 风格贴近 Java；
+  3. 继续扫可见 DrawText 中 raw key、英文 token、诊断前缀和错误图标别名。
+
 ## 1180. 下沉 Styles.defaultDialog / fullDialog 共享对话框皮肤契约
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

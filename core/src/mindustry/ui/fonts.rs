@@ -1014,7 +1014,7 @@ pub fn upstream_content_icon_headless_registry_like_java(
     }
 
     if let Some(alphaaaa) = string_icons.get("alphaaaa").cloned() {
-        string_icons.entry("alphachan".into()).or_insert(alphaaaa);
+        string_icons.insert("alphachan".into(), alphaaaa);
     }
 
     UpstreamContentIconHeadlessRegistry {
@@ -1031,6 +1031,141 @@ pub fn populate_base_team_emojis_from_headless_content_icons_like_java(
     for team in teams.base_teams_mut() {
         team.emoji = registry.string_icon(&team.name).unwrap_or("").to_string();
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpstreamRegisteredContentIcon {
+    pub unicode: u32,
+    pub name: String,
+    pub atlas_symbol: String,
+    pub emoji: String,
+}
+
+impl UpstreamRegisteredContentIcon {
+    pub fn as_content_icon(&self) -> UpstreamContentIcon {
+        UpstreamContentIcon {
+            unicode: self.unicode,
+            name: self.name.clone(),
+            atlas_symbol: self.atlas_symbol.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpstreamContentIconRuntimeRegistry {
+    pub unicode_icons: BTreeMap<String, u32>,
+    pub string_icons: BTreeMap<String, String>,
+    pub unicode_to_name: BTreeMap<u32, String>,
+    registered_icons: Vec<UpstreamRegisteredContentIcon>,
+    by_name: BTreeMap<String, usize>,
+    by_unicode: BTreeMap<u32, usize>,
+    by_atlas_symbol: BTreeMap<String, usize>,
+}
+
+impl UpstreamContentIconRuntimeRegistry {
+    pub fn registered_icons(&self) -> &[UpstreamRegisteredContentIcon] {
+        &self.registered_icons
+    }
+
+    pub fn string_icon(&self, name: &str) -> Option<&str> {
+        self.string_icons.get(name).map(String::as_str)
+    }
+
+    pub fn unicode_icon(&self, name: &str) -> Option<u32> {
+        self.unicode_icons.get(name).copied()
+    }
+
+    pub fn unicode_name(&self, unicode: u32) -> Option<&str> {
+        self.unicode_to_name.get(&unicode).map(String::as_str)
+    }
+
+    pub fn registered_by_name(&self, name: &str) -> Option<&UpstreamRegisteredContentIcon> {
+        self.by_name
+            .get(name)
+            .and_then(|index| self.registered_icons.get(*index))
+    }
+
+    pub fn registered_by_unicode(&self, unicode: u32) -> Option<&UpstreamRegisteredContentIcon> {
+        self.by_unicode
+            .get(&unicode)
+            .and_then(|index| self.registered_icons.get(*index))
+    }
+
+    pub fn registered_by_atlas_symbol(
+        &self,
+        atlas_symbol: &str,
+    ) -> Option<&UpstreamRegisteredContentIcon> {
+        self.by_atlas_symbol
+            .get(atlas_symbol)
+            .and_then(|index| self.registered_icons.get(*index))
+    }
+}
+
+pub fn upstream_content_icon_runtime_registry_like_java<F>(
+    icons: &[UpstreamContentIcon],
+    mut registerable: F,
+) -> UpstreamContentIconRuntimeRegistry
+where
+    F: FnMut(&UpstreamContentIcon) -> bool,
+{
+    let mut unicode_icons = BTreeMap::new();
+    let mut string_icons = BTreeMap::new();
+    let mut unicode_to_name = BTreeMap::new();
+    let mut registered_icons = Vec::new();
+    let mut by_name = BTreeMap::new();
+    let mut by_unicode = BTreeMap::new();
+    let mut by_atlas_symbol = BTreeMap::new();
+
+    for icon in icons.iter().filter(|icon| registerable(icon)) {
+        let emoji = icon.emoji_string().unwrap_or_default();
+        let registered = UpstreamRegisteredContentIcon {
+            unicode: icon.unicode,
+            name: icon.name.clone(),
+            atlas_symbol: icon.atlas_symbol.clone(),
+            emoji: emoji.clone(),
+        };
+        let index = registered_icons.len();
+
+        unicode_icons.insert(icon.name.clone(), icon.unicode);
+        string_icons.insert(icon.name.clone(), emoji);
+        unicode_to_name.insert(icon.unicode, icon.atlas_symbol.clone());
+
+        by_name.insert(icon.name.clone(), index);
+        by_unicode.insert(icon.unicode, index);
+        by_atlas_symbol.insert(icon.atlas_symbol.clone(), index);
+        registered_icons.push(registered);
+    }
+
+    if let Some(alphaaaa) = string_icons.get("alphaaaa").cloned() {
+        string_icons.insert("alphachan".into(), alphaaaa);
+    }
+
+    UpstreamContentIconRuntimeRegistry {
+        unicode_icons,
+        string_icons,
+        unicode_to_name,
+        registered_icons,
+        by_name,
+        by_unicode,
+        by_atlas_symbol,
+    }
+}
+
+pub fn upstream_ui_icon_glyph_name_by_unicode(unicode: u32) -> Option<&'static str> {
+    UPSTREAM_UI_ICON_GLYPHS
+        .iter()
+        .find(|glyph| glyph.codepoint == unicode)
+        .map(|glyph| glyph.java_name)
+}
+
+pub fn upstream_unicode_to_name_like_java(
+    registry: &UpstreamContentIconRuntimeRegistry,
+    unicode: u32,
+) -> Option<String> {
+    registry
+        .unicode_name(unicode)
+        .map(str::to_string)
+        .or_else(|| upstream_ui_icon_glyph_name_by_unicode(unicode).map(str::to_string))
 }
 
 #[cfg(test)]
@@ -1305,6 +1440,114 @@ mod tests {
             "",
             "base teams without a content icon keep Java's empty emoji fallback"
         );
+    }
+
+    #[test]
+    fn content_icon_runtime_registry_matches_fonts_load_content_icons() {
+        let icons = vec![
+            UpstreamContentIcon {
+                unicode: 0xf8ff,
+                name: "alphaaaa".to_string(),
+                atlas_symbol: "block-alpha-ui".to_string(),
+            },
+            UpstreamContentIcon {
+                unicode: 0xf900,
+                name: "main-only".to_string(),
+                atlas_symbol: "block-alpha-main".to_string(),
+            },
+            UpstreamContentIcon {
+                unicode: 0xf901,
+                name: "crux".to_string(),
+                atlas_symbol: "team-crux-ui".to_string(),
+            },
+            UpstreamContentIcon {
+                unicode: 0xf902,
+                name: "sand".to_string(),
+                atlas_symbol: "item-sand-ui".to_string(),
+            },
+            UpstreamContentIcon {
+                unicode: 0xf903,
+                name: "sand".to_string(),
+                atlas_symbol: "floor-sand-ui".to_string(),
+            },
+        ];
+
+        let registry = upstream_content_icon_runtime_registry_like_java(&icons, |icon| {
+            icon.atlas_symbol.ends_with("-ui")
+        });
+
+        assert_eq!(registry.registered_icons().len(), 4);
+        assert_eq!(registry.unicode_icon("alphaaaa"), Some(0xf8ff));
+        assert_eq!(registry.string_icon("alphaaaa"), Some("\u{f8ff}"));
+        assert_eq!(
+            registry.string_icon("alphachan"),
+            Some("\u{f8ff}"),
+            "Java Fonts.loadContentIcons adds only a stringIcons alias for alphachan"
+        );
+        assert_eq!(registry.unicode_icon("alphachan"), None);
+        assert_eq!(registry.unicode_icon("main-only"), None);
+        assert_eq!(registry.string_icon("main-only"), None);
+        assert_eq!(
+            registry.unicode_name(0xf8ff),
+            Some("block-alpha-ui"),
+            "Java registerIcon writes unicodeToName[ch] = regionName"
+        );
+        assert_eq!(
+            registry.unicode_name(0xf900),
+            None,
+            "Java loadContentIcons skips atlas regions that are not on the UI page"
+        );
+        assert_eq!(
+            registry
+                .registered_by_name("crux")
+                .map(|icon| icon.atlas_symbol.as_str()),
+            Some("team-crux-ui")
+        );
+        assert_eq!(
+            registry
+                .registered_by_atlas_symbol("team-crux-ui")
+                .map(|icon| icon.name.as_str()),
+            Some("crux")
+        );
+        assert_eq!(
+            registry.unicode_icon("sand"),
+            Some(0xf903),
+            "Java ObjectMap.put keeps the last icons.properties row for duplicate names"
+        );
+        assert_eq!(registry.string_icon("sand"), Some("\u{f903}"));
+        assert_eq!(
+            registry
+                .registered_by_name("sand")
+                .map(|icon| icon.atlas_symbol.as_str()),
+            Some("floor-sand-ui")
+        );
+        assert_eq!(
+            registry.unicode_name(0xf902),
+            Some("item-sand-ui"),
+            "distinct unicode keys still retain their own unicodeToName registrations"
+        );
+        assert_eq!(registry.unicode_name(0xf903), Some("floor-sand-ui"));
+    }
+
+    #[test]
+    fn unicode_to_name_like_java_prefers_runtime_content_icons_then_iconc() {
+        let play = upstream_ui_icon_glyph("play").expect("Iconc.play should be in the glyph table");
+        let icons = vec![UpstreamContentIcon {
+            unicode: 0xf8ff,
+            name: "alphaaaa".to_string(),
+            atlas_symbol: "block-alpha-ui".to_string(),
+        }];
+        let registry = upstream_content_icon_runtime_registry_like_java(&icons, |_| true);
+
+        assert_eq!(
+            upstream_unicode_to_name_like_java(&registry, 0xf8ff).as_deref(),
+            Some("block-alpha-ui")
+        );
+        assert_eq!(
+            upstream_unicode_to_name_like_java(&registry, play.codepoint).as_deref(),
+            Some("play")
+        );
+        assert_eq!(upstream_unicode_to_name_like_java(&registry, 0xf8fe), None);
     }
 
     #[test]

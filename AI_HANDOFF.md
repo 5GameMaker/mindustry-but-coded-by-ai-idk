@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.57%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.58%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,39 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：下沉 Styles.defaultDialog / fullDialog 共享对话框皮肤契约
+## 最新闭环：下沉 Fonts.loadContentIcons 运行时 registry 并修复语言 raw locale 勾选状态
+
+- 当前总体迁移完成度：约 **99.58%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Fonts.java`：`loadContentIcons()` / `registerIcon()` / `unicodeToName()` 运行时语义；
+  - `D:/MDT/mindustry-upstream-v157.4/core/assets/icons/icons.properties`：`sand` 重名行要求 Java `ObjectMap.put` 后写覆盖前写；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java`：`getLocale()` 只在 `default` sentinel 下 materialize closest locale，未知 raw locale 不应在弹窗 checked state 中强制回退 English。
+- 本轮实现：
+  - `core/src/mindustry/ui/fonts.rs`
+    - 新增 `UpstreamRegisteredContentIcon`、`UpstreamContentIconRuntimeRegistry`；
+    - 新增 `upstream_content_icon_runtime_registry_like_java()` 与 `upstream_unicode_to_name_like_java()`，统一 `unicodeIcons/stringIcons/unicodeToName` 运行时注册语义；
+    - runtime registry 使用后写覆盖，保持 Java `ObjectMap.put` 行为，并覆盖 `alphachan -> alphaaaa` alias。
+  - `core/src/mindustry/ui/mod.rs`
+    - 公开新的 content icon runtime registry API。
+  - `desktop/src/lib.rs`
+    - `desktop_unicode_to_name_like_java()`、`format_icons_like_java()`、字体 rasterization plan、team emoji、campaign content icon source 改为消费 core runtime registry；
+    - `DesktopContentIconGlyphRegistry::new()` 的索引改为后写覆盖；
+    - 语言弹窗打开时只 materialize `default/空值`，未知 raw locale 保留为未勾选状态。
+  - `README.md`
+    - 迁移进度更新到 **99.58%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core content_icon -- --nocapture`
+  - `cargo test -p mindustry-desktop content_icon -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_preserves_unknown_raw_locale_without_forcing_checked_row_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop language_dialog -- --nocapture`
+  - `cargo test -p mindustry-desktop settings_main_page -- --nocapture`
+- 下一步优先：
+  1. 按 UI/UX 子代理审查结果继续收口 Settings 主菜单 chrome、LanguageDialog scrollbar/row hover、Data/Planet 子对话框按钮布局；
+  2. 继续推进 Join / About / Database / CampaignRules / LaunchLoadout 等子菜单的 Scene2D 尺寸、tooltip、checkbox/toggle 风格；
+  3. 继续扫可见 DrawText 中 raw key、英文 token、诊断前缀和错误图标别名。
+
+## 上一闭环：下沉 Styles.defaultDialog / fullDialog 共享对话框皮肤契约
 
 - 当前总体迁移完成度：约 **99.57%**，仍未达到完整可玩。
 - 本轮对照：
