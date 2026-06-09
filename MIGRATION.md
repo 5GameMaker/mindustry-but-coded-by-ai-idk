@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1191. 避免菜单帧深拷贝贴图图集
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.68%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，并同时处理用户反馈的前端帧率极低问题。
+- 性能背景：
+  - 前端/菜单帧每帧都会构造 `DesktopGraphicsFrame`；旧实现把 `TextureAtlasPlan<bool>` 直接放入 frame，导致稳定菜单帧仍会复制大型 atlas 结构；
+  - Java 原版 runtime 侧 atlas 是长期驻留的共享资源，前端帧不应每帧深拷贝整套贴图区域表。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsFrame.texture_atlas` 与 `DesktopLauncher.texture_atlas` 改为 `Arc<TextureAtlasPlan<bool>>`；
+    - 菜单帧与世界帧构造改为 `Arc::clone(&self.texture_atlas)`，避免稳定帧深拷贝 atlas；
+    - atlas 合并/线性过滤切换/预览贴图注入等真实变更点改为 `Arc::make_mut(&mut self.texture_atlas)`，只在需要写入时 copy-on-write；
+    - 所有测试 fixture 统一改为 `Arc::new(TextureAtlasPlan::...)`，并把旧 direct/packed atlas 断言修正为 page-specific/packed atlas 语义，避免锁死过渡占位行为。
+  - `README.md`
+    - 迁移进度更新到 **99.68%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_graphics_frame_for_surface_uses_single_ui_command_build -- --nocapture`
+  - `cargo test -p mindustry-desktop mods_browser -- --nocapture`
+  - `cargo test -p mindustry-desktop texture_atlas -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. 继续查外置 bundle/locale 每帧 IO 与 font seed/glyph upload plan cache key churn；
+  2. 继续审查 native loop 的 vsync/fpscap/wait_until 双节流风险；
+  3. 在保持帧率优化的同时继续对齐 Host/Join/Load/Settings/Mods 等所有子菜单的 Java 原版 UI 表现。
+
 ## 1190. 对齐 Mods Browser 条目高度和图标密度
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
