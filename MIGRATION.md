@@ -19,6 +19,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1192. 缓存外置 bundle 解析结果降低前端帧 IO
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.69%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，同时继续修用户反馈的前端帧率极低问题。
+- 性能背景：
+  - `menu_graphics_frame_for_surface(...)` 每帧都会触发外置 bundle notice 和多处 `@key` 本地化；
+  - 旧路径在 `bundle_value_for_current_locale(...)` / `sync_external_bundle_loaded_notice_like_java(...)` 中会反复探测、读取并解析 `bundle` / `bundle.properties` / `bundle_en.properties`；
+  - Java 语义需要外置 bundle 覆盖内部语言包，但稳定菜单帧不应重复做磁盘 IO 和 properties 解析。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopExternalBundleCache`，按 `data_dir + locale + source_paths + path/len/modified` 指纹缓存外置 bundle 解析结果；
+    - `DesktopLauncher` 新增 `external_bundle_cache` / `external_bundle_cache_rebuilds`；
+    - `bundle_value_for_current_locale(...)` 改为走 launcher 内部缓存，保持“有外置 bundle 时缺 key 不回落内部 locale”的 Java 行为；
+    - `sync_external_bundle_loaded_notice_like_java(...)` 改为复用缓存的可读路径和 source path 列表，只在首次/文件变更时注册外置字体 seed；
+    - 新增缓存回归测试，锁住稳定帧不重复 rebuild，文件内容变更后能失效并刷新文案。
+  - `README.md`
+    - 迁移进度更新到 **99.69%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop external_bundle -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_graphics_frame_for_surface_uses_single_ui_command_build -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. 继续查 font glyph upload cache key 每帧重算与 external seed digest 成本；
+  2. 继续确认 native OpenGL present/swap 与实际绘制 workload 是否仍拖低 FPS；
+  3. 继续推进 Join/Load/Settings/Schematics/CustomRules 等子菜单的 Java 原版 UI 还原。
+
 ## 1191. 避免菜单帧深拷贝贴图图集
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。

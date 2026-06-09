@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.68%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.69%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -26,6 +26,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
+
+## 最新闭环：缓存外置 bundle 解析结果降低前端帧 IO
+
+- 当前总体迁移完成度：约 **99.69%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopExternalBundleCache`，使用 `data_dir + locale + source_paths + path/len/modified` 指纹缓存外置 bundle values；
+    - `DesktopLauncher` 新增 `external_bundle_cache` 和测试可见的 rebuild 计数；
+    - `bundle_value_for_current_locale(...)` 改走缓存，保留 Java 外置 bundle 覆盖/缺 key 行为；
+    - `sync_external_bundle_loaded_notice_like_java(...)` 改复用缓存 paths，只在首次或文件变更后注册外置字体 seed；
+    - 新增 `desktop_launcher_caches_external_bundle_family_between_stable_frames_and_invalidates_on_change`。
+  - `README.md`
+    - 迁移进度更新到 **99.69%**。
+  - `MIGRATION.md`
+    - 新增 `1192. 缓存外置 bundle 解析结果降低前端帧 IO`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop external_bundle -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_graphics_frame_for_surface_uses_single_ui_command_build -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. 继续优化 font glyph upload cache key/digest 的每帧重算；
+  2. 排查 OpenGL present/swap 和实际绘制 workload；
+  3. 继续推进 Join/Load/Settings/Schematics/CustomRules 等高感知子菜单的 Java 原版 UI 还原。
 
 ## 最新闭环：避免菜单帧深拷贝贴图图集
 
