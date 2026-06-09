@@ -19,6 +19,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1219. 缓存字体上传 key 的 content icon 可见性扫描
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.96%**，仍未达到完整可玩；当前继续优先 UI/前端还原，同时处理用户反馈的极低帧率问题。
+- Java 对照：
+  - Java 字体/icon 注册是资源变化驱动，不应在稳定菜单帧反复遍历所有 content icon atlas symbol 来判断字体上传 key；
+  - Rust 旧路径已经缓存 `DesktopFontGlyphUploadPlan`，但每帧构造 cache key 时仍会完整执行 `desktop_content_icon_atlas_visibility_cache_key(...)`，对菜单 UI/字体渲染稳定帧造成额外 CPU 开销。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopFontGlyphContentIconAtlasVisibilityKeyCache`；
+    - `DesktopLauncher::font_glyph_upload_plan_cache_key()` 复用缓存后的 content icon atlas visibility key；
+    - atlas region 插入路径只在插入的 region 名称命中 content icon glyph registry 时失效相关缓存；
+    - 同步失效 content icon runtime registry 的当前帧 validation，避免同帧资源变更后继续使用旧可见性；
+    - 扩展 `desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames`，锁住稳定帧、viewport-only、无关 atlas 编辑、font-source/locale rebuild 都不会重复扫描 content icon 可见性；
+    - 新增 `desktop_launcher_invalidates_cached_font_icon_visibility_key_for_content_icon_region`，锁住真正 content icon region 注册时必须刷新 key。
+  - `README.md`
+    - 迁移进度更新到 **99.96%**。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_invalidates_cached_font_icon_visibility_key_for_content_icon_region --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_content_icon_runtime_registry_within_menu_frame --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. FPS：继续压低 OpenGL plan/batch 构建、sprite mesh upload、route snapshot、文本 quad 生成等稳定帧成本；
+  2. UI：继续收口所有主/子菜单细节、字体/语言显示和 Java skin 语义；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1218. 前置过滤已提交的字体 atlas 上传计划
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。

@@ -10,13 +10,40 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.95%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.96%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 最新闭环：缓存字体上传 key 的 content icon 可见性扫描
+
+- 当前总体迁移完成度：约 **99.96%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时持续处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopFontGlyphContentIconAtlasVisibilityKeyCache`；
+    - `font_glyph_upload_plan_cache_key()` 不再在稳定菜单帧重复扫描所有 content icon atlas symbol；
+    - atlas region 插入路径只在 region 名称命中 content icon glyph registry 时失效字体/icon 可见性 key；
+    - 同步清掉 content icon runtime registry 当前帧 validation，避免同帧资源变更后继续使用旧可见性；
+    - 扩展 `desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames`；
+    - 新增 `desktop_launcher_invalidates_cached_font_icon_visibility_key_for_content_icon_region`。
+  - `README.md`
+    - 迁移进度更新到 **99.96%**。
+  - `MIGRATION.md`
+    - 新增 `1219. 缓存字体上传 key 的 content icon 可见性扫描`。
+- 已验证/本轮收口验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_invalidates_cached_font_icon_visibility_key_for_content_icon_region --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_content_icon_runtime_registry_within_menu_frame --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. FPS：继续压低 OpenGL plan/batch 构建、sprite mesh upload、route snapshot、文本 quad 生成等稳定帧成本；
+  2. UI：继续收口所有主/子菜单细节、字体/语言显示和 Java skin 语义；
+  3. 继续保证模块接入整体 runtime/render/backend 主链路，不允许做成孤立模块。
 
 ## 最新闭环：前置过滤已提交的字体 atlas 上传计划
 
