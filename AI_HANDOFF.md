@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.74%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.75%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -26,6 +26,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
+
+## 最新闭环：窗口化 Join 保存服务器快照降低帧开销
+
+- 当前总体迁移完成度：约 **99.75%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `join_saved_server_snapshot_window(start, capacity)`，只为可见 saved card 构建 snapshot；
+    - `push_join_route_page(...)` 不再每帧为所有 saved server 构建派生字段和 search terms；
+    - `max_join_route_scroll_offset_for_panel(...)` 使用 `join_saved_servers.len()`，滚动上限不再触发 snapshot 构建；
+    - `join_route_server_card_hit_at_point(...)` 改为按可见 index 几何命中，并按 saved server 数量截断空槽；
+    - 这轮没有引入长生命周期行级 snapshot cache，避免误缓存 `Idle` 分支实时网络状态、异步刷新结果和刷新动画。
+  - `README.md`
+    - 迁移进度更新到 **99.75%**。
+  - `MIGRATION.md`
+    - 新增 `1198. 窗口化 Join 保存服务器快照降低帧开销`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_scroll_hit_testing_matches_saved_server_rendering -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_follow_reorder_delete_and_poll -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_drive_server_cards_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. 继续低 FPS：saved-server 行级 snapshot 短生命周期 key 缓存、Join 静态文本缓存、font glyph upload key generation 化；
+  2. Join UI 还原：community host 正文流式排版、group header 按钮 skin、Add Server 弹窗 shell；
+  3. 继续 UI 还原：Settings、Load/Save、Host、Mods、Schematics 子菜单贴 Java 原版。
 
 ## 最新闭环：对齐 Join 社区多列布局并降低稳定帧开销
 

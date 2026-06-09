@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1198. 窗口化 Join 保存服务器快照降低帧开销
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.75%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，同时继续修用户反馈的前端帧率极低问题。
+- 性能背景：
+  - 旧 `push_join_route_page(...)` 每帧先构建全部 saved-server snapshots，再取可见窗口；
+  - `max_join_route_scroll_offset_for_panel(...)` 和 saved card hit-test 也会触发全量 snapshot 构建；
+  - snapshot 构建包含网络状态锁、世界标签读取、字符串拼接和 `search_terms` 生成，保存服务器数量多时会拖慢 Join/UI 帧。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_saved_server_snapshot_window(start, capacity)`，只为当前可见 saved card 窗口构建 snapshot；
+    - `push_join_route_page(...)` 改为使用可见窗口 snapshot，不再为不可见 saved server 重建派生文本；
+    - `max_join_route_scroll_offset_for_panel(...)` 改用 `join_saved_servers.len()`，滚动上限无需构建 snapshot；
+    - `join_route_server_card_hit_at_point(...)` 改为只按可见 index 几何命中，并用 saved server 数量截断空槽；
+    - 暂不做长生命周期行级缓存，避免把 `Idle` 分支实时网络态、异步刷新和刷新动画缓存死。
+  - `README.md`
+    - 迁移进度更新到 **99.75%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_scroll_hit_testing_matches_saved_server_rendering -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_follow_reorder_delete_and_poll -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_drive_server_cards_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. 继续低 FPS：在不破坏异步刷新/实时连接态的前提下，为 saved-server 行级 snapshot 增加短生命周期 key 缓存；
+  2. Join UI 还原：community host 正文流式排版、group header 按钮 skin、Add Server 弹窗 shell；
+  3. 继续 UI 还原：Settings、Load/Save、Host、Mods、Schematics 子菜单贴近 Java 原版。
+
 ## 1197. 对齐 Join 社区多列布局并降低稳定帧开销
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
