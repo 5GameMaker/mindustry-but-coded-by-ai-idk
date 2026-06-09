@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1185. 补齐 Schematics 信息弹窗滚动
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.62%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SchematicsDialog.java`：`SchematicInfoDialog.show(...)` 的 `cont.pane(...).grow().scrollX(false).scrollY(true)` 要求信息内容区可纵向滚动；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SchematicsDialog.java`：`@back`、`@editor.export`、`@edit` 按钮位于滚动 pane 外，滚动内容不应覆盖底部按钮。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 为 Schematics `Info` modal 增加 `schematic_info_scroll_offset` 状态；
+    - 增加信息弹窗内容 clip、描述高度估算、总高度、最大滚动偏移和滚动后 dialog helper；
+    - Info dialog 的 info line、tags、tag chips、add controls、preview、requirements、power、description 改为在 clip 内按滚动偏移渲染，并在溢出时绘制滚动条；
+    - Info dialog hit-test 改为使用滚动后的布局，保留底部 Back/Export/Edit 按钮固定在 pane 外；
+    - 打开/关闭 Info modal 或重新进入 Schematics route 时重置信息滚动状态。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematic_info_dialog_scrolls_long_content_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematics_info_dialog_renders_and_dispatches_buttons -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematic_info_and_edit_dialog_show_all_tags_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematic_info_dialog_renders_power_balance_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematics_icon_tag_picker_scrolls_overflow_candidates_like_java -- --nocapture`
+- 后续继续优先：
+  1. 继续按原版收口 Schematics tag editor 多 tag pane、card grid/filter 与 add-tag dialog；
+  2. 优先审查并修复字体、语言/本地化、raw key、glyph seed 与 LanguageDialog 视觉差距；
+  3. 继续推进 Join/Mods/Load/CustomRules/Database/Settings 等子菜单的 Scene2D 尺寸、wrap/ellipsis、按钮皮肤与滚动行为。
+
 ## 1184. 补齐 Schematics 图标标签滚动与暂停菜单细节
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
