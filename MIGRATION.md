@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1189. 接入 LanguageDialog 行模型字体和样式
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.66%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java`：每个语言行是 `new TextButton(getDisplayName(loc), Styles.flatTogglet)` 并作为 `400f x 50f` 的按钮加入 ScrollPane；
+  - `Styles.flatTogglet` 使用默认 UI 字体，行文本不应被渲染层重新硬编码成脱离 `LanguageDialogRow` 模型的样式。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `SETTINGS_LANGUAGE_LABEL_FONT_SIZE_LIKE_JAVA`，把语言行文本字号固定到 Java 默认 UI label 节奏；
+    - `push_settings_language_dialog_content(...)` 改为消费 `LanguageDialogRow.button_style` 选择按钮皮肤，消费 `LanguageDialogRow.font` 选择文本字体；
+    - 扩展 `desktop_launcher_language_dialog_uses_fonts_def_shadow_not_outline_like_java`，锁住 English 行的字号、默认字体和非 outline 行为。
+  - `README.md`
+    - 迁移进度更新到 **99.66%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_dialog_uses_fonts_def_shadow_not_outline_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop language_dialog -- --nocapture`
+- 后续继续优先：
+  1. 继续按子代理审查清单补 Settings/Language 的启动 locale、字体装载和外置 bundle 入口；
+  2. 继续收口 Host/Join/Mods 等子菜单真实交互壳层与 Java Scene2D 行为；
+  3. 继续扫所有子菜单最终 `DrawText` 的 raw key、英文 fallback 与图标 raw token 泄漏。
+
 ## 1188. 修正 Controls 设置行内字体节奏
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
