@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1183. 收口 Discord 原版图标与 PlanetData 容器密度
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.60%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Links.java:18` 与生成的 `Iconc.java`：About/Discord 入口使用真实 `Icon.discord` glyph，不应降级成通用 `Icon.link`；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:94-120`：`PlanetDataDialog` 使用 `planetDataDialog.cont.table(Tex.button, ...)` 直接包住 `280x60` 按钮列，不额外添加 Rust-only 外扩 chrome。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 移除 `desktop_ui_icon_alias_like_java("discord") -> "link"`，让主菜单 Discord banner、About 链接卡和 DiscordDialog 使用原版 `Icon.discord` glyph；
+    - `settings_planet_data_container_rect()` 改为直接包住三枚 `280x60` PlanetData 按钮列，去掉额外 14px 外扩 padding；
+    - 扩展 `desktop_ui_icon_glyph_aliases_avoid_raw_small_icon_names_like_java`，断言 `discord` 既不是 raw 英文 token，也不能等同通用 link glyph；
+    - 扩展 `desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell`，断言 PlanetData `Tex.button` 容器不再有额外 padded outer chrome。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_ui_icon_glyph_aliases_avoid_raw_small_icon_names_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_desktop_and_discord_chrome_buttons -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_records_discord_and_becheck_actions -- --nocapture`
+  - `cargo test -p mindustry-desktop settings_planet -- --nocapture`
+- 后续继续优先：
+  1. 继续收口 Pause/PausedDialog 的按钮矩阵、modal 背景与自定义规则入口；
+  2. 继续推进 Schematics icon tag picker、info dialog scroll、tags/card grid 与 Java Scene2D 一致；
+  3. 继续扫可见 DrawText 中 raw key、英文 token、诊断前缀和错误图标别名。
+
 ## 1182. 收口 Settings PlanetSelectDialog 的 BaseDialog 与 flatTogglet 视觉语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
