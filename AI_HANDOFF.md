@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.66%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.67%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -26,6 +26,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
+
+## 最新闭环：对齐 Mods Browser 条目高度和图标密度
+
+- 当前总体迁移完成度：约 **99.67%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/ModsDialog.java`
+  - `rebuildBrowser()`：`s=64f`，repo 图标 `size(s).pad(8f)`，listing button `height(s + 8*2f)`，外层 cell `pad(4)`。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 Mods Browser Java-like 几何常量；
+    - Browser listing 从旧 72f/52f 密度调整为 80f entry / 64f icon / 8f icon pad；
+    - 可见容量按 Java 条目高度和 cell pad 重新计算；
+    - 扩展 Browser 搜索/排序/过滤测试与滚动测试，锁住几何和 hit-test。
+  - `README.md`
+    - 迁移进度更新到 **99.67%**。
+  - `MIGRATION.md`
+    - 新增 `1190. 对齐 Mods Browser 条目高度和图标密度`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_scrolls_all_matching_cards_like_java_scrollpane -- --nocapture`
+  - `cargo test -p mindustry-desktop mods_browser -- --nocapture`
+- 下一步优先级：
+  1. Host：名字输入 40 字符、listfrag rebuild side-effect、端口按钮禁用；
+  2. Join：add/edit 弹窗生命周期、刷新中 reorder/delete 状态一致性；
+  3. Mods：selection/release 详情区继续对齐按钮顺序、pane 宽度和文本 wrap。
 
 ## 最新闭环：接入 LanguageDialog 行模型字体和样式
 

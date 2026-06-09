@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1190. 对齐 Mods Browser 条目高度和图标密度
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.67%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/ModsDialog.java:496-633`：`rebuildBrowser()` 中 `float s = 64f`，repo 图标 `size(s).pad(4f * 2f)`，外层 listing button `height(s + 8*2f)`，cell `pad(4)`；
+  - Browser 条目不应继续使用旧 Rust-only 72f/52f 的压缩卡片密度。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `MODS_BROWSER_ENTRY_HEIGHT_LIKE_JAVA = 80.0`、`MODS_BROWSER_ENTRY_ICON_SIZE_LIKE_JAVA = 64.0`、`MODS_BROWSER_ENTRY_ICON_PAD_LIKE_JAVA = 8.0` 和 row span/cell pad 常量；
+    - `mods_browser_entry_rect_for_list(...)` 改为 80f 高条目；
+    - `mods_browser_entry_icon_rect(...)` 改为 64f 图标并保持 8f pad；
+    - `mods_browser_visible_entry_capacity_for_list(...)` 改按 Java 条目高度/外层 cell pad 计算容量；
+    - 扩展 Mods Browser 测试，锁住条目高度、图标尺寸、图标 padding，并把滚动测试从旧固定行数改为按当前 Java-like 可见容量断言。
+  - `README.md`
+    - 迁移进度更新到 **99.67%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_scrolls_all_matching_cards_like_java_scrollpane -- --nocapture`
+  - `cargo test -p mindustry-desktop mods_browser -- --nocapture`
+- 后续继续优先：
+  1. 继续按子代理审查清单补 Host 名字输入/端口 UI 闭环；
+  2. 继续收口 Join add/edit/delete/move/refresh 生命周期和非英文可见文本；
+  3. 继续补 Mods Browser selection/release 详情区微视觉与按钮排布。
+
 ## 1189. 接入 LanguageDialog 行模型字体和样式
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
