@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1195. 缓存 Join 社区可见列表降低联机菜单帧开销
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.72%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，同时继续修用户反馈的前端帧率极低问题。
+- 性能背景：
+  - Join community 区域在 render、hit-test、scroll max、shell lines 中都会查询可见 group 和展开后的 host entries；
+  - 旧路径每次调用都会 rotate group 列表、过滤 hidden、对 group/host 文本重复做 search plain text 归一化，并重新展开 entries；
+  - Java `refreshCommunity()` 更接近刷新时重建，稳定帧不应重复做这些字符串和列表工作。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopJoinCommunityVisibleCache` / cache key，缓存可见 group indices 与展开后的 `(group_index, host_index)` entries；
+    - `visible_join_community_groups()` / `visible_join_community_entries()` 保持原接口，内部从缓存索引映射回 group 引用；
+    - `max_join_route_scroll_offset_for_panel(...)` 改用 cached entry count；
+    - cache key 覆盖提交后的 `join_community_search_committed`、`join_show_hidden`、hidden settings、group/host 搜索字段 fingerprint；
+    - 新增稳定帧缓存回归测试，并删除被缓存路径取代的旧 group `matches_query` 方法。
+  - `README.md`
+    - 迁移进度更新到 **99.72%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_caches_visible_join_community_entries_between_stable_queries -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. Join UI 还原：community 区块 columns/Collapser 宽度、host 正文流式排版、header/add 按钮 Java skin 节奏；
+  2. 继续低 FPS 修复：Settings row layout 前缀和，MapLocales property/add-icon 缓存；
+  3. 继续 UI 还原：Settings、Load/Save、Host、Mods、Schematics 子菜单贴近 Java 原版。
+
 ## 1194. 缓存 Mods Browser 过滤排序结果降低子菜单帧开销
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
