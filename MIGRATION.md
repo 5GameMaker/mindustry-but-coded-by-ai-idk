@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1194. 缓存 Mods Browser 过滤排序结果降低子菜单帧开销
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.71%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，同时继续修用户反馈的前端帧率极低问题。
+- 性能背景：
+  - `ModsDialog` Browser 打开时，render、hit-test、scroll max、icon request 都会触发 browser listing 查询；
+  - 旧 Rust 路径每次调用 `filtered_mods_browser_indices()` 都重新 trim/lower/search、collect、sort，并且 `mods_browser_entry_installed_like_java()` 对每个可见项再次扫描 metas；
+  - Java 原版 `rebuildBrowser()` 更接近事件驱动重建，稳定帧不应重复执行整列表过滤排序。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopModsBrowserFilteredIndicesCache` / cache key，缓存过滤排序后的 indices 与 installed flags；
+    - `max_mods_browser_scroll_offset(...)` 改用缓存长度，render/hit-test/selection info 共享缓存；
+    - cache key 覆盖 `mods_browser_search`、`mods_browser_sort_date`、mod names/metas 长度与 listing fingerprint，兼容现有测试直接修改公共字段的失效路径；
+    - 新增 `desktop_launcher_caches_mods_browser_filtered_indices_between_stable_queries`，验证稳定查询复用、搜索/排序/列表变更刷新缓存。
+  - `README.md`
+    - 迁移进度更新到 **99.71%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_caches_mods_browser_filtered_indices_between_stable_queries -- --nocapture`
+  - `cargo test -p mindustry-desktop mods_browser -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. 继续低 FPS 修复：Join 社区列表 search/visible entries 缓存，Settings row layout 前缀和，MapLocales property/add-icon 缓存；
+  2. 继续 UI 还原：Settings 语言/控制、Load/Save、Join community、Host、Mods、Schematics 子菜单贴近 Java 原版；
+  3. 继续确认 OpenGL present/swap 与菜单绘制 workload。
+
 ## 1193. 缓存外置字体种子摘要降低稳定帧开销
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
