@@ -36,6 +36,9 @@ const LOAD_FRAGMENT_CANCEL_WIDTH: f32 = 250.0;
 const LOAD_FRAGMENT_CANCEL_HEIGHT: f32 = 70.0;
 const LOAD_FRAGMENT_CANCEL_PAD: f32 = 20.0;
 const LOAD_FRAGMENT_LABEL_WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+const LOAD_STAGE_LOADING_KEY: &str = "@loading";
+const LOAD_STAGE_COMPLETE_KEY: &str = "@done";
+const LOAD_STAGE_ERROR_KEY: &str = "@error.title";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoadStage {
@@ -51,26 +54,18 @@ pub enum LoadStage {
 impl LoadStage {
     pub const fn default_prompt(self) -> &'static str {
         match self {
-            Self::Boot => "booting",
-            Self::LoadingAssets => "loading assets",
-            Self::LoadingContent => "loading content",
-            Self::Initializing => "initializing",
-            Self::Running => "starting",
-            Self::Failed => "loading failed",
-            Self::Complete => "ready",
+            Self::Boot
+            | Self::LoadingAssets
+            | Self::LoadingContent
+            | Self::Initializing
+            | Self::Running => LOAD_STAGE_LOADING_KEY,
+            Self::Failed => LOAD_STAGE_ERROR_KEY,
+            Self::Complete => LOAD_STAGE_COMPLETE_KEY,
         }
     }
 
     pub const fn label(self) -> &'static str {
-        match self {
-            Self::Boot => "boot",
-            Self::LoadingAssets => "assets",
-            Self::LoadingContent => "content",
-            Self::Initializing => "init",
-            Self::Running => "run",
-            Self::Failed => "error",
-            Self::Complete => "done",
-        }
+        self.default_prompt()
     }
 
     pub const fn is_terminal(self) -> bool {
@@ -195,14 +190,14 @@ impl LoadRendererState {
         let completion_text = input
             .completion
             .clone()
-            .unwrap_or_else(|| "loading complete".to_string());
+            .unwrap_or_else(|| LOAD_STAGE_COMPLETE_KEY.to_string());
         let error_text = input
             .error
             .clone()
             .unwrap_or_else(|| input.stage.default_prompt().to_string());
 
         let status_text = if input.stage == LoadStage::Complete {
-            prompt_or(&completion_text, "ready")
+            prompt_or(&completion_text, LOAD_STAGE_COMPLETE_KEY)
         } else if input.stage == LoadStage::Failed {
             error_text.clone()
         } else {
@@ -288,7 +283,7 @@ impl LoadRendererState {
         if input.stage == LoadStage::Failed || input.error.is_some() {
             commands.push(LoadRenderCommand::ErrorBanner {
                 message: error_text.clone(),
-                details: Some("retry or inspect the failure source".to_string()),
+                details: None,
                 rect: LoadRect::new(panel_x, panel_y, panel_width, panel_height),
                 color: self.theme.error_rgba,
             });
@@ -1100,10 +1095,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_stage_prompts_match_expected_labels() {
-        assert_eq!(LoadStage::Boot.default_prompt(), "booting");
-        assert_eq!(LoadStage::LoadingAssets.default_prompt(), "loading assets");
-        assert_eq!(LoadStage::Failed.default_prompt(), "loading failed");
+    fn default_stage_prompts_match_bundle_keys() {
+        assert_eq!(LoadStage::Boot.default_prompt(), "@loading");
+        assert_eq!(LoadStage::LoadingAssets.default_prompt(), "@loading");
+        assert_eq!(LoadStage::LoadingContent.default_prompt(), "@loading");
+        assert_eq!(LoadStage::Initializing.default_prompt(), "@loading");
+        assert_eq!(LoadStage::Running.default_prompt(), "@loading");
+        assert_eq!(LoadStage::Failed.default_prompt(), "@error.title");
+        assert_eq!(LoadStage::Complete.default_prompt(), "@done");
+        assert_eq!(LoadStage::Boot.label(), "@loading");
+        assert_eq!(LoadStage::Failed.label(), "@error.title");
+        assert_eq!(LoadStage::Complete.label(), "@done");
         assert!(LoadStage::Complete.is_terminal());
     }
 
@@ -1160,8 +1162,8 @@ mod tests {
 
         assert_eq!(plan.stage, LoadStage::LoadingContent);
         assert_eq!(plan.progress, 0.42);
-        assert_eq!(plan.stage_text, "content  42%");
-        assert_eq!(plan.prompt_text, "loading content");
+        assert_eq!(plan.stage_text, "@loading  42%");
+        assert_eq!(plan.prompt_text, "@loading");
         assert_eq!(plan.commands.len(), 9);
 
         match &plan.commands[6] {
@@ -1469,12 +1471,12 @@ mod tests {
     #[test]
     fn failed_state_adds_error_banner_and_clamps_progress() {
         let mut state = LoadRendererState::default();
-        let mut input = LoadFrameInput::new(1280.0, 720.0, 1.5, 1.0, LoadStage::Failed, 2.5);
-        input.error = Some("asset loader crashed".to_string());
+        let input = LoadFrameInput::new(1280.0, 720.0, 1.5, 1.0, LoadStage::Failed, 2.5);
         let plan = state.build_plan(input);
 
         assert_eq!(plan.progress, 1.0);
-        assert_eq!(plan.stage_text, "asset loader crashed");
+        assert_eq!(plan.stage_text, "@error.title");
+        assert_eq!(plan.prompt_text, "@error.title");
         assert!(matches!(
             plan.commands.last().unwrap(),
             LoadRenderCommand::ErrorBanner { .. }
@@ -1486,27 +1488,27 @@ mod tests {
             } => (message.clone(), details.clone()),
             _ => unreachable!(),
         };
-        assert_eq!(error.0, "asset loader crashed");
+        assert_eq!(error.0, "@error.title");
         assert_eq!(
-            error.1,
-            Some("retry or inspect the failure source".to_string())
+            error.1, None,
+            "Java LoadingFragment does not add a Rust-only English retry/details line"
         );
     }
 
     #[test]
     fn completion_state_forces_full_progress_and_completion_banner() {
         let mut state = LoadRendererState::default();
-        let mut input = LoadFrameInput::new(960.0, 540.0, 1.0, 0.25, LoadStage::Complete, 0.1);
-        input.completion = Some("all assets ready".to_string());
+        let input = LoadFrameInput::new(960.0, 540.0, 1.0, 0.25, LoadStage::Complete, 0.1);
         let plan = state.build_plan(input);
 
         assert_eq!(plan.progress, 1.0);
-        assert_eq!(plan.stage_text, "all assets ready");
-        assert_eq!(plan.prompt_text, "ready");
-        assert!(matches!(
-            plan.commands.last().unwrap(),
-            LoadRenderCommand::CompletionBanner { .. }
-        ));
+        assert_eq!(plan.stage_text, "@done");
+        assert_eq!(plan.prompt_text, "@done");
+        let completion = match plan.commands.last().unwrap() {
+            LoadRenderCommand::CompletionBanner { message, .. } => message,
+            other => panic!("expected CompletionBanner command, got {other:?}"),
+        };
+        assert_eq!(completion, "@done");
     }
 
     #[test]
@@ -1575,7 +1577,7 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(texts, vec!["boot | @loading"]);
+        assert_eq!(texts, vec!["@loading | @loading"]);
 
         assert!(plan.into_render_pass().is_some());
     }
@@ -1634,7 +1636,7 @@ mod tests {
                 },
                 LoadRenderCommand::ErrorBanner {
                     message: "asset loader crashed".to_string(),
-                    details: Some("retry or inspect the failure source".to_string()),
+                    details: Some("@loading".to_string()),
                     rect: LoadRect::new(16.0, 220.0, 168.0, 54.0),
                     color: [0.95, 0.26, 0.22, 1.0],
                 },
@@ -1689,7 +1691,7 @@ mod tests {
             "error  25%",
             "loading assets",
             "asset loader crashed",
-            "retry or inspect the failure source",
+            "@loading",
             "all assets ready",
         ] {
             assert!(
