@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1223. 去掉 black6 面板 fallback 的 Rust-only 描边
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.98%**，仍未达到完整可玩；当前继续优先 UI/前端还原，同时处理用户反馈的极低帧率问题。
+- Java 对照：
+  - `core/src/mindustry/ui/Styles.java:107`：`black6 = whiteui.tint(0f, 0f, 0f, 0.6f)`，它是纯 tinted drawable；
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:201-241`：desktop main/submenu table 使用 `Styles.black6` 作为背景，不额外添加边框描线。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `menu_push_black6_panel(...)` fallback 保留 `FillRect`，删除额外 `StrokeRect`；
+    - 扩展 `menu_ui_plan_desktop_draws_black6_main_and_submenu_panels_like_java_tables`，断言主/子菜单 panel 不出现 background-layer + 0.01 的黑色描边；
+    - 现有 `upstream_ui_drawable_alias("black6")` 路径继续优先走 `whiteui` sprite，fallback 仅保持纯黑 0.6 alpha 背景。
+- 已验证：
+  - `cargo fmt -- core/src/mindustry/graphics/menu_renderer.rs`
+  - `cargo test -p mindustry-core menu_ui_plan_desktop_draws_black6_main_and_submenu_panels_like_java_tables --lib -- --nocapture`
+  - `cargo test -p mindustry-core menu_desktop_submenu_panels_keep_java_black6_layering_and_alpha --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. UI：补锁 desktop flatToggleMenut icon/label inset 与 submenu sibling table 230f/70f 几何，继续 chrome widget skin；
+  2. FPS：继续推进文本 layout 跨帧缓存、text layer/batch 收敛、font atlas/upload 失效收紧；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1222. 共享真实字体文本 layout 并避免逐 glyph 克隆 atlas 像素
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。

@@ -371,12 +371,6 @@ fn menu_push_black6_panel(commands: &mut Vec<RenderCommand>, rect: RenderRect, a
         menu_color_with_alpha([0.0, 0.0, 0.0, 0.6], alpha_scale),
         MENU_DESKTOP_BACKGROUND_LAYER,
     ));
-    commands.push(RenderCommand::stroke_rect(
-        rect,
-        menu_color_with_alpha([0.0, 0.0, 0.0, 0.42], alpha_scale),
-        1.0,
-        MENU_DESKTOP_BACKGROUND_LAYER + 0.01,
-    ));
 }
 
 fn menu_union_rect(a: RenderRect, b: RenderRect) -> RenderRect {
@@ -4693,21 +4687,34 @@ mod tests {
                 _ => false,
             }
         }
+        fn is_black6_panel_stroke(command: &RenderCommand, rect: RenderRect) -> bool {
+            matches!(
+                command,
+                RenderCommand::StrokeRect {
+                    rect: stroke_rect,
+                    layer,
+                    ..
+                } if *stroke_rect == rect
+                    && (*layer - (MENU_DESKTOP_BACKGROUND_LAYER + 0.01)).abs() < f32::EPSILON
+            )
+        }
 
+        let main_panel = RenderRect::new(128.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0);
+        let submenu_panel = RenderRect::new(358.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0);
+
+        assert!(commands
+            .iter()
+            .any(|command| { is_black6_panel_command(command, main_panel, 1.0) }));
         assert!(commands.iter().any(|command| {
-            is_black6_panel_command(
-                command,
-                RenderRect::new(128.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
-                1.0,
-            )
+            is_black6_panel_command(command, submenu_panel, plan.ui.submenu_alpha)
         }));
-        assert!(commands.iter().any(|command| {
-            is_black6_panel_command(
-                command,
-                RenderRect::new(358.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
-                plan.ui.submenu_alpha,
-            )
-        }));
+        assert!(
+            !commands
+                .iter()
+                .any(|command| is_black6_panel_stroke(command, main_panel)
+                    || is_black6_panel_stroke(command, submenu_panel)),
+            "Java Styles.black6 is a plain tinted whiteui drawable; Rust must not add an extra fallback panel border"
+        );
     }
 
     #[test]

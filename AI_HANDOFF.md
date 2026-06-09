@@ -10,13 +10,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.97%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.98%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 最新闭环：去掉 black6 面板 fallback 的 Rust-only 描边
+
+- 当前总体迁移完成度：约 **99.98%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时持续处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 对照 Java `Styles.black6 = whiteui.tint(0f, 0f, 0f, 0.6f)`，去掉 `menu_push_black6_panel(...)` fallback 路径里额外的 `StrokeRect`；
+    - 扩展 `menu_ui_plan_desktop_draws_black6_main_and_submenu_panels_like_java_tables`，锁住主/子菜单 `black6` panel 不能额外画 Rust-only border。
+  - `README.md`
+    - 迁移进度更新到 **99.98%**。
+  - `MIGRATION.md`
+    - 新增 `1223. 去掉 black6 面板 fallback 的 Rust-only 描边`。
+- 已验证/本轮收口验证：
+  - `cargo fmt -- core/src/mindustry/graphics/menu_renderer.rs`
+  - `cargo test -p mindustry-core menu_ui_plan_desktop_draws_black6_main_and_submenu_panels_like_java_tables --lib -- --nocapture`
+  - `cargo test -p mindustry-core menu_desktop_submenu_panels_keep_java_black6_layering_and_alpha --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. UI：补锁 desktop 主按钮 icon/label inset、submenu sibling table 230f/70f 回归测试，并继续收口顶部/右侧 chrome widget skin；
+  2. FPS：继续做文本 layout 跨帧缓存与 text layer/batch 收敛；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
 
 ## 最新闭环：共享真实字体文本 layout 并避免逐 glyph 克隆 atlas 像素
 
