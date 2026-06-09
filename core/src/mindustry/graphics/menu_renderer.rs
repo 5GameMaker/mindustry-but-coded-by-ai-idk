@@ -1447,28 +1447,8 @@ fn menu_push_icon_render_commands(
                 layer,
             ));
         }
-        _ => {
-            commands.push(RenderCommand::draw_text_styled(
-                menu_icon_text(icon_name),
-                center,
-                color,
-                size,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Center)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
-                layer,
-            ));
-        }
+        _ => {}
     }
-}
-
-fn menu_icon_text(icon_name: &str) -> String {
-    icon_name
-        .chars()
-        .find(|character| character.is_ascii_alphanumeric())
-        .map(|character| character.to_ascii_uppercase().to_string())
-        .unwrap_or_else(|| "!".to_string())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -5582,6 +5562,25 @@ mod tests {
                 "icon {icon} should prefer the upstream Icon glyph bridge over the sprite bridge"
             );
         }
+    }
+
+    #[test]
+    fn menu_icon_render_commands_unknown_icon_uses_neutral_fallback() {
+        let mut commands = Vec::new();
+        menu_push_icon_render_commands(
+            &mut commands,
+            "future-mod-icon",
+            RenderPoint::new(32.0, 48.0),
+            MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE,
+            [1.0, 1.0, 1.0, 1.0],
+            MENU_FLAT_TOGGLE_MENU_STYLE.text_layer,
+            false,
+        );
+
+        assert!(
+            commands.is_empty(),
+            "Java MenuFragment draws registered Icon/Drawable values; unknown icon names must not be converted into visible fallback letters"
+        );
     }
 
     #[test]
