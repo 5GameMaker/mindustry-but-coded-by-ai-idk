@@ -19,6 +19,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1221. 去掉真实字体文本 quad 的行列表分配
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度保持：约 **99.96%**，仍未达到完整可玩；当前继续优先 UI/前端还原，同时处理用户反馈的极低帧率问题。
+- Java 对照：
+  - Java 字体 layout 对稳定 UI 文本不应额外分配临时行列表；Rust 当前真实字体路径在每个 `DrawText` pass 中仅为计算行数和迭代而 `collect::<Vec<_>>()`；
+  - outline/shadow 文本会多次调用同一 layout helper，临时行列表分配会被放大。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `opengl_backend_text_real_font_quads_without_outline(...)` 改为先计数 `line_count`，再直接迭代 `text.split('\n')`；
+    - 保持 `total_height`、newline char color index 推进和逐行宽度计算语义不变；
+    - 去掉每次文本 quad 生成里的 `Vec<&str>` 临时分配。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_registers_incremental_real_font_glyphs_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_frame_plan_carries_font_glyph_texture_upload --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. FPS：继续把 outline/shadow/foreground 的真实字体 layout 结果共享化；
+  2. UI：优先收口顶部/右侧 chrome 的 Java Table 语义，然后继续 submenu sibling table；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1220. 借用化 OpenGL sprite mesh batch key
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。

@@ -18,6 +18,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 最新闭环：去掉真实字体文本 quad 的行列表分配
+
+- 当前总体迁移完成度：约 **99.96%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时持续处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - `opengl_backend_text_real_font_quads_without_outline(...)` 不再 `collect::<Vec<_>>()` 保存 `text.split('\n')`；
+    - 改为 `line_count` 计数 + 直接迭代 split；
+    - 保持 `total_height`、逐行 width、newline char index 推进语义不变；
+    - 这是后续 outline/shadow/foreground 共享 layout 的前置减负。
+  - `MIGRATION.md`
+    - 新增 `1221. 去掉真实字体文本 quad 的行列表分配`。
+- 已验证/本轮收口验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_registers_incremental_real_font_glyphs_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_frame_plan_carries_font_glyph_texture_upload --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. FPS：继续把 outline/shadow/foreground 的真实字体 layout 结果共享化；
+  2. UI：优先收口顶部/右侧 chrome 的 Java Table 语义，然后继续 submenu sibling table；
+  3. 继续保证模块接入整体 runtime/render/backend 主链路，不允许做成孤立模块。
+
 ## 最新闭环：借用化 OpenGL sprite mesh batch key
 
 - 当前总体迁移完成度：约 **99.96%**，仍未达到完整可玩。
