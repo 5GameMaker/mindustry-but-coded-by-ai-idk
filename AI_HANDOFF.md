@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.79%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.80%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -26,6 +26,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
+
+## 最新闭环：缓存 Join 保存服务器快照降低联机菜单帧开销
+
+- 当前总体迁移完成度：约 **99.80%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 Join saved-server 行级 snapshot cache；
+    - 只缓存 `Refreshing/Resolved/Failed`，`Idle` 保持实时 net/world/connect 状态；
+    - cache key 覆盖 saved target host/port 与 refresh-state digest，刷新结果变化、reorder/delete、目标变化都会自动 miss；
+    - cache key 命中路径不再构造 display address 字符串；
+    - 新增稳定查询复用测试。
+  - `README.md`
+    - 迁移进度更新到 **99.80%**。
+  - `MIGRATION.md`
+    - 新增 `1203. 缓存 Join 保存服务器快照降低联机菜单帧开销`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_caches_join_saved_server_snapshots_between_stable_queries -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_drive_server_cards_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_follow_reorder_delete_and_poll -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. FPS：localize bundle/static text 缓存、菜单背景命令缓存/批处理、frame payload 大对象 clone 减少；
+  2. UI：继续补 Join/Settings/Load/Host/Mods/Schematics 子菜单与 Java Scene2D 视觉差；
+  3. 资源：继续直接复用上游 assets、fonts、bundles、icons、sprites/ui。
 
 ## 最新闭环：跳过普通文本图标格式化降低 UI 稳定帧开销
 

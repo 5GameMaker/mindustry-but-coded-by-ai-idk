@@ -19,6 +19,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1203. 缓存 Join 保存服务器快照降低联机菜单帧开销
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.80%**，仍未达到完整可玩；当前继续优先补前端 UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，同时继续处理用户反馈的前端帧率极低问题。
+- 性能背景：
+  - Join saved-server 卡片每帧会从 `DesktopConnectTarget` + refresh state 派生 `DesktopJoinRouteServerSnapshot`；
+  - 派生过程包含状态分支、字符串拼接、换行清洗、players/map/mode/ping/version 行和 `search_terms` 重建；
+  - Java `JoinDialog.refreshServer()/buildServer()` 更接近刷新事件驱动更新，稳定帧不应重复重建同一行派生文本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopJoinSavedServerSnapshotCache` 行级缓存；
+    - 仅缓存 `Refreshing/Resolved/Failed` 这类由刷新状态驱动的低频变更快照；
+    - `Idle` 分支继续实时读取 net/world/connect 状态，避免把当前连接状态缓存死；
+    - cache key 使用 `host + port + refresh-state digest`，命中路径不再为 display address 额外分配字符串；
+    - 保留刷新中 animated dots 在 render 阶段生成，`@server.refreshing...` 动画不被缓存冻结；
+    - 新增 `desktop_launcher_caches_join_saved_server_snapshots_between_stable_queries`，验证稳定查询复用、刷新结果变更后自动失效。
+  - `README.md`
+    - 迁移进度更新到 **99.80%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_caches_join_saved_server_snapshots_between_stable_queries -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_drive_server_cards_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_saved_refresh_states_follow_reorder_delete_and_poll -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. 继续低 FPS：localize bundle/static text 缓存、菜单背景命令缓存/批处理、frame payload 大对象 clone 减少；
+  2. 继续 UI 还原：Join/Settings/Load/Host/Mods/Schematics 子菜单继续对照 Java Scene2D；
+  3. 资源/字体：继续直接复用上游 assets、fonts、bundles、icons、sprites/ui。
+
 ## 1202. 跳过普通文本图标格式化降低 UI 稳定帧开销
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
