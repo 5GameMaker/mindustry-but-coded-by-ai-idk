@@ -10,13 +10,39 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.96%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.97%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 最新闭环：共享真实字体文本 layout 并避免逐 glyph 克隆 atlas 像素
+
+- 当前总体迁移完成度：约 **99.97%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时持续处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopRealFontTextLayout` / line / glyph 中间结构；
+    - `opengl_backend_text_real_font_quads_for_locale(...)` 对同一段文本只构建一次真实字体 layout，然后复用于 shadow / outline / foreground 多层绘制；
+    - 新增轻量 glyph quad binding，逐字形绘制时不再临时 clone 整张 runtime font atlas 像素；真正上传路径仍保留完整 atlas pixels；
+    - 新增测试锁住 newline char color index 与 per-glyph binding 不携带 atlas pixels。
+  - `README.md`
+    - 迁移进度更新到 **99.97%**。
+  - `MIGRATION.md`
+    - 新增 `1222. 共享真实字体文本 layout 并避免逐 glyph 克隆 atlas 像素`。
+- 已验证/本轮收口验证：
+  - `cargo fmt -- desktop/src/lib.rs`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_real_font_ --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_markup_colors_real_font_foreground_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_outline_uses_real_font_atlas_not_placeholder --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_registers_incremental_real_font_glyphs_like_java --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. UI：按子代理审查优先去掉主/子菜单 black6 Rust-only 描边，继续收口 flat toggle icon/label padding、submenu sibling table anchor、顶部/右侧 chrome widget skin；
+  2. FPS：继续做文本 layout 跨帧缓存与 text layer/batch 收敛，避免 shadow/outline 的微小 layer 偏移制造过多 batch；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
 
 ## 最新闭环：去掉真实字体文本 quad 的行列表分配
 

@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1222. 共享真实字体文本 layout 并避免逐 glyph 克隆 atlas 像素
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.97%**，仍未达到完整可玩；当前继续优先 UI/前端还原，同时处理用户反馈的极低帧率问题。
+- Java 对照：
+  - Java/Arc 字体绘制在同一 text layout 的 shadow / outline / foreground 变体之间复用 glyph metrics 和 line metrics；Rust 旧路径每层都重新做 glyph lookup、line width、symbol format；
+  - 字体 atlas 像素只应在资源上传路径持有；逐 glyph quad 构建不应临时 clone 整张 runtime font atlas。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopRealFontTextLayout`、`DesktopRealFontTextLayoutLine`、`DesktopRealFontTextLayoutGlyph`；
+    - 新增 `opengl_backend_real_font_text_layout(...)` 与 `opengl_backend_text_real_font_quads_from_layout(...)`；
+    - `opengl_backend_text_real_font_quads_for_locale(...)` 对同一文本只构建一次 layout，再复用于 default shadow、runtime outline 八方向、foreground；
+    - 新增 `opengl_backend_font_glyph_atlas_texture_binding_for_quad(...)`，per-glyph quad binding 不再携带 `atlas.pixels.clone()`；`opengl_backend_font_glyph_atlas_texture_binding(...)` 仍用于 texture resource table/upload；
+    - 新增测试覆盖 newline char color index 与 glyph quad binding 无 atlas pixels。
+- 已验证：
+  - `cargo fmt -- desktop/src/lib.rs`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_real_font_ --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_markup_colors_real_font_foreground_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_outline_uses_real_font_atlas_not_placeholder --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_registers_incremental_real_font_glyphs_like_java --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. UI：按审查优先去掉主/子菜单 black6 Rust-only 描边，收口 flat toggle icon/label padding、submenu sibling table anchor 与顶部/右侧 chrome skin；
+  2. FPS：继续推进文本 layout 跨帧缓存、text layer/batch 收敛、font atlas/upload 失效收紧；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1221. 去掉真实字体文本 quad 的行列表分配
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
