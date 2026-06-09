@@ -19,6 +19,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1228. 收口菜单帧率缓存、字体 atlas 大拷贝与 Settings 条件
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.982%**，仍未达到完整可玩；当前继续优先 UI/前端还原，同时把用户反馈的极低帧率作为前端阻塞问题持续压低。
+- Java 对照：
+  - `MenuRenderer` 的背景缓存/少量动态元素思路要求稳定菜单帧不能每帧重建大块背景命令；
+  - Java Fonts/Scene2D 侧的稳定文本不应在每个 shadow/outline pass 中重复构造同一 glyph atlas 绑定；
+  - `SettingsMenuDialog.addSettings()` 的桌面副作用和 runtime 条件必须跟随平台、beta/alpha、shader 可用性。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增菜单背景动态 cache，把 synthetic 背景动画按 viewport + 12Hz 相位量化，稳定 60fps 相邻帧复用背景 commands，同时跨相位仍推进星空/星球动画；
+    - `DesktopGraphicsOpenGlBackendSpriteMeshUploadSignature` 不再保存整份 vertex/index bytes，改为 len + FNV digest，减少稳定帧判重时的大 `Vec<u8>` clone；
+    - `DesktopRealFontTextLayoutGlyph` 预烘焙 per-glyph `DesktopGraphicsOpenGlBackendTextureBinding`，layout cache 命中后 shadow/outline/foreground 多 pass 直接复用绑定元数据；
+    - 新增 `opengl_backend_font_glyph_atlas_texture_binding_for_resource_table(...)`，已上传的 runtime font atlas 资源后续 DrawText 注册只携带元数据，不再每帧克隆整张 atlas 像素；
+    - Settings：桌面默认强制 `game.swapdiagonal=false`，`steampublichost` 跟随 beta/alpha gating，`animatedshields` 跟随 shader 可用性 flag。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_real_font --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_reuses_uploaded_font_atlas_binding_without_pixel_clone_for_stable_fps --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_synthetic_menu_background --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_ --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_ --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. UI：Settings、LoadGame、Join、Mods、Database/ContentInfo 等子菜单继续贴近 Java 视觉和交互；
+  2. FPS：继续 text layer/batch 收敛、route-shell 主体缓存、Join/Mods 文本截断缓存；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1227. 缓存稳定真实字体文本 layout
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
