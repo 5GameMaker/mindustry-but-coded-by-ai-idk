@@ -47,6 +47,7 @@ impl Default for FullTextDialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mindustry::graphics::RenderFontId;
     use crate::mindustry::ui::dialogs::DialogState;
 
     #[test]
@@ -140,8 +141,16 @@ mod tests {
                 assert_eq!(*align, RenderTextAlign::Center);
                 assert_eq!(style.horizontal_align, RenderTextAlign::Center);
                 assert_eq!(style.vertical_align, RenderTextVerticalAlign::Center);
+                assert_eq!(
+                    style.font,
+                    RenderFontId::Default,
+                    "Java FullTextDialog title uses the default UI font through BaseDialog"
+                );
                 assert!(style.integer_position);
-                assert!(style.outline);
+                assert!(
+                    !style.outline,
+                    "Java BaseDialog title uses Fonts.def; FullTextDialog must not reintroduce a Rust-only runtime outline"
+                );
             }
             other => panic!("expected centered title text, got {other:?}"),
         }
