@@ -19,6 +19,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1212. 对齐 Campaign 首次选星弹窗 planet 图卡与 OK 按钮高度
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.89%**，仍未达到完整可玩；当前继续优先前端/UI 视觉还原，同时持续处理前端帧率问题。
+- Java 对照：
+  - `PlanetDialog.java` 首次 campaign select 使用 `BaseDialog("@campaign.select")` 叠层，而不是嵌在右侧 route shell 小 panel 内；
+  - Serpulo/Erekir 选项是 `diag.cont.button(...).size(mobile ? 220f : 320f)` 的方形 `Styles.togglet` 按钮；
+  - 按钮主体直接显示 `TextureRegionDrawable(planetTextures[i])`，对应上游 `sprites/planets/serpulo.png` / `sprites/planets/erekir.png`；
+  - campaign select `@ok` 按钮为 `300x64`，Serpulo rework notice `@ok` 按钮为 `280x64`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `campaign_intro_select_dialog_rect(...)` 改为按 viewport 居中的 BaseDialog 叠层，避免被 220px route shell panel 限死；
+    - `campaign_intro_planet_button_rect(...)` 改为方形桌面 320 目标尺寸，并按可用空间收缩；
+    - `push_campaign_intro_planet_button(...)` 删除圆形几何占位，改为绘制上游 planet PNG；
+    - `campaign_intro_select_ok_rect(...)` 高度改为 64；
+    - `campaign_serpulo_rework_notice_ok_rect(...)` 高度改为 64；
+    - 扩展 Campaign select / rework notice 测试，锁住方形按钮、planet sprite、OK 高度与点击命中。
+  - `README.md`
+    - 迁移进度更新到 **99.89%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_shows_initial_campaign_select_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_shows_serpulo_rework_notice_once_like_java -- --nocapture`
+- 后续继续优先：
+  1. UI：继续收口 Settings pressed/down 态、Mac notch 动态偏移、主/子菜单背景容器语义、Icon drawable 路径；
+  2. FPS：继续缓存稳定菜单 layout/plan、减少 UI command 克隆、复核 trace 环境变量和 glyph layout；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1211. 清空 OpenGL recording driver 历史命令避免跨帧累积
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
