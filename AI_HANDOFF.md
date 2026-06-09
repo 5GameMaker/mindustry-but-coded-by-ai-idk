@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.82%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.83%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -26,6 +26,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
+
+## 最新闭环：OpenGL sprite mesh batch 改为哈希分桶降低 UI 帧开销
+
+- 当前总体迁移完成度：约 **99.83%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteMeshBatchKey`；
+    - `opengl_backend_sprite_mesh_batches_from_quads(...)` 从对已有 batch 的线性扫描改为 `HashMap<BatchKey, usize>`；
+    - batch Vec 顺序仍按第一次出现的 quad，draw-call layer 排序和拆批语义保持不变；
+    - 覆盖 target、shader、blend、clip、texture identity、page、sampler、layer bits，避免错误合批；
+    - 扩展测试确认相同 key 的 quad 即使被其它 batch 插开也会归并。
+  - `README.md`
+    - 迁移进度更新到 **99.83%**。
+  - `MIGRATION.md`
+    - 新增 `1206. OpenGL sprite mesh batch 改为哈希分桶降低 UI 帧开销`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop sprite_mesh -- --nocapture`
+  - `cargo test -p mindustry-desktop sprite_draw_call_plans -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_sprite_quad_respects_draw_sprite_origin -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. FPS：继续复核 `DesktopGraphicsOpenGlBackendFramePlan::from_frame_with_effect_buffer_surface` 的 trace-free live 路径；
+  2. UI：继续收口主菜单 chrome、Settings tooltip/hover、ModsBrowser、Host、Schematics、Campaign/Planet 子页面；
+  3. 继续保证所有模块接入整体 runtime/render/backend 主链路，不允许做成孤立模块。
 
 ## 最新闭环：默认启用轻量菜单路径并收口 Load/Join 几何
 

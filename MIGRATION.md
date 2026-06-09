@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1206. OpenGL sprite mesh batch 改为哈希分桶降低 UI 帧开销
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.83%**，仍未达到完整可玩；当前继续优先前端/UI 视觉还原，同时处理用户反馈的前端帧率极低问题。
+- 性能背景：
+  - `opengl_backend_sprite_mesh_batches_from_quads(...)` 旧实现对每个 sprite/text quad 都线性扫描已有 batch；
+  - 菜单、子菜单、字体/outline 文本会产生大量 quad，稳定帧下该路径容易退化为 O(n²)。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteMeshBatchKey`，覆盖 target、shader、blend、clip、texture identity、page、sampler 和 layer bits；
+    - `opengl_backend_sprite_mesh_batches_from_quads(...)` 改用 `HashMap<BatchKey, usize>` 定位 batch，保留 batch Vec 首次出现顺序；
+    - 保持不同 layer / texture handle / sampler / clip / target / blend 的拆批语义不变；
+    - 扩展 sprite quad 测试，锁住“相同 key 被其它 batch 插开后仍归并”的行为。
+  - `README.md`
+    - 迁移进度更新到 **99.83%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop sprite_mesh -- --nocapture`
+  - `cargo test -p mindustry-desktop sprite_draw_call_plans -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_sprite_quad_respects_draw_sprite_origin -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. FPS：继续复核 live renderer 的 trace-free 路径、文本布局缓存、frame/atlas 上传稳定性；
+  2. UI：继续收口主菜单 chrome、Settings tooltip/hover、ModsBrowser、Host、Schematics、Campaign/Planet 子页面；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1205. 默认启用轻量菜单路径并收口 Load/Join 几何
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
