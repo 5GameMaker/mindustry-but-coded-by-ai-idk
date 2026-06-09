@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.69%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.70%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -26,6 +26,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
+
+## 最新闭环：缓存外置字体种子摘要降低稳定帧开销
+
+- 当前总体迁移完成度：约 **99.70%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 将外置字体 seed 全局缓存从裸 `BTreeSet<char>` 改为带 `(len, digest)` 摘要的 `DesktopExternalFontSeedCharactersCache`；
+    - `desktop_external_font_seed_key()` 改为只读缓存摘要，不再在稳定菜单帧路径 clone 全量字符集并重算 digest；
+    - `desktop_register_external_font_seed_characters(...)` 只在确实注册到新字符时刷新摘要，保持 Java 外置 bundle / mod bundle 字形注册语义；
+    - 扩展 Thai 外置 bundle 字形回归测试，锁住注册后稳定帧继续复用 cached font upload plan。
+  - `README.md`
+    - 迁移进度更新到 **99.70%**。
+  - `MIGRATION.md`
+    - 新增 `1193. 缓存外置字体种子摘要降低稳定帧开销`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_external_font_seed -- --nocapture`
+  - `cargo test -p mindustry-desktop external_bundle -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_menu_graphics_frame_registers_thai_external_bundle_seed_and_refreshes_cache_key -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mod_bundle_seed_refreshes_font_upload_plan_like_java -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. 继续修低 FPS：优先缓存 Mods 浏览器过滤/排序/installed 状态，或 Join 社区列表 search/visible entries；
+  2. 继续 UI 还原：Settings 语言/控制、Load/Save、Join community、Host、Mods、Schematics 子菜单继续贴 Java 原版；
+  3. 继续确认 OpenGL present/swap 与菜单绘制 workload。
 
 ## 最新闭环：缓存外置 bundle 解析结果降低前端帧 IO
 

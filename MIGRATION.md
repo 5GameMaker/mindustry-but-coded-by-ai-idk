@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1193. 缓存外置字体种子摘要降低稳定帧开销
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.70%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，同时继续修用户反馈的前端帧率极低问题。
+- 性能背景：
+  - 菜单帧构造 `DesktopFontGlyphUploadPlanCacheKey` 时会读取外置字体 seed key；
+  - 旧路径每帧通过 `desktop_external_font_seed_characters()` clone 全量外置 seed 字符集，再对整个 `BTreeSet<char>` 重算 digest；
+  - Java 语义只要求外置 bundle / mod bundle 注册新字形后刷新字体 upload plan，稳定帧不应重复 clone 和 digest。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopExternalFontSeedCharactersCache`，在全局外置字体 seed 缓存中同时保存字符集与 `(len, digest)` 摘要；
+    - `desktop_external_font_seed_key()` 改为只读取缓存摘要，避免稳定帧 clone 大字形集合；
+    - `desktop_register_external_font_seed_characters(...)` 只在确实插入新字符时刷新摘要，保持外置 bundle 和 mod bundle 字形注册触发 font upload plan dirty 的语义；
+    - 扩展 Thai 外置 bundle 测试，确认 seed 注册后稳定帧继续复用 cached font glyph upload plan。
+  - `README.md`
+    - 迁移进度更新到 **99.70%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_external_font_seed -- --nocapture`
+  - `cargo test -p mindustry-desktop external_bundle -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_menu_graphics_frame_registers_thai_external_bundle_seed_and_refreshes_cache_key -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mod_bundle_seed_refreshes_font_upload_plan_like_java -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. 继续低 FPS 修复：Mods 浏览器过滤/排序/installed 状态缓存，Join 社区列表 search/visible entries 缓存，Settings row layout 前缀和；
+  2. 继续 UI 还原：Settings 语言/控制、Load/Save、Join community、Host、Mods、Schematics 子菜单贴近 Java 原版；
+  3. 继续排查 OpenGL present/swap 与菜单绘制 workload。
+
 ## 1192. 缓存外置 bundle 解析结果降低前端帧 IO
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
