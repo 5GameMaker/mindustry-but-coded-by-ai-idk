@@ -19,6 +19,44 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1200. 优化 Settings 行布局并拆分 Host 图标 fallback
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.77%**，仍未达到完整可玩；当前继续优先补前端 UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，同时继续处理用户反馈的前端帧率极低问题。
+- 性能背景：
+  - Settings 偏好项列表渲染和命中在稳定帧中会逐行调用 `settings_pref_widget_row_rect_for_specs_with_scroll(...)`；
+  - 旧 helper 每求一个 index 都从头累计前置行高度，长设置页会把同一批行高度重复累计成 O(n²)；
+  - Java Scene2D Table/ScrollPane 更接近顺序布局和事件驱动重排，不应在稳定帧重复做前缀累计。
+- UI 背景：
+  - `Icon.host` 在上游字体图标中是独立 glyph；
+  - Rust fallback 里曾把 `host` 合并到 `add`，一旦 glyph 路径缺失会把主机/联机入口显示成加号。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_pref_widget_row_width_for_clip(...)`，统一 Settings 行宽计算；
+    - `push_settings_pref_controls_for_specs(...)` 改为单次顺序 `row_top` 游标布局，避免每行从头累计高度；
+    - `settings_route_control_action_at_point(...)` 同步改为顺序游标命中，保持渲染与 hit-test 几何一致；
+    - 默认虚拟菜单图标 atlas 增加 `menu-icon-host`。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `menu_icon_sprite_for_name("host")` 改为独立 `menu-icon-host`；
+    - fallback primitive 中 `host` 不再画加号，改为独立 host 形状；
+    - 扩展菜单图标测试，锁住 `add` 与 `host` fallback 不再合并。
+  - `README.md`
+    - 迁移进度更新到 **99.77%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core menu_button_roles_expose_upstream_menu_fragment_icons -- --nocapture`
+  - `cargo test -p mindustry-core menu_icon_render_commands_cover_upstream_menu_fragment_icons_without_question_text -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_scroll_wheel_offsets_table_hit_tests -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_scrollbar_knob_drag_updates_scroll_offset -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_dynamic_text_and_area_prefs_render_edit_and_reset_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_text_and_area_pref_description_tooltips_match_java_hit_targets -- --nocapture`
+- 后续继续优先：
+  1. 处理用户反馈的极低 FPS：重点处理 `format_icons_like_java` / `localize_bundle_markup_text` 稳定帧缓存、font glyph upload plan key 轻量化、Join 可见窗口分配；
+  2. 继续 UI 还原：所有子菜单继续对照 Java Scene2D 结构和 skin；
+  3. 资源/字体：保持直接复用 `D:/MDT/mindustry-upstream-v157.4`，避免重复造资源。
+
 ## 1199. 对齐 Join Add Server 弹窗按钮间距
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。

@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.76%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.77%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -26,6 +26,38 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
+
+## 最新闭环：优化 Settings 行布局并拆分 Host 图标 fallback
+
+- 当前总体迁移完成度：约 **99.77%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - Settings 偏好项渲染与 hit-test 从每行前缀累计改为单次顺序 `row_top` 游标布局，降低长设置页稳定帧 CPU 开销；
+    - 新增 `settings_pref_widget_row_width_for_clip(...)` 复用行宽计算；
+    - 默认虚拟菜单图标 atlas 增加 `menu-icon-host`。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `host` fallback 从 `add`/加号中拆出为 `menu-icon-host`；
+    - fallback primitive 不再把 `Icon.host` 画成加号；
+    - 菜单图标测试锁住 `add` 和 `host` fallback 分离。
+  - `README.md`
+    - 迁移进度更新到 **99.77%**。
+  - `MIGRATION.md`
+    - 新增 `1200. 优化 Settings 行布局并拆分 Host 图标 fallback`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core menu_button_roles_expose_upstream_menu_fragment_icons -- --nocapture`
+  - `cargo test -p mindustry-core menu_icon_render_commands_cover_upstream_menu_fragment_icons_without_question_text -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_scroll_wheel_offsets_table_hit_tests -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_scrollbar_knob_drag_updates_scroll_offset -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_dynamic_text_and_area_prefs_render_edit_and_reset_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_text_and_area_pref_description_tooltips_match_java_hit_targets -- --nocapture`
+- 下一步优先级：
+  1. FPS：缓存/轻量化 `format_icons_like_java`、`localize_bundle_markup_text`、font glyph upload plan key、Join 可见窗口分配；
+  2. UI：继续补 Join/Settings/Load/Host/Mods/Schematics 子菜单与 Java Scene2D 视觉差；
+  3. 资源：继续直接复用上游 assets、fonts、bundles、icons、sprites/ui。
 
 ## 最新闭环：对齐 Join Add Server 弹窗按钮间距
 

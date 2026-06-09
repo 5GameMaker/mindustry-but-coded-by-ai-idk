@@ -47,8 +47,11 @@ fn menu_icon_sprite_for_name(icon_name: &str) -> Option<MenuIconSprite> {
         "play" => Some(MenuIconSprite {
             symbol: "menu-icon-play",
         }),
-        "add" | "host" => Some(MenuIconSprite {
+        "add" => Some(MenuIconSprite {
             symbol: "menu-icon-add",
+        }),
+        "host" => Some(MenuIconSprite {
+            symbol: "menu-icon-host",
         }),
         "rightOpenOut" => Some(MenuIconSprite {
             symbol: "menu-icon-rightOpenOut",
@@ -1221,7 +1224,7 @@ fn menu_push_icon_render_commands(
                 layer,
             ));
         }
-        "add" | "host" => {
+        "add" => {
             commands.push(RenderCommand::draw_line(
                 RenderPoint::new(center.x - size * 0.38, center.y),
                 RenderPoint::new(center.x + size * 0.38, center.y),
@@ -1232,6 +1235,36 @@ fn menu_push_icon_render_commands(
             commands.push(RenderCommand::draw_line(
                 RenderPoint::new(center.x, center.y - size * 0.38),
                 RenderPoint::new(center.x, center.y + size * 0.38),
+                stroke,
+                color,
+                layer,
+            ));
+        }
+        "host" => {
+            let body = RenderRect::new(
+                center.x - size * 0.40,
+                center.y - size * 0.18,
+                size * 0.80,
+                size * 0.45,
+            );
+            commands.push(RenderCommand::stroke_rect(body, color, stroke, layer));
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(center.x, body.y),
+                RenderPoint::new(center.x, center.y - size * 0.40),
+                stroke,
+                color,
+                layer,
+            ));
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(center.x - size * 0.24, body.y + body.height),
+                RenderPoint::new(center.x - size * 0.38, center.y + size * 0.42),
+                stroke,
+                color,
+                layer,
+            ));
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(center.x + size * 0.24, body.y + body.height),
+                RenderPoint::new(center.x + size * 0.38, center.y + size * 0.42),
                 stroke,
                 color,
                 layer,
@@ -5538,6 +5571,15 @@ mod tests {
                 "upstream Icon.{icon} glyph should be registered"
             );
         }
+        assert_eq!(
+            menu_icon_sprite_for_name("add").map(|sprite| sprite.symbol),
+            Some("menu-icon-add")
+        );
+        assert_eq!(
+            menu_icon_sprite_for_name("host").map(|sprite| sprite.symbol),
+            Some("menu-icon-host"),
+            "Icon.host fallback must not collapse to the add/plus glyph"
+        );
     }
 
     #[test]
