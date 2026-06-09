@@ -19,6 +19,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1199. 对齐 Join Add Server 弹窗按钮间距
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.76%**，仍未达到完整可玩；当前继续优先补前端 UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，同时继续处理用户反馈的前端帧率极低问题。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java`
+  - `add.cont.field(...).size(320f, 54f).maxTextLength(100)`
+  - `add.buttons.defaults().size(140f, 60f).pad(4f)`
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 为 Join Add Server 弹窗输入框和按钮尺寸新增 Java-like 常量；
+    - `join_add_dialog_text_rect(...)` 改用 `320f x 54f` 常量；
+    - `join_add_dialog_button_rect(...)` 改用 `140f x 60f`，并按 Java `pad(4f)` 语义将 `@cancel` 与 `@ok` 间距修正为 `4f + 4f = 8f`；
+    - 扩展 `desktop_launcher_join_route_renders_server_browser_skeleton`，锁住输入框尺寸、按钮尺寸和两按钮间距。
+  - `README.md`
+    - 迁移进度更新到 **99.76%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_open_add_dialog_prefills_from_last_ip_setting_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_add_server_text_limit_matches_java_100_chars -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. 处理用户反馈的极低 FPS：继续查 render/UI 稳定帧每帧分配、文本测量、资源/字体缓存、Join/Settings/Load 等子菜单热点；
+  2. 继续 UI 还原：Join community host 正文流式排版、group header 按钮 skin、Add Server 弹窗 shell 外壳和 label/field padRight；
+  3. Settings、Load/Save、Host、Mods、Schematics 等子菜单继续贴近 Java 原版。
+
 ## 1198. 窗口化 Join 保存服务器快照降低帧开销
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
