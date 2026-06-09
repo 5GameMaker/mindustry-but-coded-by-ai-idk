@@ -19,6 +19,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1230. 锁定 LoadDialog 60f 模式筛选 chip 与 padLeft(-12f)
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.984%**，仍未达到完整可玩；当前继续优先 UI/前端所有子菜单贴近 Java 原版，同时把用户反馈的“帧数极其极其低下”作为前端阻塞问题继续优化。
+- Java 对照：
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java:65-73`：`search.button(..., Styles.emptyTogglei, ...)` 的模式筛选按钮使用 `.size(60f).padLeft(-12f)`，并挂载 `@mode.*.name` tooltip；
+  - 搜索 TextField 的 `growX()` 只占据筛选 chip 左侧空间，不能在 chip 后方继续铺满整行。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 扩展 `desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click`；
+    - 锁住 LoadGame 搜索行高度 60、模式筛选 chip 60×60；
+    - 锁住相邻模式 chip 的 x 间距为 `60 - 12 = 48`；
+    - 锁住搜索 TextField 右边界停在第一个 mode chip 左侧，并保留可见间隔，避免后续 UI 调整破坏 Java `LoadDialog` 搜索行节奏。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib -- --nocapture`
+- 后续继续优先：
+  1. UI：Join 服务器卡片 header/body、Mods/Database 子菜单、Load/Save 其它 hover/tooltip 继续贴近 Java；
+  2. FPS：继续 route-shell 主体缓存、Join/Mods 搜索 normalize/ellipsis 缓存、文本 layer/batch 收敛；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1229. 锁定 Settings 主菜单按钮的 Java flatt 几何
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
