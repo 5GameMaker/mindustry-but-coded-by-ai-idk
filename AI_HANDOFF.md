@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.54%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.55%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,38 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：补齐 MapLocalesDialog filterStyle 视觉语义
+## 最新闭环：收敛前端小图标 glyph 与 LanguageDialog 显示名契约
+
+- 当前总体迁移完成度：约 **99.55%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java`：`displayNames` 为 Java 语言弹窗原生显示名表，并兼容 `in_ID -> id_ID`；
+  - `D:/MDT/mindustry-upstream-v157.4/core/build/generated/source/kapt/main/mindustry/gen/Iconc.java`：可见图标应渲染真实 `Iconc.*` glyph，不能落成 `eyeSmall` / `fileSmall` / `pencilSmall` 等 raw 英文别名。
+- 本轮实现：
+  - `core/src/mindustry/ui/dialogs/language_dialog.rs`
+    - 新增 Java `displayNames` 等价表、`default` sentinel、fallback locale、locale normalize 与 resolve helper；
+  - `desktop/src/lib.rs`
+    - desktop 语言显示名改为消费 core `LanguageDialog` 显示名表；
+    - 新增小图标 alias 映射，避免 UI 泄漏 raw 英文图标名；
+    - 字体 atlas 静态 seed 缓存化，动态外部 bundle / 增量 glyph seed 仍按需合并。
+  - `README.md`
+    - 迁移进度更新到 **99.55%**。
+- 已验证：
+  - `cargo test -p mindustry-core language_dialog_display_names_match_java_language_dialog_table -- --nocapture`
+  - `cargo test -p mindustry-core language_dialog_resolve_locale_code_materializes_default_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_ui_icon_glyph_aliases_avoid_raw_small_icon_names_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_seed_scans_upstream_bundle_texts_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_external_font_seed_registration_tracks_korean_bundle_source_characters -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_database_overlays_banned_and_patched_on_locked_content_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_display_names_match_upstream_language_dialog_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_options_sort_like_java_case_insensitive_display_names -- --nocapture`
+- 下一步优先：
+  1. 继续把 `Styles.defaultb` / `Styles.underlineb`、DialogStyle 和内容图标注册契约下沉到 core/UI；
+  2. 继续扫可见 DrawText 中 raw key、英文 token、诊断前缀和错误图标别名；
+  3. 继续推进 Settings / Join / About / Database 等子菜单视觉与 Java Scene2D 样式一致。
+
+## 上一闭环：补齐 MapLocalesDialog filterStyle 视觉语义
+
+> 历史记录：原“最新闭环”向下归档，当前进度以上一节为准。
 
 - 当前总体迁移完成度：约 **99.54%**，仍未达到完整可玩。
 - 本轮对照：

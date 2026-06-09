@@ -19,6 +19,38 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1178. 收敛前端小图标 glyph 与 LanguageDialog 显示名契约
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.55%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java`：`displayNames` 为 Java 语言弹窗的原生显示名表，并兼容 `in_ID -> id_ID`；
+  - `D:/MDT/mindustry-upstream-v157.4/core/build/generated/source/kapt/main/mindustry/gen/Iconc.java`：前端可见图标应落到真实 `Iconc.*` glyph，而不是显示 `eyeSmall` / `fileSmall` / `pencilSmall` 等 raw 英文别名。
+- 本轮主改动：
+  - `core/src/mindustry/ui/dialogs/language_dialog.rs`
+    - 新增 `LANGUAGE_DIALOG_DISPLAY_NAMES`、`LANGUAGE_DIALOG_DEFAULT_SENTINEL`、`LANGUAGE_DIALOG_FALLBACK_LOCALE`；
+    - 新增 `normalize_locale_code_like_java()`、`display_name_for_code()`、`display_name_static_for_code()`、`resolve_locale_code_like_java()`；
+    - 新增 core 测试锁住 Java `displayNames`、`in_ID -> id_ID`、`default` locale materialize 行为。
+  - `desktop/src/lib.rs`
+    - `settings_language_display_name_for_code()` / static 版本改为消费 core `LanguageDialog` 的 Java 显示名表；
+    - 新增 `desktop_ui_icon_alias_like_java()`，将 `eyeSmall`、`eyeOffSmall`、`fileSmall`、`powerSmall`、`cancelSmall`、`pencilSmall`、`up-open`、`down-open` 映射到真实 Java `Iconc` glyph，避免 UI 中泄漏 raw 英文图标名；
+    - 将字体 atlas 静态 seed 缓存化，动态外部 bundle / 增量 glyph seed 仍每帧按需合并。
+  - `README.md`
+    - 迁移进度更新到 **99.55%**。
+- 已验证：
+  - `cargo test -p mindustry-core language_dialog_display_names_match_java_language_dialog_table -- --nocapture`
+  - `cargo test -p mindustry-core language_dialog_resolve_locale_code_materializes_default_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_ui_icon_glyph_aliases_avoid_raw_small_icon_names_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_font_atlas_seed_scans_upstream_bundle_texts_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_external_font_seed_registration_tracks_korean_bundle_source_characters -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_database_overlays_banned_and_patched_on_locked_content_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_display_names_match_upstream_language_dialog_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_options_sort_like_java_case_insensitive_display_names -- --nocapture`
+- 后续继续优先：
+  1. 按子代理审查继续把 `Styles.defaultb` / `Styles.underlineb`、DialogStyle 和内容图标注册契约下沉到 core/UI；
+  2. 继续扫可见 DrawText 中 raw key、英文 token、诊断前缀和错误图标别名；
+  3. 继续推进 Settings / Join / About / Database 等子菜单视觉与 Java Scene2D 样式一致。
+
 ## 1177. 补齐 MapLocalesDialog filterStyle 视觉语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

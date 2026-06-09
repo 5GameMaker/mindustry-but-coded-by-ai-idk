@@ -10,6 +10,47 @@ pub const LANGUAGE_DIALOG_ROW_HEIGHT: f32 = 50.0;
 pub const LANGUAGE_DIALOG_TABLE_MARGIN_HORIZONTAL: f32 = 24.0;
 pub const LANGUAGE_DIALOG_ROW_TEXT_BUTTON_STYLE: &str = "flatTogglet";
 pub const LANGUAGE_DIALOG_ROW_FONT: RenderFontId = RenderFontId::Default;
+pub const LANGUAGE_DIALOG_DEFAULT_SENTINEL: &str = "default";
+pub const LANGUAGE_DIALOG_FALLBACK_LOCALE: &str = "en";
+
+pub const LANGUAGE_DIALOG_DISPLAY_NAMES: &[(&str, &str)] = &[
+    ("ca", "Català"),
+    ("id_ID", "Bahasa Indonesia"),
+    ("da", "Dansk"),
+    ("de", "Deutsch"),
+    ("et", "Eesti"),
+    ("en", "English"),
+    ("es", "Español"),
+    ("eu", "Euskara"),
+    ("fil", "Filipino"),
+    ("fr", "Français"),
+    ("it", "Italiano"),
+    ("lt", "Lietuvių"),
+    ("hu", "Magyar"),
+    ("nl", "Nederlands"),
+    ("nl_BE", "Nederlands (België)"),
+    ("pl", "Polski"),
+    ("pt_BR", "Português (Brasil)"),
+    ("pt_PT", "Português (Portugal)"),
+    ("ro", "Română"),
+    ("fi", "Suomi"),
+    ("sv", "Svenska"),
+    ("vi", "Tiếng Việt"),
+    ("tk", "Türkmen dili"),
+    ("tr", "Türkçe"),
+    ("cs", "Čeština"),
+    ("be", "Беларуская"),
+    ("bg", "Български"),
+    ("ru", "Русский"),
+    ("sr", "Српски"),
+    ("uk_UA", "Українська"),
+    ("th", "ไทย"),
+    ("zh_CN", "简体中文"),
+    ("zh_TW", "正體中文"),
+    ("ja", "日本語"),
+    ("ko", "한국어"),
+    ("router", "router"),
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanguageDialogLocale {
@@ -122,6 +163,47 @@ impl LanguageDialog {
         self.last_restart_message.take()
     }
 
+    pub fn normalize_locale_code_like_java(code: &str) -> String {
+        let code = code.trim().replace('-', "_");
+        if code == "in_ID" {
+            "id_ID".to_string()
+        } else {
+            code
+        }
+    }
+
+    pub fn display_name_static_for_code(code: &'static str) -> &'static str {
+        let normalized = if code == "in_ID" { "id_ID" } else { code };
+        LANGUAGE_DIALOG_DISPLAY_NAMES
+            .iter()
+            .find(|(locale, _)| *locale == normalized)
+            .map(|(_, display_name)| *display_name)
+            .unwrap_or(code)
+    }
+
+    pub fn display_name_for_code(code: &str) -> String {
+        let normalized = Self::normalize_locale_code_like_java(code);
+        LANGUAGE_DIALOG_DISPLAY_NAMES
+            .iter()
+            .find(|(locale, _)| *locale == normalized)
+            .map(|(_, display_name)| *display_name)
+            .unwrap_or(normalized.as_str())
+            .to_string()
+    }
+
+    pub fn resolve_locale_code_like_java<'a>(
+        locales: impl IntoIterator<Item = &'a str>,
+        stored_locale: &str,
+        system_default_locale: &str,
+    ) -> String {
+        let stored = stored_locale.trim();
+        if stored.is_empty() || stored.eq_ignore_ascii_case(LANGUAGE_DIALOG_DEFAULT_SENTINEL) {
+            Self::find_closest_locale_code(locales, system_default_locale)
+        } else {
+            Self::normalize_locale_code_like_java(stored)
+        }
+    }
+
     pub fn find_closest_locale_code<'a>(
         locales: impl IntoIterator<Item = &'a str>,
         default_locale: &str,
@@ -153,7 +235,7 @@ impl LanguageDialog {
             return (*locale).to_string();
         }
 
-        "en".to_string()
+        LANGUAGE_DIALOG_FALLBACK_LOCALE.to_string()
     }
 }
 
@@ -296,6 +378,43 @@ mod tests {
         assert_eq!(
             LanguageDialog::find_closest_locale_code(locales, "fr_FR"),
             "en"
+        );
+    }
+
+    #[test]
+    fn language_dialog_display_names_match_java_language_dialog_table() {
+        assert_eq!(
+            LanguageDialog::display_name_for_code("in_ID"),
+            "Bahasa Indonesia",
+            "Java LanguageDialog.getDisplayName maps Locale in_ID to id_ID"
+        );
+        assert_eq!(LanguageDialog::display_name_for_code("zh_CN"), "简体中文");
+        assert_eq!(LanguageDialog::display_name_for_code("zh_TW"), "正體中文");
+        assert_eq!(LanguageDialog::display_name_for_code("ja"), "日本語");
+        assert_eq!(LanguageDialog::display_name_for_code("ko"), "한국어");
+        assert_eq!(
+            LanguageDialog::display_name_for_code("xx_YY"),
+            "xx_YY",
+            "unknown locales fall back to their normalized locale string like Java's displayNames.get(str, str)"
+        );
+    }
+
+    #[test]
+    fn language_dialog_resolve_locale_code_materializes_default_like_java() {
+        let locales = ["en", "pt_BR", "pt_PT", "zh_CN", "zh_TW"];
+        assert_eq!(
+            LanguageDialog::resolve_locale_code_like_java(locales, "default", "zh_HK"),
+            "zh_CN",
+            "Java findClosestLocale falls back to the first matching language entry when exact locale is absent"
+        );
+        assert_eq!(
+            LanguageDialog::resolve_locale_code_like_java(locales, "", "pt_AO"),
+            "pt_BR"
+        );
+        assert_eq!(
+            LanguageDialog::resolve_locale_code_like_java(locales, "in_ID", "en_US"),
+            "id_ID",
+            "non-default stored locale is normalized without being replaced by the system default"
         );
     }
 }
