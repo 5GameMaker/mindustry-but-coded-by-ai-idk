@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1182. 收口 Settings PlanetSelectDialog 的 BaseDialog 与 flatTogglet 视觉语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.59%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:91-120`；
+  - `planetDataDialog` 是 `BaseDialog("@settings.data")`，按钮容器是 `Tex.button`，按钮 `280x60` + `Styles.flatt` + `marginLeft(4)`；
+  - 星球选择弹窗是 `new BaseDialog("")`，内容 `pane(p -> p.background(Tex.button).margin(1f))`，星球按钮 `Styles.flatTogglet`、`110x45`、每 4 个换行、checked 状态使用 Java ButtonStyle，而不是 Rust 自绘 cyan/gray 描边或 10px 小字体。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_planet_chooser_dialog()` 改为通过 `BaseDialog::shell_render_commands_with_title_text()` 走 `windowEmpty`/accent/stageBackground 皮肤；
+    - 星球选择 pane 保持 `Tex.button` 背景，移除 dialog/pane 上的 Rust-only `StrokeRect`；
+    - 星球选项按钮改为 `settings_text_button_symbol_and_tint_checked("flatTogglet", ...)`，使用 Java `flatTogglet` 的 black/flatOver/flatDown tint；
+    - 星球选项文字改为 `settings_text_button_font_size("flatTogglet")` + `RenderFontId::Default`，移除之前的 10px 自定义小字体；
+    - 扩展 `desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell`，断言 Planet chooser 使用 `window-empty.9`、Tex.button pane、无额外描边、flatTogglet 原版 tint/字体。
+  - `README.md`
+    - 迁移进度更新到 **99.59%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop settings_planet -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+- 后续继续优先：
+  1. 继续收口 Settings 主菜单 hover/pressed 截图差异与 Data 页所有按钮的 `Tex.button + Styles.flatt` 视觉密度；
+  2. 继续推进 LanguageDialog scrollbar/row hover、Join/About/Database/CampaignRules/LaunchLoadout 等子菜单视觉与 Java Scene2D 一致；
+  3. 继续扫可见 DrawText 中 raw key、英文 token、诊断前缀和错误图标别名。
+
 ## 1181. 下沉 Fonts.loadContentIcons 运行时 registry 并修复语言 raw locale 勾选状态
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
