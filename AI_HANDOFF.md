@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.72%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.73%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -26,6 +26,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
+
+## 最新闭环：对齐 Join 社区 Host 标题宽度和 Add 按钮边距
+
+- 当前总体迁移完成度：约 **99.73%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java`；
+    - Join community host 标题 wrap 宽度从 add 按钮几何反推改为 Java `targetWidth() - 40f`；
+    - community host add 按钮 rect 改用 Java `margin(3f)` / `padRight(4f)` 语义常量；
+    - 扩展 `desktop_launcher_join_route_tracks_community_groups_like_java_server_group`，锁住 add 按钮 rect、标题 `wrap_width` 与 Java 对齐。
+  - `README.md`
+    - 迁移进度更新到 **99.73%**。
+  - `MIGRATION.md`
+    - 新增 `1196. 对齐 Join 社区 Host 标题宽度和 Add 按钮边距`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. Join UI 还原：community 区块 columns/Collapser 宽度、host 正文流式排版、group header 按钮 skin；
+  2. 继续低 FPS：Settings row layout 前缀和、MapLocales property/add-icon 缓存；
+  3. 继续 UI 还原：Settings、Load/Save、Host、Mods、Schematics 子菜单贴 Java 原版。
 
 ## 最新闭环：缓存 Join 社区可见列表降低联机菜单帧开销
 

@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1196. 对齐 Join 社区 Host 标题宽度和 Add 按钮边距
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.73%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，同时继续修用户反馈的前端帧率极低问题。
+- UI 背景：
+  - Java `JoinDialog.buildServer(...)` 中标题/正文宽度使用 `targetWidth() - 40f`；
+  - Java `addCommunityHost(...)` 中 community host 标题条高 45f，右侧 add `ImageButton` 带 `margin(3f).pad(8f).padRight(4f)`；
+  - 旧 Rust 路径用 add 按钮 rect 反推标题 `wrap_width`，长社区服务器名的截断/换行点会随按钮几何漂移。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `JOIN_COMMUNITY_HOST_ADD_BUTTON_MARGIN_LIKE_JAVA` 与 `JOIN_COMMUNITY_HOST_ADD_BUTTON_RIGHT_PAD_LIKE_JAVA`；
+    - `join_route_community_host_add_button_rect_for_header(...)` 改为按 45f title bar 内的 Java margin/right-pad 语义定位；
+    - community host title `wrap_width` 改为 `join_route_server_card_text_width_like_java(card)`，即 `targetWidth() - 40f`；
+    - 扩展 Join community 回归测试，验证 add 按钮 rect 与 title `wrap_width`。
+  - `README.md`
+    - 迁移进度更新到 **99.73%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. Join UI 还原：community 区块 columns/Collapser 宽度、host 正文流式排版、group header 按钮 skin；
+  2. 继续低 FPS 修复：Settings row layout 前缀和，MapLocales property/add-icon 缓存；
+  3. 继续 UI 还原：Settings、Load/Save、Host、Mods、Schematics 子菜单贴近 Java 原版。
+
 ## 1195. 缓存 Join 社区可见列表降低联机菜单帧开销
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
