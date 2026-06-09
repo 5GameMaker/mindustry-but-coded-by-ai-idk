@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.81%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.82%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -26,6 +26,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
+
+## 最新闭环：默认启用轻量菜单路径并收口 Load/Join 几何
+
+- 当前总体迁移完成度：约 **99.82%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 默认启用 fast menu 路径，`MINDUSTRY_DESKTOP_FAST_MENU=0` 仍可退回慢路径；
+    - fast menu 直接 move/take `plan.ui_render_commands`，减少菜单稳定帧 UI command clone；
+    - bloom pass 捕获命令只做一次，避免判空与构建阶段重复扫描/克隆；
+    - active route shell cache 命中后不再分配临时 Vec，直接把缓存命令克隆进目标 pass；
+    - Load/Save 底部 `@save.import` / `@save.new` 对齐 Java `fillX()`，填满 back 后剩余宽度；
+    - Join 顶部玩家名行对齐 Java 70f 行高，54f name field 与 color ImageButton 居中。
+  - `README.md`
+    - 迁移进度更新到 **99.82%**。
+  - `MIGRATION.md`
+    - 新增 `1205. 默认启用轻量菜单路径并收口 Load/Join 几何`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop fast_menu -- --nocapture`
+  - `cargo test -p mindustry-desktop load_game -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo test -p mindustry-desktop bloom_settings -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. FPS：继续复核 `DesktopGraphicsOpenGlBackendFramePlan` trace 路径、sprite mesh batching、文本布局缓存；
+  2. UI：继续收口主菜单 chrome、Settings tooltip/hover、ModsBrowser、Host、Schematics、Campaign/Planet 子页面；
+  3. 继续保证所有模块接入整体 runtime/render/backend 主链路，不允许做成孤立模块。
 
 ## 最新闭环：共享 mod 贴图字节避免 Desktop frame 每帧深拷贝
 

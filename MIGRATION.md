@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1205. 默认启用轻量菜单路径并收口 Load/Join 几何
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.82%**，仍未达到完整可玩；当前继续优先前端/UI 视觉还原，同时处理用户反馈的前端帧率极低问题。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `desktop_fast_menu_enabled()` 改为默认启用；仍可用 `MINDUSTRY_DESKTOP_FAST_MENU=0` 退回慢路径，避免主菜单默认每帧走重世界背景；
+    - fast menu pass 改为 `std::mem::take(&mut plan.ui_render_commands)`，不再为 UI command 做一次额外整段 clone；
+    - bloom pass 先捕获一次命令并判空，删除“判空一次、再捕获一次”的重复扫描/克隆；
+    - active menu route shell cache 命中后直接把缓存命令克隆进目标 pass，不再先分配临时 `Vec<RenderCommand>`；
+    - `LoadDialog.addSetup()` 对齐 Java `fillX()`：`@save.import` / `@save.new` 底部按钮填满 back 按钮后的剩余行宽；
+    - `JoinDialog.setup()` 对齐 Java 70f 顶部玩家名行：54f name field 和 54f color ImageButton 垂直居中。
+  - `README.md`
+    - 迁移进度更新到 **99.82%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop fast_menu -- --nocapture`
+  - `cargo test -p mindustry-desktop load_game -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo test -p mindustry-desktop bloom_settings -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. FPS：继续复核 OpenGL trace/mesh batching、文本布局缓存、菜单/子菜单命令缓存；
+  2. UI：继续收口主菜单 chrome、Settings tooltip/hover、ModsBrowser、Host、Schematics、Campaign/Planet 子页面；
+  3. 可玩性：继续把已迁移 UI/后端模块接进整体 runtime，不能做成孤立模块。
+
 ## 1204. 共享 mod 贴图字节避免 Desktop frame 每帧深拷贝
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
