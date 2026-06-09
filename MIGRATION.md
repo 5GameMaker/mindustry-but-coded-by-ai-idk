@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1217. 缓存 content icon runtime registry 帧内复用
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.94%**，仍未达到完整可玩；当前继续优先 UI/前端还原，同时处理用户反馈的低帧率问题。
+- Java 对照：
+  - Java `Fonts.loadContentIcons()` / `UI.formatIcons(...)` 依赖已注册的 runtime stringIcons，不应在每个 icon-token 文案里重新构造 registry；
+  - Rust 旧路径已有无冒号文本快路径，但冒号文本每次都会重建 `UpstreamContentIconRuntimeRegistry`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopContentIconRuntimeRegistryCache` 与帧内 validation token；
+    - `DesktopLauncher` 缓存 content icon runtime registry；
+    - `format_icons_like_java(...)` 改为通过 cached registry 解析 `:icon:` token；
+    - `campaign_sector_content_icon_source_like_java(...)` 复用同一 cached registry 入口；
+    - 新增 `desktop_launcher_reuses_content_icon_runtime_registry_within_menu_frame`，锁住同一菜单帧多个 icon-token 文案只构建一次 registry。
+  - `README.md`
+    - 迁移进度更新到 **99.94%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_content_icon_runtime_registry_within_menu_frame -- --nocapture`
+  - `cargo test -p mindustry-desktop content_icon -- --nocapture`
+  - `cargo test -p mindustry-desktop localized_text_formats_icon_tokens -- --nocapture`
+- 后续继续优先：
+  1. FPS：继续压低字体 glyph upload key 构造、Join/route snapshot、OpenGL plan/batch 构建成本；
+  2. UI：继续收口主/子菜单背景容器语义、Icon drawable 路径、Language/Mods/Host/Schematics 细节；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1216. 缓存 mod bundle locale fallback 名称列表
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
