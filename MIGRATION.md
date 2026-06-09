@@ -19,6 +19,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1229. 锁定 Settings 主菜单按钮的 Java flatt 几何
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.983%**，仍未达到完整可玩；当前继续优先 UI/前端所有子菜单贴近 Java 原版，同时继续压低菜单/文本渲染 FPS 热点。
+- Java 对照：
+  - `core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:362-379`：`rebuildMenu()` 中 Settings 主菜单按钮使用 `Styles.flatt`，`menu.defaults().size(300f, 60f)`；
+  - 同段 `float marg = 8f, isize = iconMed`，每个按钮 `.marginLeft(marg)`，icon 使用 `iconMed`，文本从 icon 后延续 Scene2D TextButton 节奏。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 实现已命中 Java 数值，本轮补强 `desktop_launcher_settings_main_page_renders_upstream_menu_buttons`；
+    - 断言 Settings Game 按钮尺寸 300×60、icon cell 32×32、icon x = button.x + 8；
+    - 断言 `Icon.settings` 通过 icon font 在 icon center 绘制，label 起点为 `icon center x + iconMed/2 + 18`，避免后续 UI 调整导致主菜单按钮节奏回退。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_main_page_renders_upstream_menu_buttons --lib -- --nocapture`
+- 后续继续优先：
+  1. UI：LoadGame 搜索行/模式筛选 chip、Join 服务器卡片、Mods/Database 子菜单继续贴近 Java；
+  2. FPS：继续 text layer/batch 收敛、route-shell 主体缓存、Join/Mods 文本截断缓存；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1228. 收口菜单帧率缓存、字体 atlas 大拷贝与 Settings 条件
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。

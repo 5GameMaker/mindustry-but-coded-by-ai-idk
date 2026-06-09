@@ -10,13 +10,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.982%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.983%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 最新闭环：锁定 Settings 主菜单按钮的 Java flatt 几何
+
+- 当前总体迁移完成度：约 **99.983%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时持续处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 对照 Java `SettingsMenuDialog.rebuildMenu()` 的 `menu.defaults().size(300f, 60f)`、`marginLeft(8f)` 和 `iconMed`；
+    - 实现已保持 300×60、icon 32×32、marginLeft 8、label gap 18，本轮补强 Settings 主菜单回归断言；
+    - 锁住 `Icon.settings` 通过 icon font 绘制在 icon cell center，label 从 `icon center + iconMed/2 + 18` 开始，防止后续 UI 修复破坏 Java `Styles.flatt` 节奏。
+- 已验证/本轮收口验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_main_page_renders_upstream_menu_buttons --lib -- --nocapture`
+- 下一步优先级：
+  1. UI：继续 LoadGame 搜索行/模式筛选 chip、Join 服务器卡片、Mods/Database 子菜单；
+  2. FPS：继续 text layer/batch 收敛、route-shell 主体缓存、Join/Mods 文本截断缓存；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
 
 ## 最新闭环：收口菜单帧率缓存、字体 atlas 大拷贝与 Settings 条件
 
