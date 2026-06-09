@@ -5054,10 +5054,24 @@ mod tests {
             RenderRect::new(365.0, 390.0, 120.0, 120.0)
         );
 
-        let quit_center = plan.ui.buttons.last().unwrap().rect.center();
+        for button in &plan.ui.buttons {
+            let center = button.rect.center();
+            assert_eq!(
+                state.hit_test_ui(input, center.x, center.y),
+                Some(button.role),
+                "portrait mobile hit-test must match the visible Java grid button {:?}",
+                button.role
+            );
+        }
         assert_eq!(
-            state.hit_test_ui(input, quit_center.x, quit_center.y),
-            Some(MenuButtonRole::Quit)
+            state.hit_test_ui(input, 360.0, 60.0),
+            None,
+            "portrait mobile hit-test must keep the horizontal gap between the two Java columns inert"
+        );
+        assert_eq!(
+            state.hit_test_ui(input, 295.0, 125.0),
+            None,
+            "portrait mobile hit-test must keep the vertical gap between Java rows inert"
         );
     }
 
@@ -5119,10 +5133,24 @@ mod tests {
             RenderRect::new(775.0, 190.0, 120.0, 120.0)
         );
 
-        let join_center = plan.ui.buttons[1].rect.center();
+        for button in &plan.ui.buttons {
+            let center = button.rect.center();
+            assert_eq!(
+                state.hit_test_ui(input, center.x, center.y),
+                Some(button.role),
+                "landscape mobile hit-test must match the visible Java grid button {:?}",
+                button.role
+            );
+        }
         assert_eq!(
-            state.hit_test_ui(input, join_center.x, join_center.y),
-            Some(MenuButtonRole::Join)
+            state.hit_test_ui(input, 510.0, 120.0),
+            None,
+            "landscape mobile hit-test must keep the horizontal gap between Campaign and Join inert"
+        );
+        assert_eq!(
+            state.hit_test_ui(input, 445.0, 185.0),
+            None,
+            "landscape mobile hit-test must keep the vertical gap between Java rows inert"
         );
     }
 
@@ -5156,6 +5184,12 @@ mod tests {
             .buttons
             .iter()
             .any(|button| button.role == MenuButtonRole::Quit));
+        let about_center = ios_plan.ui.buttons.last().unwrap().rect.center();
+        assert_eq!(
+            ios_state.hit_test_ui(input, about_center.x, about_center.y),
+            Some(MenuButtonRole::About),
+            "iOS mobile menu should route the final visible grid button to About, not the non-rendered Quit action"
+        );
     }
 
     #[test]
