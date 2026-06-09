@@ -6,7 +6,10 @@
 //! plus error and completion overlays.
 
 use super::Pal;
-use super::{RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderRect, RenderTextAlign};
+use super::{
+    RenderCommand, RenderFontId, RenderPass, RenderPassKind, RenderPoint, RenderRect,
+    RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign,
+};
 use crate::mindustry::ui::{WarningBar, WarningBarDrawCommand, WarningBarLayout};
 
 const LOAD_PASS_KIND: &str = "load";
@@ -798,13 +801,15 @@ impl LoadRenderCommand {
                 ));
                 push_warning_bar_render_commands(&mut commands, top_warning);
                 push_warning_bar_render_commands(&mut commands, bottom_warning);
-                commands.push(RenderCommand::draw_text(
+                commands.push(RenderCommand::draw_text_styled(
                     label,
                     RenderPoint::new(label_center.0, label_center.1),
                     label_color,
                     22.0,
                     0.0,
-                    RenderTextAlign::Center,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_font(RenderFontId::Tech)
+                        .with_vertical_align(RenderTextVerticalAlign::Center),
                     LOAD_FRAGMENT_LABEL_LAYER,
                 ));
                 if let Some(cancel_button) = cancel_button {
@@ -1300,6 +1305,36 @@ mod tests {
                 if text == "@saving"
                     && (*layer - LOAD_FRAGMENT_LABEL_LAYER).abs() < f32::EPSILON
         )));
+    }
+
+    #[test]
+    fn loading_fragment_label_uses_tech_font_like_java_tech_label() {
+        let mut state = LoadRendererState::default();
+        let mut input = LoadFrameInput::new(1280.0, 720.0, 1.0, 0.0, LoadStage::LoadingAssets, 0.2);
+        input.cancelable = true;
+        let plan = state.build_plan(input);
+        let pass = plan
+            .to_render_pass()
+            .expect("load plan with LoadingFragment should render");
+
+        assert!(
+            pass.commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawText { text, style, layer, .. }
+                    if text == "@loading"
+                        && style.font == RenderFontId::Tech
+                        && (*layer - LOAD_FRAGMENT_LABEL_LAYER).abs() < f32::EPSILON
+            )),
+            "Java LoadingFragment nameLabel uses Styles.techLabel/Fonts.tech before falling back for missing glyphs"
+        );
+        assert!(
+            pass.commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawText { text, style, .. }
+                    if text == "@cancel" && style.font == RenderFontId::Default
+            )),
+            "the cancel button is a normal text button and should not inherit the tech label font"
+        );
     }
 
     #[test]
