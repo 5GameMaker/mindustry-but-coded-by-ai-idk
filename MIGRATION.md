@@ -19,6 +19,56 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1208. 复用 OpenGL renderer 状态减少前端帧深拷贝
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.85%**，仍未达到完整可玩；当前继续优先前端/UI 视觉还原，同时处理用户反馈的前端帧率极低问题。
+- 性能对照/问题：
+  - Rust OpenGL renderer 每帧会构建 backend plan/executor 并把纹理资源表、resolver allocator/cache/location cache 带入解析执行器；
+  - 旧路径使用 clone 传递这些长期状态，资源表里可能包含贴图/字体/图集相关元数据，菜单稳定帧也会承担不必要深拷贝。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendFramePlan` 新增 `from_trace_with_frame_and_effect_buffer_surface(...)`，保留旧 `from_frame_with_effect_buffer_surface(...)` 兼容入口；
+    - `HeadlessDesktopGraphicsRenderer` 复用已构建的 trace 生成 OpenGL plan，避免测试/审计 renderer 一帧扫两次 frame；
+    - `DesktopOpenGlBackendGraphicsRenderer` 用 `std::mem::take(...)` 临时 move `sprite_texture_resource_table`、`resolver_allocator`、`resolver_cache`、`resolver_location_cache` 进本帧 executor/resolver，帧尾 move 回 renderer；
+    - 去掉 live OpenGL 路径里 `pending_sprite_mesh_upload_plans` 的帧内 clone，直接引用本帧 executor state 记录上传签名。
+  - `README.md`
+    - 迁移进度更新到 **99.85%**。
+- 已验证/待本轮收口验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_frame_plan_reuses_trace_with_effect_buffer_surface -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_reuses_resolved_texture_handles_between_frames -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_does_not_reupload_static_sprite_mesh_each_frame -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. FPS：继续压 trace-free live plan、文本 glyph quad/layout、font atlas key 与 draw-call/mesh 上传；
+  2. UI：继续收口主菜单 chrome、Settings 主菜单容器、ModsBrowser、Host、Schematics、Campaign/Planet 子页面；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
+## 1207. 收口 Settings 描述 tooltip 去除 Rust-only 行描边
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.84%**，仍未达到完整可玩；当前继续优先前端/UI 视觉还原，同时处理用户反馈的前端帧率极低问题。
+- Java 对照：
+  - `SettingsMenuDialog.java` 的 `Setting.addDesc(...)` 调用 `ui.addDescTooltip(elem, description)`；
+  - 原版 tooltip 走 tooltip chrome，不会在被 hover 的 setting row 本体上额外画一圈 Rust-only 高亮描边。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_pref_description_tooltip(...)` 保留 Java-like `black6` tooltip 背景和 tooltip 自身边框；
+    - 删除对 `target` setting row 的额外 `StrokeRect`；
+    - 扩展 `desktop_launcher_settings_text_and_area_pref_description_tooltips_match_java_hit_targets`，断言 hover setting row 不再被画 Rust-only 描边。
+  - `README.md`
+    - 迁移进度更新到 **99.84%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_text_and_area_pref_description_tooltips_match_java_hit_targets -- --nocapture`
+  - `cargo test -p mindustry-desktop settings_pages -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. UI：继续收口主菜单 chrome、Settings 主菜单容器、ModsBrowser、Host、Schematics、Campaign/Planet 子页面；
+  2. FPS：继续复核 live renderer trace-free 路径、文本布局缓存、frame/atlas 上传稳定性；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1206. OpenGL sprite mesh batch 改为哈希分桶降低 UI 帧开销
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
