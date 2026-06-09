@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1186. 补齐外部语言包 UTF-8 优先编码容错
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.63%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java`：语言页可见文本依赖可读 bundle/locale 链路；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Fonts.java`：字体/glyph 行为要求语言文本最终落到可显示 glyph，而不是因外部 bundle 编码失败整组回退。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增外部 bundle 文本读取链：UTF-8 优先，随后识别 UTF-16 BOM/启发式 UTF-16，再在 Windows 下尝试常见代码页（936/950/932/949/1251/1252/1254/874），最后用 Latin-1 兜底；
+    - 内置/global bundle、外部 data bundle、mod bundle 读取改用编码容错函数；
+    - `icons/icons.properties` 继续使用严格 UTF-8 读取，避免图标注册被错误编码污染；
+    - 外部 bundle 单个文件无法读取/解码时不再拖垮整组加载。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_bundle_and_icons_properties_keep_icons_strict_but_bundle_text_uses_utf8_first_fallback -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_external_bundle_decodes_gbk_after_utf8_fails -- --nocapture`
+  - `git diff --check`
+- 后续继续优先：
+  1. 按子代理审查结果继续收口 Join / Load / Settings / Mods 的 Scene2D 视觉密度、按钮皮肤、字体节奏与滚动区域；
+  2. 继续审查 LanguageDialog 运行时 locale 列表、字体 seed 与外部语言包刷新；
+  3. 继续扫所有子菜单最终 `DrawText` 的 raw key、英文 fallback 与图标 raw token 泄漏。
+
 ## 1185. 补齐 Schematics 信息弹窗滚动
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

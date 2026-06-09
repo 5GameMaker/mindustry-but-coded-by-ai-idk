@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.62%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.63%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,34 +27,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：补齐 Schematics 信息弹窗滚动
+## 最新闭环：补齐外部语言包 UTF-8 优先编码容错
 
-- 当前总体迁移完成度：约 **99.62%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.63%**，仍未达到完整可玩。
 - 本轮对照：
-  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SchematicsDialog.java`：`SchematicInfoDialog.show(...)` 的内容区是 `cont.pane(...).grow().scrollX(false).scrollY(true)`，长内容要纵向滚动；
-  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SchematicsDialog.java`：底部 `@back`、`@editor.export`、`@edit` 按钮位于滚动 pane 外，不能随内容滚走。
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LanguageDialog.java`：语言页可见文本依赖 locale/bundle 链路；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Fonts.java`：语言文本最终应进入可显示 glyph，而不是因外部 bundle 编码失败整体丢失。
 - 本轮实现：
   - `desktop/src/lib.rs`
-    - 为 Schematics `Info` modal 增加 `schematic_info_scroll_offset`；
-    - 增加内容 clip、描述高度、总高度、最大滚动偏移与滚动后 dialog helper；
-    - Info dialog 的标签、tag chips、add controls、preview、requirements、power、description 在 clip 内随滚动偏移绘制，并在溢出时绘制滚动条；
-    - hit-test 使用滚动后的布局，底部 Back/Export/Edit 按钮继续固定在 pane 外；
-    - 打开/关闭 Info modal 与重新进入 Schematics route 时重置信息滚动状态。
+    - 新增 bundle 文本读取链：UTF-8 优先，随后 UTF-16 BOM/启发式 UTF-16，再尝试 Windows 常见代码页，最后 Latin-1 兜底；
+    - 内置/global bundle、外部 data bundle、mod bundle 改用编码容错读取；
+    - `icons/icons.properties` 继续保持严格 UTF-8，避免图标注册被错误编码污染；
+    - 外部 bundle 单个文件不可读/不可解码时不再中断整组加载。
   - `README.md`
-    - 迁移进度更新到 **99.62%**。
+    - 迁移进度更新到 **99.63%**。
   - `MIGRATION.md`
-    - 新增 `1185. 补齐 Schematics 信息弹窗滚动`。
+    - 新增 `1186. 补齐外部语言包 UTF-8 优先编码容错`。
 - 已验证：
   - `cargo fmt`
-  - `cargo test -p mindustry-desktop desktop_launcher_schematic_info_dialog_scrolls_long_content_like_java -- --nocapture`
-  - `cargo test -p mindustry-desktop desktop_launcher_schematics_info_dialog_renders_and_dispatches_buttons -- --nocapture`
-  - `cargo test -p mindustry-desktop desktop_launcher_schematic_info_and_edit_dialog_show_all_tags_like_java -- --nocapture`
-  - `cargo test -p mindustry-desktop desktop_launcher_schematic_info_dialog_renders_power_balance_like_java -- --nocapture`
-  - `cargo test -p mindustry-desktop desktop_launcher_schematics_icon_tag_picker_scrolls_overflow_candidates_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_bundle_and_icons_properties_keep_icons_strict_but_bundle_text_uses_utf8_first_fallback -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_external_bundle_decodes_gbk_after_utf8_fails -- --nocapture`
+  - `git diff --check`
 - 下一步优先：
-  1. 继续收口 Schematics tag editor 多 tag pane、card grid/filter 与 add-tag dialog；
-  2. 重新并行审查字体、语言/本地化、raw key、glyph seed、LanguageDialog 视觉缺口；
-  3. 继续推进 Join/Mods/Load/CustomRules/Database/Settings 等子菜单的 Scene2D 尺寸、wrap/ellipsis、按钮皮肤与滚动行为。
+  1. 按子代理审查结果继续收口 Join / Load / Settings / Mods 的 Scene2D 视觉密度、按钮皮肤、字体节奏与滚动区域；
+  2. 继续审查 LanguageDialog 运行时 locale 列表、字体 seed 与外部语言包刷新；
+  3. 继续扫所有子菜单最终 `DrawText` 的 raw key、英文 fallback 与图标 raw token 泄漏。
 
 ## 上一闭环：下沉 Fonts.loadContentIcons 运行时 registry 并修复语言 raw locale 勾选状态
 
