@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1226. 按 Java 中心点公式收口 logo/version 位置
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度保持：约 **99.98%**，仍未达到完整可玩；当前继续优先 UI/前端还原，同时处理用户反馈的极低帧率问题。
+- Java 对照：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:112-130`：`fx = (int)(width / 2f)`，`Draw.rect(logo, fx, fy, logow, logoh)`，version 文字以相同 `fx` 居中；
+  - Java 只截断 `height - 6 - logoh` 得到 `fy` 基准，version y 是 `fy - logoh/2 - Scl.scl(2f)`，没有额外 viewport clamp。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_menu_logo_and_version_chrome(...)` 改为先计算 `logo_center_x = viewport.x + floor(width / 2)`，再由中心推出 logo rect；
+    - version 文本 x 复用同一个 `logo_center_x`；
+    - 去掉 version y 的 Rust-only clamp；
+    - 新增 `desktop_launcher_menu_logo_uses_java_center_math_for_fractional_scaled_regions`，覆盖奇数 viewport 宽度 + fractional scaled logo region；
+    - `desktop_launcher_menu_renders_logo_and_version_overlay` 的背景断言改为接受 Java world darkness 或 bucketed synthetic background，避免与 logo 位置无关的背景路径误报。
+- 已验证：
+  - `cargo fmt -- desktop/src/lib.rs`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_logo --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. UI：继续子菜单视觉状态和 route shell 细节；
+  2. FPS：继续推进文本 layout 跨帧缓存、text layer/batch 收敛、font atlas/upload 失效收紧；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1225. 补齐 Discord chrome 的 Java tooltip 语义
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
