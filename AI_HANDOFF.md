@@ -18,6 +18,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 最新闭环：缓存稳定真实字体文本 layout
+
+- 当前总体迁移完成度：约 **99.98%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时持续处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - `DesktopRealFontAtlas` 增加 `source_key_digest`，用于区分字体 atlas/source/seed 变化；
+    - 新增 `DesktopRealFontTextLayoutCacheKey` 和全局小型 `Arc<DesktopRealFontTextLayout>` cache；
+    - `opengl_backend_real_font_text_layout(...)` 现在按 atlas digest、texture size、glyph count、font、size、text 复用稳定 layout；
+    - cache 命中返回同一个 `Arc`，避免稳定菜单帧重复 glyph lookup、symbol format 和 layout 分配；
+    - 新增测试锁住同 key 复用，size/atlas digest 变化隔离。
+- 已验证/本轮收口验证：
+  - `cargo fmt -- desktop/src/lib.rs`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_real_font_ --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_markup_colors_real_font_foreground_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_outline_uses_real_font_atlas_not_placeholder --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_registers_incremental_real_font_glyphs_like_java --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. UI：继续子菜单视觉状态和 route shell 细节；
+  2. FPS：继续 text layer/batch 收敛与 frame plan 分配压缩；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 最新闭环：按 Java 中心点公式收口 logo/version 位置
 
 - 当前总体迁移完成度：约 **99.98%**，仍未达到完整可玩。

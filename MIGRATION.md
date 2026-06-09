@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1227. 缓存稳定真实字体文本 layout
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度保持：约 **99.98%**，仍未达到完整可玩；当前继续优先 UI/前端还原，同时处理用户反馈的极低帧率问题。
+- Java 对照：
+  - 稳定菜单帧中的同一文本/font/size 不应每帧重复做 glyph lookup、layout metrics 和 symbol format；
+  - 但 atlas/source/seed 变化可能移动 glyph UV，layout cache 必须绑定 atlas source identity。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopRealFontAtlas` 增加 `source_key_digest`；
+    - 新增 `desktop_real_font_atlas_source_key_digest(...)`；
+    - 新增 `DesktopRealFontTextLayoutCacheKey`、`DESKTOP_REAL_FONT_TEXT_LAYOUT_CACHE` 和 512 entry 上限；
+    - `opengl_backend_real_font_text_layout(...)` 拆成 uncached build + cached wrapper，命中时返回同一 `Arc<DesktopRealFontTextLayout>`；
+    - cache key 包含 atlas source digest、texture width/height、glyph count、font key、size bits 与 text；
+    - 新增 `desktop_graphics_opengl_backend_real_font_layout_cache_reuses_stable_text_like_java`，锁住同 key `Arc::ptr_eq` 复用，size/atlas digest 变化隔离。
+- 已验证：
+  - `cargo fmt -- desktop/src/lib.rs`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_real_font_ --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_markup_colors_real_font_foreground_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_outline_uses_real_font_atlas_not_placeholder --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_registers_incremental_real_font_glyphs_like_java --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. UI：继续子菜单视觉状态和 route shell 细节；
+  2. FPS：继续 text layer/batch 收敛与 frame plan 分配压缩；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1226. 按 Java 中心点公式收口 logo/version 位置
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
