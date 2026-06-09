@@ -558,13 +558,6 @@ fn desktop_native_push_shader_asset_root_candidates_near(
             .join("assets"),
         source,
     ));
-    candidates.push((
-        base.join("..")
-            .join("_upstream_mindustry")
-            .join("core")
-            .join("assets"),
-        source,
-    ));
 }
 
 #[cfg(feature = "opengl-native-runtime")]

@@ -11462,7 +11462,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `desktop/src/main.rs`
     - 新增 `desktop_native_push_shader_asset_root_candidates_near(...)`；
     - native shader root 同时扫描 `current_dir` ancestors、`current_exe` ancestors 和仓库 root 邻近候选；
-    - 候选包含 `base/core/assets`、`base/assets`、相邻 `mindustry-upstream-v157.4/core/assets`、`_upstream_mindustry/core/assets`；
+    - 候选包含 `base/core/assets`、`base/assets`、相邻 `mindustry-upstream-v157.4/core/assets`；
     - 新增去重 helper，保留首个来源标签用于诊断；
     - 测试覆盖打包布局候选与去重。
 - 已验证：
@@ -11483,7 +11483,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - 字体、icons.properties、sprite source 解析失败会直接影响主菜单观感和首帧可见性。
 - 本轮主改动：
   - `desktop/src/lib.rs`
-    - 新增 `desktop_push_asset_root_candidates_near(...)`，同时纳入 `base/core/assets`、`base/assets`、相邻上游 `mindustry-upstream-v157.4/core/assets` 与 `_upstream_mindustry/core/assets`；
+    - 新增 `desktop_push_asset_root_candidates_near(...)`，同时纳入 `base/core/assets`、`base/assets`、相邻上游 `mindustry-upstream-v157.4/core/assets`；
     - `desktop_default_asset_roots()` 同时扫描 `current_dir` ancestors 与 `current_exe` ancestors；
     - 新增 `desktop_dedup_path_list(...)` 避免重复候选；
     - 测试覆盖打包/工作区候选路径和去重逻辑。
