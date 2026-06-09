@@ -19,6 +19,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1184. 补齐 Schematics 图标标签滚动与暂停菜单细节
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.61%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SchematicsDialog.java:420-458`：`showNewIconTag(...)` 使用 `Dialog` + `cont.pane(...)`，候选池应能纵向滚动，`buttons.button("@back", Icon.left, ...)` 在滚动 pane 外；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/PausedDialog.java:69-103`：`@abandon` 只因 `net.client()` 或 `state.gameOver` 禁用，desktop `@loadgame` 使用 `Icon.upload`，`@quit` 在当前存档 autosave 时切成 `@save.quit`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 为 Schematics `IconTag` modal 增加 `schematic_icon_tag_scroll_offset` 状态；
+    - 增加 icon picker clip rect、visible rows、total rows、max scroll、visible window helper；
+    - IconTag 渲染改为 `SetClip/ClearClip` 包住候选网格，并绘制滚动条；
+    - IconTag hit-test 改为使用滚动后的 visible window，滚到底后最后一批候选可见且可点击；
+    - 打开/关闭 IconTag modal 时重置滚动状态，滚轮只在候选 pane 内生效；
+    - Pause overlay 增加 `pause_overlay_net_client()` 与 `pause_overlay_quit_label()`，同步 Java 的 abandon/server 与 autosave quit 文案；
+    - desktop `@loadgame` 图标从旧 `load` 改为 Java `Icon.upload` 对应的 `upload` glyph。
+  - `README.md`
+    - 迁移进度更新到 **99.61%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematics_icon_tag_picker_scrolls_overflow_candidates_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematic_tags_modal_and_icon_picker_do_not_hard_truncate_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_renders_save_and_load_entries -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_campaign_abandon_matches_java_server_client_and_gameover_rules -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_quit_requires_confirmation -- --nocapture`
+- 后续继续优先：
+  1. 继续收口 Schematics Info dialog 长内容 scroll、tag editor 多 tag pane 和 card grid 的 Scene2D 行为；
+  2. 按子代理清单继续推进 Join/Mods/Load/CustomRules 等子菜单的字体节奏、ellipsis/wrap 与按钮皮肤；
+  3. 继续扫可见 DrawText 中 raw key、英文 token、诊断前缀和错误图标别名。
+
 ## 1183. 收口 Discord 原版图标与 PlanetData 容器密度
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

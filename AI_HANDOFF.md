@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.59%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.61%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,28 +27,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收口 Settings PlanetSelectDialog 的 BaseDialog 与 flatTogglet 视觉语义
+## 最新闭环：补齐 Schematics 图标标签滚动与暂停菜单细节
 
-- 当前总体迁移完成度：约 **99.59%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.61%**，仍未达到完整可玩。
 - 本轮对照：
-  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:91-120`；
-  - `planetDataDialog` 是 `BaseDialog("@settings.data")`，容器为 `Tex.button`，按钮 `280x60` / `Styles.flatt` / `marginLeft(4)`；
-  - 星球选择弹窗是 `new BaseDialog("")` + `pane(p -> p.background(Tex.button).margin(1f))`，星球按钮为 `Styles.flatTogglet`、`110x45`、4 列换行、checked 使用 Java ButtonStyle。
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/SchematicsDialog.java:420-458`：`showNewIconTag(...)` 是 `Dialog` + `cont.pane(...)`，候选池纵向滚动，`@back` 在 pane 外；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/PausedDialog.java:69-103`：`@abandon` 只因 `net.client()` 或 `state.gameOver` 禁用，desktop `@loadgame` 使用 `Icon.upload`，autosave 时 `@quit` 切为 `@save.quit`。
 - 本轮实现：
   - `desktop/src/lib.rs`
-    - `push_settings_planet_chooser_dialog()` 改为通过 `BaseDialog` shell 走 `windowEmpty` / accent / stageBackground；
-    - 星球选择 pane 保持 `Tex.button` 背景，去掉 Rust-only dialog/pane `StrokeRect`；
-    - 星球按钮改为 `settings_text_button_symbol_and_tint_checked("flatTogglet", ...)` 与 Java default TextButton 字体，移除自定义蓝灰 tint 和 10px 小字体；
-    - 扩展 `desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell` 锁住 chooser chrome、pane、按钮 tint/font。
+    - 为 Schematics `IconTag` modal 增加滚动状态、clip rect、visible rows/window 与滚动条；
+    - IconTag render/hit-test 均使用滚动后的 visible window，滚到底后最后一批候选可见且可点；
+    - 打开/关闭 IconTag modal 重置滚动，滚轮只在候选 pane 内生效；
+    - Pause overlay 补齐 `pause_overlay_net_client()`、`pause_overlay_quit_label()`，并把 desktop `@loadgame` 图标改为 `upload`。
   - `README.md`
-    - 迁移进度更新到 **99.59%**。
+    - 迁移进度更新到 **99.61%**。
+  - `MIGRATION.md`
+    - 新增 `1184. 补齐 Schematics 图标标签滚动与暂停菜单细节`。
 - 已验证：
   - `cargo fmt`
-  - `cargo test -p mindustry-desktop settings_planet -- --nocapture`
-  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematics_icon_tag_picker_scrolls_overflow_candidates_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematic_tags_modal_and_icon_picker_do_not_hard_truncate_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_renders_save_and_load_entries -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_campaign_abandon_matches_java_server_client_and_gameover_rules -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_quit_requires_confirmation -- --nocapture`
 - 下一步优先：
-  1. 继续收口 Settings 主菜单 hover/pressed 截图差异与 Data 页所有按钮的 `Tex.button + Styles.flatt` 视觉密度；
-  2. 继续推进 LanguageDialog scrollbar/row hover、Join / About / Database / CampaignRules / LaunchLoadout 等子菜单 Scene2D 尺寸、tooltip、checkbox/toggle 风格；
+  1. 继续收口 Schematics Info dialog 长内容 scroll、tag editor 多 tag pane 和 card grid 的 Scene2D 行为；
+  2. 按子代理清单继续推进 Join/Mods/Load/CustomRules 等子菜单的字体节奏、ellipsis/wrap 与按钮皮肤；
   3. 继续扫可见 DrawText 中 raw key、英文 token、诊断前缀和错误图标别名。
 
 ## 上一闭环：下沉 Fonts.loadContentIcons 运行时 registry 并修复语言 raw locale 勾选状态
