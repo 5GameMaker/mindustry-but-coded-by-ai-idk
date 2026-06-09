@@ -19,6 +19,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1202. 跳过普通文本图标格式化降低 UI 稳定帧开销
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.79%**，仍未达到完整可玩；当前继续优先补前端 UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，同时继续处理用户反馈的前端帧率极低问题。
+- 性能背景：
+  - `localize_bundle_markup_text(...)` 在主菜单、Join、Settings、Load/Save、Mods 等前端路径中频繁调用；
+  - 旧 `format_icons_like_java(...)` 即使面对普通按钮文本和普通本地化结果，也会构建 content icon runtime registry；
+  - Java 原版的 `StringIcon`/font icon 替换只在文本包含图标 token 时才有实际意义，普通 UI 文案不应支付这部分稳定帧成本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `format_icons_like_java(...)` 增加 `:` token 快速路径；
+    - 无 `:` 的普通文本直接返回，不再构建 content icon runtime registry；
+    - 保留包含 `:icon:` token 的 Java-like 图标格式化路径，避免破坏 content icon、本地化和字体图标显示。
+  - `README.md`
+    - 迁移进度更新到 **99.79%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core format_icon_tokens_like_java_matches_ui_format_icons_for_iconc_and_string_icons -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_uses_settings_locale_bundle_for_menu_buttons -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_route_titles_use_settings_locale_bundle_like_java_dialogs -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. 继续低 FPS：Join saved-server 行级 snapshot key 缓存、localize bundle/static text 缓存、菜单背景命令缓存/批处理；
+  2. 继续 UI 还原：Join/Settings/Load/Host/Mods/Schematics 子菜单继续对照 Java Scene2D；
+  3. 资源/字体：继续直接复用上游 assets、fonts、bundles、icons、sprites/ui。
+
 ## 1201. 轻量化字体上传计划缓存 key 降低稳定帧分配
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
