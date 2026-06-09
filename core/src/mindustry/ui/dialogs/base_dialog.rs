@@ -11,7 +11,9 @@ use crate::mindustry::graphics::{
     Layer, Pal, RenderCommand, RenderPoint, RenderRect, RenderTextAlign, RenderTextStyle,
     RenderTextVerticalAlign,
 };
-use crate::mindustry::ui::UiDrawableTint;
+use crate::mindustry::ui::{
+    upstream_dialog_style_skin, UiDialogStyleSkin, UiDrawableTint, UiStyleColor,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogDrawableRef {
@@ -110,9 +112,33 @@ impl DialogColorRef {
             [1.0, 1.0, 1.0, 1.0]
         } else if name == "black" {
             [0.0, 0.0, 0.0, 1.0]
+        } else if name == "gray" {
+            UiStyleColor::Gray.rgba()
+        } else if name == "darkGray" {
+            UiStyleColor::DarkGray.rgba()
+        } else if name == "lightGray" {
+            UiStyleColor::LightGray.rgba()
         } else {
             [1.0, 1.0, 1.0, 1.0]
         }
+    }
+}
+
+fn dialog_color_ref_from_ui_style_color(color: UiStyleColor) -> DialogColorRef {
+    match color {
+        UiStyleColor::White => DialogColorRef::named("white"),
+        UiStyleColor::Black => DialogColorRef::named("black"),
+        UiStyleColor::Gray => DialogColorRef::named("gray"),
+        UiStyleColor::DarkGray => DialogColorRef::named("darkGray"),
+        UiStyleColor::LightGray => DialogColorRef::named("lightGray"),
+        UiStyleColor::PalAccent => DialogColorRef::named("accent"),
+    }
+}
+
+fn dialog_drawable_ref_from_ui_style_name(name: &'static str) -> DialogDrawableRef {
+    match name {
+        "windowEmpty" => DialogDrawableRef::named("window-empty"),
+        _ => DialogDrawableRef::named(name),
     }
 }
 
@@ -162,11 +188,41 @@ impl DialogStyle {
     }
 
     pub fn default_dialog() -> Self {
-        Self::preset("default", DialogDrawableRef::named("black9"))
+        Self::from_upstream_skin("default", "defaultDialog")
+            .unwrap_or_else(|| Self::preset("default", DialogDrawableRef::named("black9")))
     }
 
     pub fn full_dialog() -> Self {
-        Self::preset("full", DialogDrawableRef::named("black"))
+        Self::from_upstream_skin("full", "fullDialog")
+            .unwrap_or_else(|| Self::preset("full", DialogDrawableRef::named("black")))
+    }
+
+    fn from_upstream_skin(name: impl Into<String>, java_name: &str) -> Option<Self> {
+        Self::from_ui_dialog_style_skin(name, upstream_dialog_style_skin(java_name)?)
+    }
+
+    fn from_ui_dialog_style_skin(
+        name: impl Into<String>,
+        skin: &'static UiDialogStyleSkin,
+    ) -> Option<Self> {
+        Some(Self {
+            name: name.into(),
+            stage_background: Some(dialog_drawable_ref_from_ui_style_name(
+                skin.stage_background,
+            )),
+            background: Some(dialog_drawable_ref_from_ui_style_name(skin.background)),
+            title: DialogTitleStyle {
+                font: Some(skin.title_font),
+                color: Some(dialog_color_ref_from_ui_style_color(skin.title_font_color)),
+                font_size: Some(24.0),
+            },
+            accent_line: Some(DialogAccentLineStyle {
+                drawable: DialogDrawableRef::named("whiteui"),
+                tint: Some(DialogColorRef::named("accent")),
+                height: 3.0,
+                pad: 4.0,
+            }),
+        })
     }
 
     fn preset(name: impl Into<String>, stage_background: DialogDrawableRef) -> Self {

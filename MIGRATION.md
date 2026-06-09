@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1180. 下沉 Styles.defaultDialog / fullDialog 共享对话框皮肤契约
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.57%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Styles.java`：`defaultDialog` / `fullDialog` 是 `DialogStyle` 级别的一等皮肤；
+  - `defaultDialog`：`stageBackground=black9`、`background=windowEmpty`、`titleFont=Fonts.def`、`titleFontColor=Pal.accent`；
+  - `fullDialog`：`stageBackground=black`、`background=windowEmpty`、`titleFont=Fonts.def`、`titleFontColor=Pal.accent`。
+- 本轮主改动：
+  - `core/src/mindustry/ui/styles.rs`
+    - 新增 `UiDialogStyleSkin`、`UPSTREAM_DIALOG_STYLE_SKINS`、`upstream_dialog_style_skin()`；
+    - 新增 `upstream_dialog_style_skins_match_java_dialog_styles`，锁住 Java `defaultDialog` / `fullDialog` 字段。
+  - `core/src/mindustry/ui/dialogs/base_dialog.rs`
+    - `DialogStyle::default_dialog()` / `full_dialog()` 改为消费共享 `upstream_dialog_style_skin()`；
+    - 保持旧内部 `style.name = default/full` 与 `window-empty` drawable ref 兼容，同时从 Java `windowEmpty` alias 规范化进入既有渲染链。
+  - `core/src/mindustry/ui/mod.rs`
+    - 公开 `UiDialogStyleSkin`、`UPSTREAM_DIALOG_STYLE_SKINS` 与 `upstream_dialog_style_skin()`，供 desktop/runtime 统一消费。
+  - `README.md`
+    - 迁移进度更新到 **99.57%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core upstream_dialog_style_skins_match_java_dialog_styles -- --nocapture`
+  - `cargo test -p mindustry-core dialog_style_default_matches_java_default_dialog_skin_contract -- --nocapture`
+  - `cargo test -p mindustry-core dialog_style_full_matches_java_full_dialog_skin_contract -- --nocapture`
+- 后续继续优先：
+  1. 继续把内容图标注册、unicode/name/atlas_symbol/team emoji 策略收敛为 core/UI 共享 API；
+  2. 继续推进 Settings / Join / About / Database 等子菜单直接消费共享 ButtonStyle/DialogStyle 契约；
+  3. 继续扫可见 DrawText 中 raw key、英文 token、诊断前缀和错误图标别名。
+
 ## 1179. 补齐 Styles.defaultb / underlineb 通用按钮皮肤契约
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

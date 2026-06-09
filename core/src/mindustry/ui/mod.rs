@@ -1974,14 +1974,15 @@ pub use fonts::{
 };
 pub use mobile_button::{MobileButton, MobileButtonLayout};
 pub use styles::{
-    upstream_button_style_skin, upstream_check_box_style_skin, upstream_image_button_style_skin,
-    upstream_label_style_skin, upstream_scroll_pane_style_skin, upstream_slider_style_skin,
-    upstream_text_button_style_skin, upstream_text_field_style_skin, upstream_tree_style_skin,
-    upstream_ui_drawable_alias, upstream_ui_skin_sprite, upstream_ui_skin_sprite_source_paths,
-    upstream_ui_skin_sprites, UiButtonStyleSkin, UiCheckBoxStyleSkin, UiDrawableAlias,
-    UiDrawableTint, UiImageButtonStyleSkin, UiLabelStyleSkin, UiScrollPaneStyleSkin, UiSkinGroup,
-    UiSkinSprite, UiSliderStyleSkin, UiStyleColor, UiTextButtonStyleSkin, UiTextFieldStyleSkin,
-    UiTreeStyleSkin, UPSTREAM_BUTTON_STYLE_SKINS, UPSTREAM_CHECK_BOX_STYLE_SKINS,
+    upstream_button_style_skin, upstream_check_box_style_skin, upstream_dialog_style_skin,
+    upstream_image_button_style_skin, upstream_label_style_skin, upstream_scroll_pane_style_skin,
+    upstream_slider_style_skin, upstream_text_button_style_skin, upstream_text_field_style_skin,
+    upstream_tree_style_skin, upstream_ui_drawable_alias, upstream_ui_skin_sprite,
+    upstream_ui_skin_sprite_source_paths, upstream_ui_skin_sprites, UiButtonStyleSkin,
+    UiCheckBoxStyleSkin, UiDialogStyleSkin, UiDrawableAlias, UiDrawableTint,
+    UiImageButtonStyleSkin, UiLabelStyleSkin, UiScrollPaneStyleSkin, UiSkinGroup, UiSkinSprite,
+    UiSliderStyleSkin, UiStyleColor, UiTextButtonStyleSkin, UiTextFieldStyleSkin, UiTreeStyleSkin,
+    UPSTREAM_BUTTON_STYLE_SKINS, UPSTREAM_CHECK_BOX_STYLE_SKINS, UPSTREAM_DIALOG_STYLE_SKINS,
     UPSTREAM_IMAGE_BUTTON_STYLE_SKINS, UPSTREAM_LABEL_STYLE_SKINS,
     UPSTREAM_SCROLL_PANE_STYLE_SKINS, UPSTREAM_SLIDER_STYLE_SKINS,
     UPSTREAM_TEXT_BUTTON_STYLE_SKINS, UPSTREAM_TEXT_FIELD_STYLE_SKINS, UPSTREAM_TREE_STYLE_SKINS,

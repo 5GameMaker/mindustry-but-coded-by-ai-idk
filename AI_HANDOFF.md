@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.56%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.57%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：补齐 Styles.defaultb / underlineb 通用按钮皮肤契约
+## 最新闭环：下沉 Styles.defaultDialog / fullDialog 共享对话框皮肤契约
+
+- 当前总体迁移完成度：约 **99.57%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Styles.java`：`defaultDialog` / `fullDialog` 是 Java `DialogStyle` 级别的一等皮肤；
+  - `defaultDialog`：`stageBackground=black9`、`background=windowEmpty`、`titleFont=Fonts.def`、`titleFontColor=Pal.accent`；
+  - `fullDialog`：`stageBackground=black`、`background=windowEmpty`、`titleFont=Fonts.def`、`titleFontColor=Pal.accent`。
+- 本轮实现：
+  - `core/src/mindustry/ui/styles.rs`
+    - 新增 `UiDialogStyleSkin`、`UPSTREAM_DIALOG_STYLE_SKINS`、`upstream_dialog_style_skin()`；
+  - `core/src/mindustry/ui/dialogs/base_dialog.rs`
+    - `DialogStyle::default_dialog()` / `full_dialog()` 改为消费共享 style registry；
+    - 兼容 Java `windowEmpty` alias 与既有内部 `window-empty` drawable ref；
+  - `core/src/mindustry/ui/mod.rs`
+    - 公开 DialogStyle 共享契约。
+  - `README.md`
+    - 迁移进度更新到 **99.57%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core upstream_dialog_style_skins_match_java_dialog_styles -- --nocapture`
+  - `cargo test -p mindustry-core dialog_style_default_matches_java_default_dialog_skin_contract -- --nocapture`
+  - `cargo test -p mindustry-core dialog_style_full_matches_java_full_dialog_skin_contract -- --nocapture`
+- 下一步优先：
+  1. 继续把内容图标注册、unicode/name/atlas_symbol/team emoji 策略收敛为 core/UI 共享 API；
+  2. 继续推进 Settings / Join / About / Database 等子菜单直接消费共享 ButtonStyle/DialogStyle 契约；
+  3. 继续扫可见 DrawText 中 raw key、英文 token、诊断前缀和错误图标别名。
+
+## 上一闭环：补齐 Styles.defaultb / underlineb 通用按钮皮肤契约
 
 - 当前总体迁移完成度：约 **99.56%**，仍未达到完整可玩。
 - 本轮对照：

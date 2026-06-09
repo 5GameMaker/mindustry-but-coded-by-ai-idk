@@ -261,6 +261,15 @@ pub struct UiLabelStyleSkin {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiDialogStyleSkin {
+    pub java_name: &'static str,
+    pub stage_background: &'static str,
+    pub background: &'static str,
+    pub title_font: &'static str,
+    pub title_font_color: UiStyleColor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UiImageButtonStyleSkin {
     pub java_name: &'static str,
     pub up: Option<&'static str>,
@@ -1059,6 +1068,23 @@ pub const UPSTREAM_LABEL_STYLE_SKINS: &[UiLabelStyleSkin] = &[
     },
 ];
 
+pub const UPSTREAM_DIALOG_STYLE_SKINS: &[UiDialogStyleSkin] = &[
+    UiDialogStyleSkin {
+        java_name: "defaultDialog",
+        stage_background: "black9",
+        background: "windowEmpty",
+        title_font: "Fonts.def",
+        title_font_color: UiStyleColor::PalAccent,
+    },
+    UiDialogStyleSkin {
+        java_name: "fullDialog",
+        stage_background: "black",
+        background: "windowEmpty",
+        title_font: "Fonts.def",
+        title_font_color: UiStyleColor::PalAccent,
+    },
+];
+
 pub const UPSTREAM_TEXT_BUTTON_STYLE_SKINS: &[UiTextButtonStyleSkin] = &[
     UiTextButtonStyleSkin::new("defaultt", "Fonts.def")
         .up("button")
@@ -1358,6 +1384,12 @@ pub fn upstream_label_style_skin(java_name: &str) -> Option<&'static UiLabelStyl
         .find(|style| style.java_name == java_name)
 }
 
+pub fn upstream_dialog_style_skin(java_name: &str) -> Option<&'static UiDialogStyleSkin> {
+    UPSTREAM_DIALOG_STYLE_SKINS
+        .iter()
+        .find(|style| style.java_name == java_name)
+}
+
 pub fn upstream_text_button_style_skin(java_name: &str) -> Option<&'static UiTextButtonStyleSkin> {
     UPSTREAM_TEXT_BUTTON_STYLE_SKINS
         .iter()
@@ -1514,6 +1546,28 @@ mod tests {
             assert!(
                 upstream_ui_drawable_alias(java_drawable).is_some(),
                 "Styles.{java_drawable} must be available before ButtonStyle chrome is consumed"
+            );
+        }
+    }
+
+    #[test]
+    fn upstream_dialog_style_skins_match_java_dialog_styles() {
+        let default_dialog = upstream_dialog_style_skin("defaultDialog").unwrap();
+        assert_eq!(default_dialog.stage_background, "black9");
+        assert_eq!(default_dialog.background, "windowEmpty");
+        assert_eq!(default_dialog.title_font, "Fonts.def");
+        assert_eq!(default_dialog.title_font_color, UiStyleColor::PalAccent);
+
+        let full_dialog = upstream_dialog_style_skin("fullDialog").unwrap();
+        assert_eq!(full_dialog.stage_background, "black");
+        assert_eq!(full_dialog.background, "windowEmpty");
+        assert_eq!(full_dialog.title_font, "Fonts.def");
+        assert_eq!(full_dialog.title_font_color, UiStyleColor::PalAccent);
+
+        for java_drawable in ["black9", "black", "windowEmpty"] {
+            assert!(
+                upstream_ui_drawable_alias(java_drawable).is_some(),
+                "Styles.{java_drawable} must resolve before DialogStyle chrome is consumed"
             );
         }
     }
