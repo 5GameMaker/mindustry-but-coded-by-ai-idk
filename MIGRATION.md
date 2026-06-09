@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1213. 接入 Settings 主菜单与 Data 页按钮 pressed/down 态
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.90%**，仍未达到完整可玩；当前继续优先前端/UI 视觉还原，同时持续处理前端帧率问题。
+- Java 对照：
+  - `SettingsMenuDialog.java` 主菜单与 Data 页按钮均使用 Scene2D `TextButton` / `Styles.flatt`；
+  - Java `TextButton` 在鼠标按下时会切到 `down` drawable 与对应 `downFontColor`；
+  - Rust 旧路径虽然已接入 `flatt`/hover/up 皮肤，但主菜单与 Data 页按钮渲染时 pressed 参数固定为 `false`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `last_settings_pressed_action`，MouseDown 时记录当前 Settings action，MouseUp/重置时清理；
+    - 新增 `settings_pressed_action_at_surface_point(...)`，复用现有 `settings_route_shell_action_at_surface_point(...)` 命中链；
+    - `push_settings_main_menu_buttons(...)` 按 hovered + pressed action 选择 `flatt` down drawable / down font color；
+    - `push_settings_data_dialog_content(...)` 对 Data action 按钮传入 pressed；
+    - 通用 `push_settings_text_button_enabled_checked...` 链路新增 pressed 内部入口，默认调用保持 pressed=false，避免影响其它按钮；
+    - 新增主菜单/Data 页 pressed 回归测试，并继续跑现有主菜单/Data 可见性测试。
+  - `README.md`
+    - 迁移进度更新到 **99.90%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_main_page_buttons_render_pressed_state_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_data_page_buttons_render_pressed_state_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_main_page_renders_upstream_menu_buttons -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_data_openfolder_visibility_matches_upstream_mobile -- --nocapture`
+- 后续继续优先：
+  1. UI：继续收口 Mac notch 动态偏移、主/子菜单背景容器语义、Icon drawable 路径、更多 Settings/Language/Mods 子菜单细节；
+  2. FPS：继续缓存稳定菜单 layout/plan、减少 UI command 克隆、复核 trace 环境变量和 glyph layout；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1212. 对齐 Campaign 首次选星弹窗 planet 图卡与 OK 按钮高度
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
