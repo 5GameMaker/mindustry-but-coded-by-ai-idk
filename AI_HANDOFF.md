@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.77%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.78%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -26,6 +26,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
+
+## 最新闭环：轻量化字体上传计划缓存 key 降低稳定帧分配
+
+- 当前总体迁移完成度：约 **99.78%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - `DesktopFontGlyphUploadPlanCacheKey` 从克隆字体源 Vec + 构造 content icon visibility Vec，改为 `(len,digest)` 轻量 key；
+    - 新增流式 FNV digest helper，覆盖字体源、content icon registry、atlas resolved 状态和外部 font seed；
+    - 保持字体源变化、locale 重启加载、content icon/atlas 变化、外部 bundle seed 变化时仍会失效。
+  - `README.md`
+    - 迁移进度更新到 **99.78%**。
+  - `MIGRATION.md`
+    - 新增 `1201. 轻量化字体上传计划缓存 key 降低稳定帧分配`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_resize_and_scale_factor_reuse_font_upload_plan_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_menu_graphics_frame_registers_thai_external_bundle_seed_and_refreshes_cache_key -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_switch_keeps_font_override_until_restart_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_font_rasterization_plan_bridges_fonts_icons_and_texture_atlas -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. FPS：缓存/轻量化 `format_icons_like_java`、`localize_bundle_markup_text`、Join 可见窗口分配；
+  2. UI：继续补 Join/Settings/Load/Host/Mods/Schematics 子菜单与 Java Scene2D 视觉差；
+  3. 资源：继续直接复用上游 assets、fonts、bundles、icons、sprites/ui。
 
 ## 最新闭环：优化 Settings 行布局并拆分 Host 图标 fallback
 

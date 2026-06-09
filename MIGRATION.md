@@ -19,6 +19,39 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1201. 轻量化字体上传计划缓存 key 降低稳定帧分配
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.78%**，仍未达到完整可玩；当前继续优先补前端 UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，同时继续处理用户反馈的前端帧率极低问题。
+- 性能背景：
+  - `cached_font_glyph_upload_plan_for_frame()` 每帧都要构造 cache key；
+  - 旧 key 会克隆 `font_asset_sources`，并为每个 content icon 构造 `(name, unicode, atlas_symbol, registerable, resolved)` 大 Vec；
+  - 即使缓存命中，稳定帧仍会承担字符串 clone、Vec 分配和 tuple 构建成本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopFontGlyphUploadPlanCacheKey` 改为轻量 digest/计数：
+      - `font_asset_sources_key: (len, digest)`
+      - `content_icon_registry_key: (len, digest)`
+      - `content_icon_atlas_visibility_key: (len, digest)`
+      - 保留 `external_font_seed_key`；
+    - 新增流式 FNV digest helper，直接按源路径、文件路径、load error、icon 名称/unicode/atlas_symbol 与 atlas resolved 状态写入 digest；
+    - `font_glyph_upload_plan_cache_key()` 不再 clone font source Vec，也不再 collect icon visibility Vec；
+    - 保持 Java-like 失效语义：字体源变化、locale 重启加载、content icon registry/atlas 变化、外部 bundle 字符 seed 变化仍会刷新。
+  - `README.md`
+    - 迁移进度更新到 **99.78%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_cached_font_glyph_upload_plan_for_stable_frames -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_resize_and_scale_factor_reuse_font_upload_plan_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_menu_graphics_frame_registers_thai_external_bundle_seed_and_refreshes_cache_key -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_language_switch_keeps_font_override_until_restart_like_java -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_font_rasterization_plan_bridges_fonts_icons_and_texture_atlas -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. 处理用户反馈的极低 FPS：继续缓存/轻量化 `format_icons_like_java` / `localize_bundle_markup_text`，并减少 Join 可见窗口分配；
+  2. 继续 UI 还原：Join/Settings/Load/Host/Mods/Schematics 子菜单继续对照 Java Scene2D；
+  3. 资源/字体：继续直接复用上游 assets、fonts、bundles、icons、sprites/ui。
+
 ## 1200. 优化 Settings 行布局并拆分 Host 图标 fallback
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
