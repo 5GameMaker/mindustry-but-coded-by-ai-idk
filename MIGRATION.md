@@ -19,6 +19,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1197. 对齐 Join 社区多列布局并降低稳定帧开销
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.74%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，同时继续修用户反馈的前端帧率极低问题。
+- Java 对照依据：
+  - `JoinDialog.columns()`：按 `Core.graphics.getWidth()/Scl.scl()*0.9f` 与 `targetWidth()` 得到 1..4 列；
+  - `section(...)` / `refreshCommunity()`：community 区块按 `(targetWidth()+5f)*columns()` 撑开，host card 按 `columns()` 换行；
+  - 稳定帧不应反复遍历全部 community group/host 文本做 cache key fingerprint。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Join community card 从旧单列 3 卡改为 Java-like `columns()` 多列布局，列间距使用 5f 语义；
+    - 新增 community 首屏窗口 helper，render、hit-test、tooltip 共享同一份多列窗口；
+    - community 滚动上限按“总行数 - 可见行数”计算，滚动一步按 `columns()` 推进；
+    - `DesktopJoinCommunityVisibleCacheKey` 从每次全量 group/host fingerprint 改为显式版本号，加载/应用 feed/隐藏组/清空组时主动失效；
+    - 为 community group header label width 增加 `(locale, group_name)` 缓存，避免稳定帧重复字体 atlas 查找与字形度量；
+    - 扩展 Join community 布局/滚动回归测试，锁住 1280x720 下 2 列 × 3 行首屏与滚动命中语义。
+  - `README.md`
+    - 迁移进度更新到 **99.74%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_tracks_community_groups_like_java_server_group -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_scrolls_community_hosts_like_java_scrollpane -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_caches_visible_join_community_entries_between_stable_queries -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. 继续低 FPS 修复：saved-server snapshot 缓存、Join 静态文本缓存、font glyph upload key generation 化；
+  2. 继续 UI 还原：Join community host 正文流式排版、group header 按钮 skin、Add Server 弹窗 shell；
+  3. 继续 UI 还原：Settings、Load/Save、Host、Mods、Schematics 子菜单贴近 Java 原版。
+
 ## 1196. 对齐 Join 社区 Host 标题宽度和 Add 按钮边距
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
