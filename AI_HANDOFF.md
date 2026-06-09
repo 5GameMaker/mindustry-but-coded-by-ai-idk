@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.80%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.81%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -26,6 +26,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
+
+## 最新闭环：共享 mod 贴图字节避免 Desktop frame 每帧深拷贝
+
+- 当前总体迁移完成度：约 **99.81%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher.mod_texture_source_bytes` 与 `DesktopGraphicsFrame.mod_texture_source_bytes` 改为 `Arc<BTreeMap<String, Vec<u8>>>`；
+    - 菜单 frame 和游戏 frame 构建改为 clone Arc，不再每帧深拷贝所有 mod/browser icon PNG 字节；
+    - 写入路径统一 `Arc::make_mut(...)`，保持 mod 资源/浏览器图标更新语义；
+    - 新增稳定 frame 共享 Arc 测试。
+  - `README.md`
+    - 迁移进度更新到 **99.81%**。
+  - `MIGRATION.md`
+    - 新增 `1204. 共享 mod 贴图字节避免 Desktop frame 每帧深拷贝`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_graphics_frames_reuse_mod_texture_source_bytes_arc_between_stable_frames -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_omits_empty_block_particle_steps -- --nocapture`
+  - `cargo test -p mindustry-desktop mods -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. FPS：localize bundle/static text 缓存、菜单背景命令缓存/批处理、OpenGL draw call/mesh upload 复核；
+  2. UI：继续补 Join/Settings/Load/Host/Mods/Schematics 子菜单与 Java Scene2D 视觉差；
+  3. 资源：继续直接复用上游 assets、fonts、bundles、icons、sprites/ui。
 
 ## 最新闭环：缓存 Join 保存服务器快照降低联机菜单帧开销
 

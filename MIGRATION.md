@@ -19,6 +19,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1204. 共享 mod 贴图字节避免 Desktop frame 每帧深拷贝
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.81%**，仍未达到完整可玩；当前继续优先补前端 UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距，同时继续处理用户反馈的前端帧率极低问题。
+- 性能背景：
+  - `menu_graphics_frame_for_surface(...)` 与正常 `graphics_frame_for_render(...)` 旧路径都会把 `self.mod_texture_source_bytes` 整个 `BTreeMap<String, Vec<u8>>` clone 到 `DesktopGraphicsFrame`；
+  - 带 mods/browser icons 时，这会在稳定帧重复复制 PNG 字节；
+  - Java 资源路径更接近加载期持有、运行期引用，稳定帧不应搬运资源字节。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher.mod_texture_source_bytes` 和 `DesktopGraphicsFrame.mod_texture_source_bytes` 改为 `Arc<BTreeMap<String, Vec<u8>>>`；
+    - frame 构建改为 `Arc::clone(...)`，避免每帧深拷贝 `Vec<u8>`；
+    - mod 资源合并、mod icon 合并、mods browser icon response 写入路径改用 `Arc::make_mut(...)`；
+    - 图形 trace / OpenGL plan 仍通过 `&BTreeMap` 读取，不改变真实贴图上传语义；
+    - 新增 `desktop_graphics_frames_reuse_mod_texture_source_bytes_arc_between_stable_frames`，锁住稳定 frame 共享 Arc 的性能语义。
+  - `README.md`
+    - 迁移进度更新到 **99.81%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_graphics_frames_reuse_mod_texture_source_bytes_arc_between_stable_frames -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_omits_empty_block_particle_steps -- --nocapture`
+  - `cargo test -p mindustry-desktop mods -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. 继续低 FPS：localize bundle/static text 缓存、菜单背景命令缓存/批处理、OpenGL draw call/mesh upload 复核；
+  2. 继续 UI 还原：Join/Settings/Load/Host/Mods/Schematics 子菜单继续对照 Java Scene2D；
+  3. 资源/字体：继续直接复用上游 assets、fonts、bundles、icons、sprites/ui。
+
 ## 1203. 缓存 Join 保存服务器快照降低联机菜单帧开销
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
