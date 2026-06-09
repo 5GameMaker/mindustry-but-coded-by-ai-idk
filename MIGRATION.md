@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1214. 将主菜单 Mac notch 偏移改为运行时高度
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.91%**，仍未达到完整可玩；当前继续优先前端/UI 视觉还原，同时持续处理前端帧率问题。
+- Java 对照：
+  - `Vars.java` 定义 `macNotchHeight = 32f`；
+  - `MenuFragment.java` logo/version 位置在 `Core.settings.getBool("macnotch")` 时减去 `Scl.scl(macNotchHeight)`；
+  - Rust 旧实现把 notch 偏移直接写死为 `32.0 * ui_scale`，无法被 runtime/platform 后续覆盖。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DESKTOP_MENU_MAC_NOTCH_HEIGHT_LIKE_JAVA = 32.0`；
+    - `DesktopLauncher` 新增 `menu_macnotch_height`，默认使用 Java 值；
+    - `DesktopMenuChromeLayoutOptions` 增加 `macnotch_height`；
+    - logo/version 位置使用 `options.macnotch_height.max(0.0) * ui_scale`，不再在公式里硬编码 32；
+    - `graphics.macnotch` 设置副作用同步更新 `menu_macnotch_enabled`；
+    - 更新 logo notch 测试，使用 48px runtime notch height 锁住动态高度；扩展 graphics 设置即时副作用测试。
+  - `README.md`
+    - 迁移进度更新到 **99.91%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_logo_respects_scene_margin_top_and_macnotch -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_immediate_side_effects_match_upstream_menu_expectations -- --nocapture`
+- 后续继续优先：
+  1. UI：继续收口主/子菜单背景容器语义、Icon drawable 路径、Language/Mods/Host/Schematics 细节；
+  2. FPS：继续缓存稳定菜单 layout/plan、减少 UI command 克隆、复核 trace 环境变量和 glyph layout；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1213. 接入 Settings 主菜单与 Data 页按钮 pressed/down 态
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。

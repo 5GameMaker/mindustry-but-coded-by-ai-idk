@@ -10,13 +10,38 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.90%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.91%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 最新闭环：将主菜单 Mac notch 偏移改为运行时高度
+
+- 当前总体迁移完成度：约 **99.91%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时持续处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `DESKTOP_MENU_MAC_NOTCH_HEIGHT_LIKE_JAVA = 32.0`；
+    - `DesktopLauncher` 新增 `menu_macnotch_height`，默认对齐 Java `Vars.macNotchHeight`；
+    - `DesktopMenuChromeLayoutOptions` 增加 `macnotch_height`；
+    - logo/version 位置使用 runtime notch height，不再在公式里硬编码 32；
+    - `graphics.macnotch` 设置副作用同步更新 `menu_macnotch_enabled`；
+    - 更新 logo notch 测试，使用 48px runtime notch height 锁住动态高度。
+  - `README.md`
+    - 迁移进度更新到 **99.91%**。
+  - `MIGRATION.md`
+    - 新增 `1214. 将主菜单 Mac notch 偏移改为运行时高度`。
+- 已验证/本轮收口验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_logo_respects_scene_margin_top_and_macnotch -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_immediate_side_effects_match_upstream_menu_expectations -- --nocapture`
+- 下一步优先级：
+  1. UI：继续收口主/子菜单背景容器语义、Icon drawable 路径、Language/Mods/Host/Schematics 细节；
+  2. FPS：继续缓存稳定菜单 layout/plan、减少 UI command 克隆、复核 trace 环境变量和 glyph layout；
+  3. 继续保证模块接入整体 runtime/render/backend 主链路，不允许做成孤立模块。
 
 ## 最新闭环：接入 Settings 主菜单与 Data 页按钮 pressed/down 态
 
