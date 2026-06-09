@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1231. 缓存 Join/Mods 单行省略文本降低稳定帧开销
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.985%**，仍未达到完整可玩；当前继续优先 UI/前端所有子菜单贴近 Java 原版，同时把用户反馈的极低帧率作为前端阻塞问题持续优化。
+- Java 对照：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java:256-306`：服务器 title/map/mode 等 label 在 Java Scene2D 控件树中按刷新/重建节奏生成，不应稳定帧逐字符重复做 ellipsis；
+  - `core/src/mindustry/ui/dialogs/ModsDialog.java:232-338`：模组卡标题使用单行省略，搜索/模组列表不变时稳定帧应复用已有 label 投影。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 将 `desktop_join_single_line_ellipsis_like_java(...)` 拆成 uncached 计算与小型全局 cache；
+    - cache key 覆盖原文、`max_width` 与 `font_size`，保留 markup tag 零宽、换行替换为空格、ASCII/非 ASCII 宽度估算等 Java-like 语义；
+    - Join/Mods 共享该函数后，稳定帧同 key 直接复用截断结果，减少服务器/模组卡片大量文本逐字符扫描；
+    - 新增 `desktop_join_single_line_ellipsis_reuses_cached_projection_for_stable_fps`，用唯一 key 注入 sentinel 锁住二次调用确实走 cache。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_join_single_line_ellipsis --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_card_title_uses_single_line_ellipsis_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_local_host_card_uses_java_buildserver_header_and_section_divider --lib -- --nocapture`
+- 后续继续优先：
+  1. FPS：OpenGL UI layer/batch 量化或 route-page 主体缓存，减少 draw call / command 重建；
+  2. UI：Join 服务器卡片 header/body、Mods Browser/详情弹窗、Settings/Load 细节继续贴近 Java；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1230. 锁定 LoadDialog 60f 模式筛选 chip 与 padLeft(-12f)
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
