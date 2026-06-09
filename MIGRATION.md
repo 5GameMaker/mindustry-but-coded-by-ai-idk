@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1224. 预计算真实字体 layout 的 scaled glyph metrics
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度保持：约 **99.98%**，仍未达到完整可玩；当前继续优先 UI/前端还原，同时处理用户反馈的极低帧率问题。
+- Java 对照：
+  - 同一段 UI 文本的 glyph metrics、region 尺寸和 scaled advance 不应在 shadow / outline / foreground 的每一层都重复计算；
+  - Rust 上一轮已经共享 text layout，本轮继续把 per-glyph 缩放计算收进 layout 结果。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopRealFontTextLayoutGlyph` 缓存 glyph uv、缩放后的 `width/height/offset_x/offset_y/advance` 和 `region_width/region_height`；
+    - `DesktopRealFontTextLayout` 新增 `glyph_count`，quad `Vec` 预分配不再每层遍历统计；
+    - `opengl_backend_text_real_font_quads_from_layout(...)` 直接使用预计算 metrics，保持 positions、markup char color index、atlas binding 语义不变；
+    - 扩展真实字体 layout 测试，锁住 visible glyph count。
+- 已验证：
+  - `cargo fmt -- desktop/src/lib.rs`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_real_font_ --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_markup_colors_real_font_foreground_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_outline_uses_real_font_atlas_not_placeholder --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. UI：继续 chrome widget skin 与子菜单视觉状态；
+  2. FPS：继续推进文本 layout 跨帧缓存、text layer/batch 收敛、font atlas/upload 失效收紧；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1223. 去掉 black6 面板 fallback 的 Rust-only 描边
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
