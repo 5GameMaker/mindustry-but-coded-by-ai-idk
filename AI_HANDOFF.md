@@ -10,13 +10,40 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.85%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.86%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 最新闭环：OpenGL live renderer 改用 direct frame plan 降低整帧 trace 开销
+
+- 当前总体迁移完成度：约 **99.86%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时持续处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendFramePlan` 新增 `from_frame_direct_with_effect_buffer_surface(...)`；
+    - direct plan 只解析 OpenGL plan 必需的 pass commands、resolved sprites、blockbuild shader apply、resolve、block particle synthetic pass 与 sideband texture/framebuffer uploads；
+    - `DesktopOpenGlBackendGraphicsRenderer` 改用 direct plan，不再为 live OpenGL plan 先构造完整 `DesktopGraphicsExecutionTrace`；
+    - `HeadlessDesktopGraphicsRenderer` 仍保留完整 trace，用于 execution summary/测试/审计路径；
+    - 扩展 direct plan 等价测试，覆盖 effect buffer 与 blockbuild shader apply。
+  - `README.md`
+    - 迁移进度更新到 **99.86%**。
+  - `MIGRATION.md`
+    - 新增 `1209. OpenGL live renderer 改用 direct frame plan 降低整帧 trace 开销`。
+- 已验证/本轮收口验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_frame_plan_reuses_trace_with_effect_buffer_surface -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_plan_maps_blockbuild_custom_to_shader_apply -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_reuses_resolved_texture_handles_between_frames -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_does_not_reupload_static_sprite_mesh_each_frame -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. UI：继续优先主菜单 chrome 与 Settings 主菜单容器，然后 ModsBrowser/Host/Schematics/Campaign/Planet；
+  2. FPS：继续压文本 glyph quad/layout、font atlas key、draw-call/mesh 上传和菜单 UI command clone；
+  3. 继续保证模块接入整体 runtime/render/backend 主链路，不允许做成孤立模块。
 
 ## 最新闭环：复用 OpenGL renderer 状态减少前端帧深拷贝
 

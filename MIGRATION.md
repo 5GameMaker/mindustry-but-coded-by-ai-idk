@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1209. OpenGL live renderer 改用 direct frame plan 降低整帧 trace 开销
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.86%**，仍未达到完整可玩；当前继续优先前端/UI 视觉还原，同时处理用户反馈的前端帧率极低问题。
+- 性能问题：
+  - live OpenGL renderer 为了生成 backend plan 仍会构造完整 `DesktopGraphicsExecutionTrace`；
+  - 完整 trace 会额外构建 summary/audit 才需要的 `command_trace`、`draw_texts`、`draw_polygon_sides`、`render_target_traces` 等数据，并克隆整组 pass commands；
+  - 这些数据对真实 OpenGL plan 提交不是必需的，菜单稳定帧也会反复承担分配/克隆成本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendFramePlan` 新增 `from_frame_direct_with_effect_buffer_surface(...)`；
+    - direct plan 只遍历 `RenderFramePlan` 的 passes，解析 `DrawSprite` 所需 atlas metadata、blockbuild shader apply 和 pass resolve；
+    - block particle synthetic pass、effect buffer attachment、minimap texture upload、font glyph texture upload 仍保持与 trace plan 等价；
+    - `DesktopOpenGlBackendGraphicsRenderer` 改为使用 direct plan，不再为 live plan 先构造完整 execution trace；
+    - `HeadlessDesktopGraphicsRenderer` 仍保留完整 trace，用于测试/审计 summary。
+  - `README.md`
+    - 迁移进度更新到 **99.86%**。
+- 已验证/待本轮收口验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_frame_plan_reuses_trace_with_effect_buffer_surface -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_plan_maps_blockbuild_custom_to_shader_apply -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_reuses_resolved_texture_handles_between_frames -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_does_not_reupload_static_sprite_mesh_each_frame -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. FPS：继续压文本 glyph quad/layout、font atlas key、draw-call/mesh 上传和菜单 UI command clone；
+  2. UI：继续收口主菜单 chrome、Settings 主菜单容器、ModsBrowser、Host、Schematics、Campaign/Planet 子页面；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1208. 复用 OpenGL renderer 状态减少前端帧深拷贝
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
