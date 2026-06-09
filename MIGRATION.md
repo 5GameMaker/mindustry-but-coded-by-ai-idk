@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1215. 缓存主菜单外置 bundle 帧内文件校验
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.92%**，仍未达到完整可玩；当前继续优先 UI/前端还原，同时处理用户反馈的“帧数极其极其低下”问题。
+- Java 对照：
+  - Java `Vars.loadSettings()` 加载本地外置 bundle 后，UI 文案渲染阶段使用已加载的 bundle；
+  - Rust 旧路径虽然已有 external bundle 解析缓存，但同一菜单帧里每次 `bundle_value_for_current_locale(...)` 都会重新走路径存在/metadata 校验。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopExternalBundleFrameValidation`；
+    - `DesktopLauncher` 新增当前菜单帧外置 bundle validation token；
+    - `refresh_external_bundle_cache_for_locale(...)` 在同一 `frame_index + data_dir + locale` 中只做一次文件系统校验，其余 key lookup 直接复用已校验缓存；
+    - 保留跨帧 revalidate 与非帧内读取的热更新语义，外置 bundle 文件变化后的下一次普通读取仍会失效重载；
+    - 新增 `desktop_launcher_validates_external_bundle_family_once_per_menu_frame`，锁住一帧内多文案查找只校验一次。
+  - `README.md`
+    - 迁移进度更新到 **99.92%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_validates_external_bundle_family_once_per_menu_frame -- --nocapture`
+  - `cargo test -p mindustry-desktop external_bundle -- --nocapture`
+- 后续继续优先：
+  1. FPS：继续压低字体 glyph upload key 构造、route/page 内容重复 snapshot、OpenGL plan/batch 构建成本；
+  2. UI：继续收口主/子菜单背景容器语义、Icon drawable 路径、Language/Mods/Host/Schematics 细节；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1214. 将主菜单 Mac notch 偏移改为运行时高度
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
