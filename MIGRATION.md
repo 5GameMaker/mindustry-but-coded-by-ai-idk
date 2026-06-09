@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1220. 借用化 OpenGL sprite mesh batch key
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度保持：约 **99.96%**，仍未达到完整可玩；当前继续优先 UI/前端还原，同时处理用户反馈的极低帧率问题。
+- Java 对照：
+  - Java/Arc 的批处理状态 key 是 draw state 分桶，不应在每个 quad 上额外分配多份目标名、shader key、texture key、page path 字符串；
+  - Rust 旧路径 `opengl_backend_sprite_mesh_batch_key(...)` 每个 quad 都 clone 多个 `String`，稳定菜单帧文本/UI sprite 多时会放大 CPU 与分配成本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendSpriteMeshBatchKey` 改为带生命周期的借用 key；
+    - `target_name`、`shader_program_key`、`texture_key`、`texture_page_source_path`、`page_source_path` 全部改用 `&str`；
+    - `opengl_backend_render_target_batch_key(...)` 不再 clone render target name；
+    - `opengl_backend_sprite_mesh_batches_from_quads(...)` 继续使用 HashMap 分桶，语义不变但减少 per-quad String clone。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_sprite_draw_call_plans_sort_batches_by_min_layer --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_batches_split_shared_texture_by_layer --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_sprite_quad_respects_draw_sprite_origin --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. FPS：继续压低文本 quad 生成、OpenGL mesh upload signature、route snapshot 等稳定帧成本；
+  2. UI：继续收口所有主/子菜单细节、字体/语言显示和 Java skin 语义；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1219. 缓存字体上传 key 的 content icon 可见性扫描
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。

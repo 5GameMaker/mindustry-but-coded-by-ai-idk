@@ -18,6 +18,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 最新闭环：借用化 OpenGL sprite mesh batch key
+
+- 当前总体迁移完成度：约 **99.96%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时持续处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendSpriteMeshBatchKey` 改为带生命周期的借用 key；
+    - `target_name`、`shader_program_key`、`texture_key`、`texture_page_source_path`、`page_source_path` 改用 `&str`；
+    - `opengl_backend_render_target_batch_key(...)` 不再 clone render target name；
+    - `opengl_backend_sprite_mesh_batches_from_quads(...)` 保持 HashMap 分桶语义，但减少每个 sprite quad 的字符串 clone。
+  - `MIGRATION.md`
+    - 新增 `1220. 借用化 OpenGL sprite mesh batch key`。
+- 已验证/本轮收口验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_sprite_draw_call_plans_sort_batches_by_min_layer --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_batches_split_shared_texture_by_layer --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_sprite_quad_respects_draw_sprite_origin --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. FPS：继续压低文本 quad 生成、OpenGL mesh upload signature、route snapshot 等稳定帧成本；
+  2. UI：继续收口所有主/子菜单细节、字体/语言显示和 Java skin 语义；
+  3. 继续保证模块接入整体 runtime/render/backend 主链路，不允许做成孤立模块。
+
 ## 最新闭环：缓存字体上传 key 的 content icon 可见性扫描
 
 - 当前总体迁移完成度：约 **99.96%**，仍未达到完整可玩。
