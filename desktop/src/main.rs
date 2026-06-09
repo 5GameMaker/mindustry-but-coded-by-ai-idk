@@ -3287,6 +3287,7 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
         let draw_state_cache_hits_start = self.draw_state_cache_hits;
         let draw_state_cache_misses_start = self.draw_state_cache_misses;
         let (driver_state, invalid_draw_commands) = {
+            self.driver.clear_frame_commands();
             let mut driver = DesktopNativeOpenGlDriver {
                 gl: &self.gl,
                 recording: &mut self.driver,

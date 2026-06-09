@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1211. 清空 OpenGL recording driver 历史命令避免跨帧累积
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.88%**，仍未达到完整可玩；当前继续优先前端/UI 视觉还原，同时处理用户反馈的前端帧率极低问题。
+- 性能问题：
+  - native OpenGL runtime 持有一个长期存在的 `DesktopGraphicsRecordingOpenGlBackendDriver`；
+  - 每帧 `executor.drive_driver(...)` 会向 `driver.commands` 追加本帧 framebuffer/texture/mesh/shader/draw/resolve 命令；
+  - 旧实现没有在提交帧前清理 recording commands，长时间运行会让调试记录跨帧增长，增加内存、遍历、重分配和测试切片成本；
+  - 真实 OpenGL texture/framebuffer/buffer/VAO/shader cache 必须继续保留，不能把资源缓存一起清掉。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsRecordingOpenGlBackendDriver` 新增 `clear_frame_commands()`；
+    - `DesktopGraphicsNullOpenGlBackendRuntime::submit_resolving_executor(...)` 在驱动提交前清空 recording commands；
+    - OpenGL renderer 相关测试从“按历史 command slice 找第二帧”改为“检查当前帧记录”，贴近 live runtime 语义；
+    - 新增 `desktop_graphics_opengl_backend_runtime_keeps_recording_driver_to_last_frame`，锁住 recording driver 只保留最近一帧命令。
+  - `desktop/src/main.rs`
+    - `DesktopNativeOpenGlRuntime::submit_resolving_executor(...)` 在构造 native driver 前清空 recording commands；
+    - texture/buffer/VAO/shader/draw-state cache 仍保留在 runtime 字段里继续跨帧复用。
+  - `README.md`
+    - 迁移进度更新到 **99.88%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend_runtime -- --nocapture`
+  - `cargo test -p mindustry-desktop opengl_backend_renderer -- --nocapture`
+- 后续继续优先：
+  1. FPS：继续缓存稳定菜单 layout/plan、减少 UI command 克隆、复核 trace 环境变量和 glyph layout；
+  2. UI：继续收口 Mac notch 动态偏移、主/子菜单背景容器语义、Icon drawable/Settings skin/Campaign planet dialogs；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1210. 对齐 BE check 默认标签纯白颜色
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
