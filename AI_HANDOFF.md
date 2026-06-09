@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.55%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.56%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：收敛前端小图标 glyph 与 LanguageDialog 显示名契约
+## 最新闭环：补齐 Styles.defaultb / underlineb 通用按钮皮肤契约
+
+- 当前总体迁移完成度：约 **99.56%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Styles.java`：`defaultb` / `underlineb` 是 Java `ButtonStyle` 级别的一等皮肤，不属于 TextButton/ImageButton；
+  - `defaultb`：`up=button`、`down=buttonDown`、`over=buttonOver`、`disabled=buttonDisabled`；
+  - `underlineb`：`up=sideline`、`down=flatOver`、`over=sidelineOver`、`checked=flatOver`。
+- 本轮实现：
+  - `core/src/mindustry/ui/styles.rs`
+    - 新增 `UiButtonStyleSkin`、`UPSTREAM_BUTTON_STYLE_SKINS`、`upstream_button_style_skin()`；
+    - 补齐 `sideline` / `sidelineOver` drawable alias；
+    - 新增测试锁住 Java `defaultb` / `underlineb` 状态。
+  - `core/src/mindustry/ui/mod.rs`
+    - 公开通用 ButtonStyle 皮肤契约，供 desktop/runtime 后续消费。
+  - `README.md`
+    - 迁移进度更新到 **99.56%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core upstream_button_style_skins_match_java_button_styles -- --nocapture`
+- 下一步优先：
+  1. 继续把 `Styles.defaultDialog` / `Styles.fullDialog` 的 DialogStyle 共享契约下沉到 core/UI；
+  2. 继续把内容图标注册、unicode/name/atlas_symbol/team emoji 策略收敛为 core/UI 共享 API；
+  3. 继续扫可见 DrawText 中 raw key、英文 token、诊断前缀和错误图标别名。
+
+## 上一闭环：收敛前端小图标 glyph 与 LanguageDialog 显示名契约
 
 - 当前总体迁移完成度：约 **99.55%**，仍未达到完整可玩。
 - 本轮对照：

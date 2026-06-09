@@ -19,6 +19,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1179. 补齐 Styles.defaultb / underlineb 通用按钮皮肤契约
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。
+- 本轮总体进度更新：约 **99.56%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/Styles.java`：`public static ButtonStyle defaultb, underlineb;`
+  - `defaultb` 使用 `up=button`、`down=buttonDown`、`over=buttonOver`、`disabled=buttonDisabled`；
+  - `underlineb` 使用 `up=sideline`、`down=flatOver`、`over=sidelineOver`、`checked=flatOver`。
+- 本轮主改动：
+  - `core/src/mindustry/ui/styles.rs`
+    - 新增 `UiButtonStyleSkin`，将 Java `ButtonStyle` 作为独立一等皮肤契约，而不是继续混在 TextButton/ImageButton 中；
+    - 新增 `UPSTREAM_BUTTON_STYLE_SKINS`、`upstream_button_style_skin()`；
+    - 补齐 `sideline` / `sidelineOver` drawable alias；
+    - 新增 `upstream_button_style_skins_match_java_button_styles`，锁住 `defaultb` / `underlineb` 的 Java drawable 状态。
+  - `core/src/mindustry/ui/mod.rs`
+    - 公开 `UiButtonStyleSkin`、`UPSTREAM_BUTTON_STYLE_SKINS` 与 `upstream_button_style_skin()`，方便 desktop/runtime 后续统一消费。
+  - `README.md`
+    - 迁移进度更新到 **99.56%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core upstream_button_style_skins_match_java_button_styles -- --nocapture`
+- 后续继续优先：
+  1. 继续把 `Styles.defaultDialog` / `Styles.fullDialog` 的 DialogStyle 共享契约下沉到 core/UI；
+  2. 继续把内容图标注册、unicode/name/atlas_symbol/team emoji 策略收敛为 core/UI 共享 API；
+  3. 继续扫可见 DrawText 中 raw key、英文 token、诊断前缀和错误图标别名。
+
 ## 1178. 收敛前端小图标 glyph 与 LanguageDialog 显示名契约
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存。

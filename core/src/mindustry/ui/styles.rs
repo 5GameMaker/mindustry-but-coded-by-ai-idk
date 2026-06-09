@@ -206,6 +206,54 @@ impl UiTextButtonStyleSkin {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiButtonStyleSkin {
+    pub java_name: &'static str,
+    pub up: Option<&'static str>,
+    pub down: Option<&'static str>,
+    pub over: Option<&'static str>,
+    pub checked: Option<&'static str>,
+    pub disabled: Option<&'static str>,
+}
+
+impl UiButtonStyleSkin {
+    pub const fn new(java_name: &'static str) -> Self {
+        Self {
+            java_name,
+            up: None,
+            down: None,
+            over: None,
+            checked: None,
+            disabled: None,
+        }
+    }
+
+    pub const fn up(mut self, drawable: &'static str) -> Self {
+        self.up = Some(drawable);
+        self
+    }
+
+    pub const fn down(mut self, drawable: &'static str) -> Self {
+        self.down = Some(drawable);
+        self
+    }
+
+    pub const fn over(mut self, drawable: &'static str) -> Self {
+        self.over = Some(drawable);
+        self
+    }
+
+    pub const fn checked(mut self, drawable: &'static str) -> Self {
+        self.checked = Some(drawable);
+        self
+    }
+
+    pub const fn disabled(mut self, drawable: &'static str) -> Self {
+        self.disabled = Some(drawable);
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UiLabelStyleSkin {
     pub java_name: &'static str,
     pub font: &'static str,
@@ -805,6 +853,18 @@ pub const UPSTREAM_UI_DRAWABLE_ALIASES: &[UiDrawableAlias] = &[
         UiDrawableTint::None,
     ),
     UiDrawableAlias::new(
+        "sideline",
+        "sideline.9",
+        "sprites/ui/sideline.9.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "sidelineOver",
+        "sideline-over.9",
+        "sprites/ui/sideline-over.9.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
         "scroll",
         "scroll.9",
         "sprites/ui/scroll.9.png",
@@ -961,6 +1021,19 @@ pub const UPSTREAM_UI_DRAWABLE_ALIASES: &[UiDrawableAlias] = &[
         UiDrawableTint::None,
     ),
     UiDrawableAlias::new("logo", "logo", "sprites/ui/logo.png", UiDrawableTint::None),
+];
+
+pub const UPSTREAM_BUTTON_STYLE_SKINS: &[UiButtonStyleSkin] = &[
+    UiButtonStyleSkin::new("defaultb")
+        .up("button")
+        .down("buttonDown")
+        .over("buttonOver")
+        .disabled("buttonDisabled"),
+    UiButtonStyleSkin::new("underlineb")
+        .up("sideline")
+        .down("flatOver")
+        .over("sidelineOver")
+        .checked("flatOver"),
 ];
 
 pub const UPSTREAM_LABEL_STYLE_SKINS: &[UiLabelStyleSkin] = &[
@@ -1273,6 +1346,12 @@ pub fn upstream_ui_drawable_alias(java_name: &str) -> Option<&'static UiDrawable
         .find(|alias| alias.java_name == java_name)
 }
 
+pub fn upstream_button_style_skin(java_name: &str) -> Option<&'static UiButtonStyleSkin> {
+    UPSTREAM_BUTTON_STYLE_SKINS
+        .iter()
+        .find(|style| style.java_name == java_name)
+}
+
 pub fn upstream_label_style_skin(java_name: &str) -> Option<&'static UiLabelStyleSkin> {
     UPSTREAM_LABEL_STYLE_SKINS
         .iter()
@@ -1404,6 +1483,38 @@ mod tests {
             assert_eq!(alias.atlas_symbol, atlas_symbol);
             assert_eq!(alias.source_path, source_path);
             assert_eq!(alias.tint, UiDrawableTint::None);
+        }
+    }
+
+    #[test]
+    fn upstream_button_style_skins_match_java_button_styles() {
+        let defaultb = upstream_button_style_skin("defaultb").unwrap();
+        assert_eq!(defaultb.up, Some("button"));
+        assert_eq!(defaultb.down, Some("buttonDown"));
+        assert_eq!(defaultb.over, Some("buttonOver"));
+        assert_eq!(defaultb.checked, None);
+        assert_eq!(defaultb.disabled, Some("buttonDisabled"));
+
+        let underlineb = upstream_button_style_skin("underlineb").unwrap();
+        assert_eq!(underlineb.up, Some("sideline"));
+        assert_eq!(underlineb.down, Some("flatOver"));
+        assert_eq!(underlineb.over, Some("sidelineOver"));
+        assert_eq!(underlineb.checked, Some("flatOver"));
+        assert_eq!(underlineb.disabled, None);
+
+        for java_drawable in [
+            "button",
+            "buttonDown",
+            "buttonOver",
+            "buttonDisabled",
+            "sideline",
+            "sidelineOver",
+            "flatOver",
+        ] {
+            assert!(
+                upstream_ui_drawable_alias(java_drawable).is_some(),
+                "Styles.{java_drawable} must be available before ButtonStyle chrome is consumed"
+            );
         }
     }
 
