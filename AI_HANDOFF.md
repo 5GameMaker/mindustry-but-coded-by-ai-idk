@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.63%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.64%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -26,6 +26,37 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
+
+## 最新闭环：收口 Join 标题条和分隔线视觉
+
+- 当前总体迁移完成度：约 **99.64%**，仍未达到完整可玩。
+- 本轮对照：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java`
+  - `buildServer(...)`：本地/普通 host 的 `addName=true` 标题条是 `Tex.whiteui` + `height(36f)`；
+  - `setupRemote()`：保存服务器卡片顶部 action row 仍保持较高按钮区，不能被 36f 本地标题条替换；
+  - `section(...)`：标题行后单独绘制 3f accent divider，左右 padding 10f。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `JOIN_SERVER_CARD_LOCAL_HEADER_HEIGHT = 36.0`，Local host 卡片标题条对齐 Java `buildServer(addName=true)`；
+    - Saved server 卡片继续使用 `JOIN_SERVER_CARD_HEADER_HEIGHT = 58.0`，保留 `emptyi` action row 视觉；
+    - 新增 `join_route_section_divider_line_for_panel(...)`，Local/Remote/Global 分隔线从标题同行短线改成标题下方 3f divider；
+    - 新增 `desktop_launcher_join_route_local_host_card_uses_java_buildserver_header_and_section_divider`；
+    - 修正本地发现 host body/header 测试几何；
+    - Join 连接测试在并发下改用 `last_sent_connect_packet` 证明 ConnectPacket 已发出，避免 disconnect 复位 `connect_packet_sent` 后误判。
+  - `README.md`
+    - 迁移进度更新到 **99.64%**。
+  - `MIGRATION.md`
+    - 新增 `1187. 收口 Join 标题条和分隔线视觉`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_local_host_card_uses_java_buildserver_header_and_section_divider -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_polls_local_discovery_hosts_like_java_refresh_local -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+- 下一步优先级：
+  1. 字体/语言 P0/P1：bundle 资源读取链、运行时 `core/assets/locales` 来源、router/global 覆盖顺序、glyph seed cache key；
+  2. Settings/Language/Controls：Controls 行内字号、Language scrollpane 极限尺寸、Keybind rebind 裸弹窗 chrome；
+  3. Mods Browser：80f row / 64f icon / 8f pad 与 selection 弹窗详情区按钮排布。
 
 ## 最新闭环：补齐外部语言包 UTF-8 优先编码容错
 

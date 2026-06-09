@@ -19,6 +19,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1187. 收口 Join 标题条和分隔线视觉
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.64%**，仍未达到完整可玩；当前继续优先补前端/UI 视觉、字体、语言/本地化和所有子菜单与 Java 原版表现的差距。
+- Java 对照依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java`
+  - `buildServer(...)`：本地/普通 host 在 `addName=true` 时使用 `Tex.whiteui` 标题条并显式 `height(36f)`，body 使用 `Tex.whitePane`；
+  - `setupRemote()`：保存服务器卡片顶部由 `emptyi` action row 撑开，不能复用本地 36f 标题条；
+  - `section(...)`：标题行后单独一行 `hosts.image().growX().pad(5).padLeft(10).padRight(10).height(3).color(Pal.accent)`，不是标题同行横线。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `JOIN_SERVER_CARD_LOCAL_HEADER_HEIGHT = 36.0`，本地发现 host 卡片改用 36f `Tex.whiteui` 标题条；
+    - 保存服务器卡片继续使用 `JOIN_SERVER_CARD_HEADER_HEIGHT = 58.0`，保留远程 action row 视觉节奏；
+    - 新增 `join_route_section_divider_line_for_panel(...)`，把 Local/Remote/Global section divider 从 Rust 旧的标题同行短线改为 Java 风格的标题下方 3f accent divider；
+    - 更新本地 host body/header 测试几何，避免继续按旧 58f header 断言；
+    - 修正 Join 连接测试的并发等待断言：整组测试负载下连接可能先完成再断开，`connect_packet_sent` 会被 disconnect 复位，改用 `last_sent_connect_packet` 保留已发送证据。
+  - `README.md`
+    - 迁移进度更新到 **99.64%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_local_host_card_uses_java_buildserver_header_and_section_divider -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_polls_local_discovery_hosts_like_java_refresh_local -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper -- --nocapture`
+  - `cargo test -p mindustry-desktop join_route -- --nocapture`
+- 子代理审查结论已纳入后续队列：
+  - 字体/语言：优先继续收口 bundle 资源读取、运行时 locales 来源、router/global 覆盖顺序和字体 glyph seed cache key；
+  - Settings/Language/Controls：优先补 Controls 行内字号、Language 极限尺寸 scrollpane metrics、Keybind rebind 裸弹窗 chrome；
+  - Mods：后续补 Browser row 80f/64f/8f 几何和 selection 详情区/按钮排布。
+
 ## 1186. 补齐外部语言包 UTF-8 优先编码容错
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
