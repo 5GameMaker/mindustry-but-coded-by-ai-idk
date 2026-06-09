@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1218. 前置过滤已提交的字体 atlas 上传计划
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.95%**，仍未达到完整可玩；当前继续优先 UI/前端还原，同时处理用户反馈的低帧率问题。
+- Java 对照：
+  - Java 字体 atlas/纹理加载完成后，稳定 UI 帧不应重复搬运整张字体 atlas 像素；
+  - Rust 旧路径虽然 renderer 会在提交前过滤已上传 generation，但 `DesktopGraphicsOpenGlBackendFramePlan` 构建时已经调用 `to_opengl_texture_upload_plan()`，会先克隆 `rgba8888_pixels` 再过滤。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendFramePlan::from_frame_direct_with_effect_buffer_surface_and_submitted_generations(...)`；
+    - 新增 frame surface/texture upload 构建的 submitted-generation 过滤路径；
+    - live `DesktopOpenGlBackendGraphicsRenderer` 传入 `submitted_frame_texture_generations`，在 plan 构建阶段跳过已提交的字体 atlas generation；
+    - 保留旧构造器语义给 headless/tests 路径；
+    - 新增 `desktop_opengl_backend_frame_plan_skips_submitted_font_texture_before_pixel_clone`，锁住稳定帧不会在 plan 构建阶段生成字体 texture upload。
+  - `README.md`
+    - 迁移进度更新到 **99.95%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_frame_plan_skips_submitted_font_texture_before_pixel_clone -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_does_not_reupload_static_font_texture_each_frame -- --nocapture`
+- 后续继续优先：
+  1. FPS：继续压低 OpenGL plan/batch 构建、sprite mesh upload、route snapshot 等稳定帧成本；
+  2. UI：继续收口所有主/子菜单细节、字体/语言显示和 Java skin 语义；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1217. 缓存 content icon runtime registry 帧内复用
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
