@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1210. 对齐 BE check 默认标签纯白颜色
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.87%**，仍未达到完整可玩；当前继续优先前端/UI 视觉还原，同时处理用户反馈的前端帧率极低问题。
+- Java 对照：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java` 的 desktop 菜单右上 BE check 文本在无更新时使用 `Color.white`；
+  - 只有检测到可用更新后，文本才在 `Color.white` 与 `Pal.accent` 之间做呼吸插值；
+  - Rust 旧实现无更新时使用略偏青白的 `[0.96, 0.99, 1.0, 1.0]`，导致主菜单 chrome 与原版存在可见差异。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `menu_becheck_label_color()` 无更新分支改为 `[1.0, 1.0, 1.0, 1.0]`；
+    - 保留有更新时 white/accent 呼吸插值；
+    - 扩展 `desktop_launcher_menu_renders_desktop_and_discord_chrome_buttons`，锁住 `@be.check` 默认纯白行为。
+  - `README.md`
+    - 迁移进度更新到 **99.87%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_desktop_and_discord_chrome_buttons -- --nocapture`
+- 后续继续优先：
+  1. FPS：继续压文本 glyph quad/layout、font atlas key、draw-call/mesh 上传和菜单 UI command clone；
+  2. UI：继续收口主菜单 chrome、Settings 主菜单容器、ModsBrowser、Host、Schematics、Campaign/Planet 子页面；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1209. OpenGL live renderer 改用 direct frame plan 降低整帧 trace 开销
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
