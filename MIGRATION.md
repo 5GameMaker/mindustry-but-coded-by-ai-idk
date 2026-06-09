@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1216. 缓存 mod bundle locale fallback 名称列表
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.93%**，仍未达到完整可玩；当前继续优先 UI/前端还原，同时处理用户反馈的低帧率问题。
+- Java 对照：
+  - Java mod bundle fallback 顺序由 locale/parent bundle 关系决定，UI 渲染时不会为每个 label 重新分配一套 fallback 名称列表；
+  - Rust 旧路径每次 `mod_bundle_value_for_current_locale(...)` 都重新 normalize locale 并构造 `bundle` / `bundle_xx` / `bundle_xx_YY` 名称序列。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopModBundleNamesCache`；
+    - `DesktopLauncher` 新增 `mod_bundle_names_cache` 与测试用 rebuild 计数；
+    - `mod_bundle_value_for_current_locale(...)` 复用同一 locale 的 mod bundle fallback 名称顺序，locale 变化时才重建；
+    - 新增 `desktop_launcher_reuses_mod_bundle_name_locale_cache_for_stable_lookups`，锁住稳定 UI 文案查找不重复构造 fallback 名称列表。
+  - `README.md`
+    - 迁移进度更新到 **99.93%**。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_mod_bundle_name_locale_cache_for_stable_lookups -- --nocapture`
+  - `cargo test -p mindustry-desktop mod_bundle -- --nocapture`
+- 后续继续优先：
+  1. FPS：继续压低字体 glyph upload key 构造、Join/route snapshot、OpenGL plan/batch 构建成本；
+  2. UI：继续收口主/子菜单背景容器语义、Icon drawable 路径、Language/Mods/Host/Schematics 细节；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1215. 缓存主菜单外置 bundle 帧内文件校验
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
