@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1225. 补齐 Discord chrome 的 Java tooltip 语义
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度保持：约 **99.98%**，仍未达到完整可玩；当前继续优先 UI/前端还原，同时处理用户反馈的极低帧率问题。
+- Java 对照：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:63-65`：Discord chrome 使用 `ImageButtonStyle` 的 `discordBanner`，并挂载 `tooltip("@discord")`；
+  - Scene2D tooltip 绑定在同一个 Discord ImageButton hit target 上，打开 Dialog 后不应继续露出背后的 hover tooltip。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLauncher::push_menu_chrome_discord_tooltip(...)`；
+    - `push_menu_logo_and_version_chrome(...)` 在绘制 chrome 后补绘 Discord hover tooltip；
+    - tooltip 使用现有 compact black6 tooltip 视觉、本地化 `@discord` 文案和同源 `DesktopMenuChromeLayout` 命中矩形；
+    - `active_menu_route.is_some()` 时不绘制 tooltip，避免 DiscordDialog 打开后背后残留 hover 文案；
+    - 新增 `desktop_launcher_menu_chrome_discord_tooltip_and_hit_target_match_java`，同时复核 info banner 仍保持 up-only。
+- 已验证：
+  - `cargo fmt -- desktop/src/lib.rs`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_discord_tooltip_and_hit_target_match_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_banner_buttons_are_up_only_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_visibility_matches_console_and_becontrol_gates --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. UI：继续 logo/version portrait/macnotch 像素级位置与子菜单视觉状态；
+  2. FPS：继续推进文本 layout 跨帧缓存、text layer/batch 收敛、font atlas/upload 失效收紧；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1224. 预计算真实字体 layout 的 scaled glyph metrics
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。

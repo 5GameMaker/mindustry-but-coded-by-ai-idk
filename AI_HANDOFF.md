@@ -18,6 +18,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 最新闭环：补齐 Discord chrome 的 Java tooltip 语义
+
+- 当前总体迁移完成度：约 **99.98%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 还原继续优先，同时持续处理“帧数极其极其低下”的性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `push_menu_chrome_discord_tooltip(...)`；
+    - 对照 Java `MenuFragment` 的 `tooltip("@discord")`，当菜单无弹窗且鼠标悬停 Discord chrome 时显示本地化 `@discord` compact black6 tooltip；
+    - tooltip 与 `DesktopMenuChromeLayout` 同源 hit target 绑定，打开 Discord dialog 后不继续在背后绘制；
+    - 新增 `desktop_launcher_menu_chrome_discord_tooltip_and_hit_target_match_java`。
+- 已验证/本轮收口验证：
+  - `cargo fmt -- desktop/src/lib.rs`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_discord_tooltip_and_hit_target_match_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_banner_buttons_are_up_only_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_visibility_matches_console_and_becontrol_gates --lib -- --nocapture`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. UI：继续 logo/version portrait/macnotch 像素级位置与子菜单视觉状态；
+  2. FPS：继续做文本 layout 跨帧缓存与 text layer/batch 收敛；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 最新闭环：预计算真实字体 layout 的 scaled glyph metrics
 
 - 当前总体迁移完成度：约 **99.98%**，仍未达到完整可玩。
