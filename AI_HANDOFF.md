@@ -26,8 +26,8 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
   - `desktop/src/lib.rs`
     - `DesktopGraphicsOpenGlBackendTextureResourceTable::register_binding(...)` 返回是否需要刷新 upload plans；
     - DrawSprite、primitive/text 注册路径只在首次绑定、仍需 full upload 或 sampler 参数变化时置 dirty；
-    - `record_primitive_quads(...)` 增加 `uses_primitive_texture` 判断，纯 DrawText 不再注册 primitive 1x1 texture；
-    - font atlas 已上传后稳定 DrawText 会丢弃 per-frame 像素克隆，但不再触发空的 `pending_upload_plans()` rebuild；
+    - 保留 `record_primitive_quads(...)` 对 primitive 1x1 texture 的稳定注册，避免首页/主菜单背景和基础矩形因 primitive white 漏注册而消失；
+    - primitive white 与 font atlas 已上传后稳定 DrawText 会丢弃 per-frame 像素克隆，但不再触发空的 `pending_upload_plans()` rebuild；
     - 新增 `desktop_graphics_opengl_backend_classifying_adapter_skips_stable_font_atlas_upload_refresh_for_fps`。
 - 已验证/本轮收口验证：
   - `cargo fmt --all`
