@@ -251,6 +251,18 @@ struct RulesJsonPatch {
     lighting: Option<bool>,
     core_incinerates: Option<bool>,
     border_darkness: Option<bool>,
+    limit_map_area: Option<bool>,
+    limit_x: Option<i32>,
+    limit_y: Option<i32>,
+    limit_width: Option<i32>,
+    limit_height: Option<i32>,
+    disable_outside_area: Option<bool>,
+    custom_background_callback: Option<Option<String>>,
+    background_texture: Option<Option<String>>,
+    background_speed: Option<f32>,
+    background_scl: Option<f32>,
+    background_offset_x: Option<f32>,
+    background_offset_y: Option<f32>,
     allow_logic_data: Option<bool>,
     schematics_allowed: Option<bool>,
     hide_banned_blocks: Option<bool>,
@@ -439,6 +451,42 @@ impl RulesJsonPatch {
         if let Some(value) = self.border_darkness {
             rules.border_darkness = value;
         }
+        if let Some(value) = self.limit_map_area {
+            rules.limit_map_area = value;
+        }
+        if let Some(value) = self.limit_x {
+            rules.limit_x = value;
+        }
+        if let Some(value) = self.limit_y {
+            rules.limit_y = value;
+        }
+        if let Some(value) = self.limit_width {
+            rules.limit_width = value;
+        }
+        if let Some(value) = self.limit_height {
+            rules.limit_height = value;
+        }
+        if let Some(value) = self.disable_outside_area {
+            rules.disable_outside_area = value;
+        }
+        if let Some(value) = self.custom_background_callback {
+            rules.custom_background_callback = value;
+        }
+        if let Some(value) = self.background_texture {
+            rules.background_texture = value;
+        }
+        if let Some(value) = self.background_speed {
+            rules.background_speed = value;
+        }
+        if let Some(value) = self.background_scl {
+            rules.background_scl = value;
+        }
+        if let Some(value) = self.background_offset_x {
+            rules.background_offset_x = value;
+        }
+        if let Some(value) = self.background_offset_y {
+            rules.background_offset_y = value;
+        }
         if let Some(value) = self.allow_logic_data {
             rules.allow_logic_data = value;
         }
@@ -561,6 +609,22 @@ impl<'a> RulesJsonParser<'a> {
                 "lighting" => patch.lighting = self.parse_optional_bool()?,
                 "coreIncinerates" => patch.core_incinerates = self.parse_optional_bool()?,
                 "borderDarkness" => patch.border_darkness = self.parse_optional_bool()?,
+                "limitMapArea" => patch.limit_map_area = self.parse_optional_bool()?,
+                "limitX" => patch.limit_x = self.parse_optional_i32()?,
+                "limitY" => patch.limit_y = self.parse_optional_i32()?,
+                "limitWidth" => patch.limit_width = self.parse_optional_i32()?,
+                "limitHeight" => patch.limit_height = self.parse_optional_i32()?,
+                "disableOutsideArea" => patch.disable_outside_area = self.parse_optional_bool()?,
+                "customBackgroundCallback" => {
+                    patch.custom_background_callback = self.parse_optional_nullable_string()?
+                }
+                "backgroundTexture" => {
+                    patch.background_texture = self.parse_optional_nullable_string()?
+                }
+                "backgroundSpeed" => patch.background_speed = self.parse_optional_f32()?,
+                "backgroundScl" => patch.background_scl = self.parse_optional_f32()?,
+                "backgroundOffsetX" => patch.background_offset_x = self.parse_optional_f32()?,
+                "backgroundOffsetY" => patch.background_offset_y = self.parse_optional_f32()?,
                 "allowLogicData" => patch.allow_logic_data = self.parse_optional_bool()?,
                 "schematicsAllowed" => patch.schematics_allowed = self.parse_optional_bool()?,
                 "hideBannedBlocks" => patch.hide_banned_blocks = self.parse_optional_bool()?,
@@ -1846,6 +1910,85 @@ mod tests {
         assert!(!rules.core_incinerates);
         assert!(!rules.border_darkness);
         assert!(rules.allow_logic_data);
+    }
+
+    #[test]
+    fn rules_apply_json_str_supports_limit_area_fields() {
+        let mut rules = Rules::default();
+        rules.limit_map_area = false;
+        rules.limit_x = 0;
+        rules.limit_y = 0;
+        rules.limit_width = 1;
+        rules.limit_height = 1;
+        rules.disable_outside_area = true;
+
+        rules
+            .apply_json_str(
+                r#"{
+                    "limitMapArea": true,
+                    "limitX": 12,
+                    "limitY": 34,
+                    "limitWidth": 56,
+                    "limitHeight": 78,
+                    "disableOutsideArea": false
+                }"#,
+            )
+            .unwrap();
+
+        assert!(rules.limit_map_area);
+        assert_eq!(rules.limit_x, 12);
+        assert_eq!(rules.limit_y, 34);
+        assert_eq!(rules.limit_width, 56);
+        assert_eq!(rules.limit_height, 78);
+        assert!(!rules.disable_outside_area);
+    }
+
+    #[test]
+    fn rules_apply_json_str_supports_background_fields() {
+        let mut rules = Rules::default();
+        rules.custom_background_callback = Some("old-callback".into());
+        rules.background_texture = Some("old.png".into());
+        rules.background_speed = 1.0;
+        rules.background_scl = 2.0;
+        rules.background_offset_x = 3.0;
+        rules.background_offset_y = 4.0;
+
+        rules
+            .apply_json_str(
+                r#"{
+                    "customBackgroundCallback": "drawStars",
+                    "backgroundTexture": null,
+                    "backgroundSpeed": 123.5,
+                    "backgroundScl": 0.75,
+                    "backgroundOffsetX": -1.25,
+                    "backgroundOffsetY": 2.5
+                }"#,
+            )
+            .unwrap();
+
+        assert_eq!(
+            rules.custom_background_callback.as_deref(),
+            Some("drawStars")
+        );
+        assert_eq!(rules.background_texture, None);
+        assert_eq!(rules.background_speed, 123.5);
+        assert_eq!(rules.background_scl, 0.75);
+        assert_eq!(rules.background_offset_x, -1.25);
+        assert_eq!(rules.background_offset_y, 2.5);
+
+        rules
+            .apply_json_str(
+                r#"{
+                    "customBackgroundCallback": null,
+                    "backgroundTexture": "sprites/space.png"
+                }"#,
+            )
+            .unwrap();
+        assert_eq!(rules.custom_background_callback, None);
+        assert_eq!(
+            rules.background_texture.as_deref(),
+            Some("sprites/space.png")
+        );
     }
 
     #[test]

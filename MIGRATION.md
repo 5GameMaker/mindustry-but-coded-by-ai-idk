@@ -19,6 +19,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1242. 补齐 RulesJsonPatch 区域限制与背景字段组
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.998%**，仍未达到完整可玩；当前继续优先 UI/前端所有子菜单贴近 Java 原版，同时继续推进 Java↔Rust 真联机 smoke、world/save-load 与 Rules JSON 应用闭环。
+- Java 对照与接入点：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/game/Rules.java:209-228`：`limitMapArea`、`limitX`、`limitY`、`limitWidth`、`limitHeight`、`disableOutsideArea`、`customBackgroundCallback`、`backgroundTexture`、`backgroundSpeed`、`backgroundScl`、`backgroundOffsetX`、`backgroundOffsetY`。
+  - Rust 接入点：`core/src/mindustry/game/rules.rs::RulesJsonPatch`、`RulesJsonParser::parse_patch()` 与 `RulesJsonPatch::apply()`。
+  - 额外发现：Java 还有对象型 `planetBackground: PlanetParams`；Rust 当前没有等价类型/字段，本轮不把它误降级为字符串，后续需补 `PlanetParams` 等价结构或明确 runtime 替代。
+- 本轮主改动：
+  - `core/src/mindustry/game/rules.rs`
+    - `RulesJsonPatch` 增加并应用区域限制字段：`limitMapArea`、`limitX`、`limitY`、`limitWidth`、`limitHeight`、`disableOutsideArea`；
+    - `RulesJsonPatch` 增加并应用背景字段：`customBackgroundCallback`、`backgroundTexture`、`backgroundSpeed`、`backgroundScl`、`backgroundOffsetX`、`backgroundOffsetY`；
+    - `customBackgroundCallback` / `backgroundTexture` 复用 nullable string 语义，支持字符串写入和 `null` 清空；
+    - 新增 `rules_apply_json_str_supports_limit_area_fields` 与 `rules_apply_json_str_supports_background_fields`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core rules_apply_json_str_supports_limit_area_fields --lib -- --nocapture`
+  - `cargo test -p mindustry-core rules_apply_json_str_supports_background_fields --lib -- --nocapture`
+  - `cargo test -p mindustry-core rules_apply_json_str --lib -- --nocapture`
+  - `cargo check -p mindustry-core --lib`
+  - `cargo check -p mindustry-desktop --lib`
+- 后续继续优先：
+  1. Net：在 `tests/src/lib.rs` 补 `ServerLauncher + DesktopLauncher` 高层真实 join smoke，复用 `free_local_port()` 与 `pump_real_server_desktop_until(...)`，ready 条件使用 `desktop.playable_smoke_ready()`；
+  2. Rules：评估并补齐 Java `planetBackground: PlanetParams` 的 Rust 等价结构/序列化；
+  3. UI：继续核对 Load slot decoration、Database/ContentInfo UI-stat-bar 与 Java 对象生命周期差异；
+  4. World/save：补 `SaveSnapshot` 统一应用入口与更完整的 save-load 运行时接入。
+
 ## 1241. 补齐 ArcNetProvider 真 socket 初始 join smoke
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
