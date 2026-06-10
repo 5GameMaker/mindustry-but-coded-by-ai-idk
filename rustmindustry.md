@@ -231,15 +231,16 @@
 ### 本轮继续细化
 
 - `LaunchLoadoutDialog` / `LoadoutDialog` 资源编辑器：`desktop/src/lib.rs` 已按上游 `loadout.show(..., i -> i.unlocked() && i.isOnPlanet(sector.planet), ...)` 收敛资源候选项，使用出发 sector 的 planet 过滤可携带 item，避免全局 unlocked 的 Erekir 物品泄漏到 Serpulo 发射资源子弹窗；新增 `desktop_launcher_campaign_launch_resources_filters_items_to_source_planet_like_java` 覆盖手动解锁 `beryllium` 后仍被 Serpulo source planet 拒绝的路径。
+- `PlanetDialog` newPresets：`desktop/src/lib.rs` 已补上游 `presetShow/showed/showing()` 的时间推进语义，20 tick 后用 `Iconc.lockOpen + [accent]sectorName` 触发 transient announce，同一 preset 只 announce 一次，超过 `sectorShowDuration=60*2.4` 后 pop 当前新 preset 并重置计时；进入/切换 PlanetDialog 时重置计时，保留既有 planetLaunch 下 sector list 隐藏逻辑；新增 `desktop_launcher_campaign_route_new_presets_announce_and_rotate_like_java` 覆盖 announce 与轮播。
 
 ## 下一步
 
 1. 继续补齐当前 UI 明确缺口：
    - dialogs 剩余 0 个明确类名文件；`desktop/src/lib.rs::push_campaign_route_page` 已接入 `g3d/PlanetRenderer` 场景壳；不要在 desktop 重写 `PlanetDialog` 状态机。
-   - 已补 planet surface hover 的首段 ray picking、hover label 投影、projection 全量可见 sector 层、hovered special icon branch、debugShowNumbers 编号层、over-projection launcher/import/export/shield/attack 连线、loadout 确认后的普通 core launch cutscene 入口、pending destination 延迟提交、资源扣除、`SectorLaunchLoadoutEvent` 与 `Layer.space` 数据化 launch pass、`CoreBlock.drawLaunch/updateLaunch()` clouds UV/scroll、final team sprite、coreLandDust 与 launch foreground fade；后续继续补完整 numbered sector 选择/面板、sector 展开/选区实绘与 landing fade-out 分支。
+   - 已补 planet surface hover 的首段 ray picking、hover label 投影、projection 全量可见 sector 层、hovered special icon branch、debugShowNumbers 编号层、over-projection launcher/import/export/shield/attack 连线、newPresets transient announce/轮播、loadout 确认后的普通 core launch cutscene 入口、pending destination 延迟提交、资源扣除、`SectorLaunchLoadoutEvent` 与 `Layer.space` 数据化 launch pass、`CoreBlock.drawLaunch/updateLaunch()` clouds UV/scroll、final team sprite、coreLandDust 与 launch foreground fade；后续继续补完整 numbered sector 选择/面板、sector 展开/选区实绘与 landing fade-out 分支。
    - 高频 UI 行为复核顺序：`HudFragment` → `ConsoleFragment` → `PlayerListFragment`。
 2. 继续复核 graphics/g3d 行为深度：
    - `simplex_noise3d` 当前是本地确定性入口，仍需后续与 Arc `Simplex.noise3d` 做数值级对照。
-    - `PlanetRenderer` 场景壳已完成，桌面 campaign route 已消费 `PlanetScenePlan` 并生成可见 preview primitives，且已补 surface hover ray picking、hover label 投影、projection 全量可见 sector 层、hovered special icon branch、debugShowNumbers 编号层、over-projection launcher/import/export/shield/attack 连线、loadout 确认后的普通 core launch cutscene 入口、pending destination 延迟提交、资源扣除、`SectorLaunchLoadoutEvent`、`Layer.space` 数据化 launch pass、clouds UV/scroll、final team sprite、coreLandDust 与 launch foreground fade；仍需 OpenGL backend 将 scene step / space pass 的 landing fade-out 等剩余细节真实落成 draw。
+    - `PlanetRenderer` 场景壳已完成，桌面 campaign route 已消费 `PlanetScenePlan` 并生成可见 preview primitives，且已补 surface hover ray picking、hover label 投影、projection 全量可见 sector 层、hovered special icon branch、debugShowNumbers 编号层、over-projection launcher/import/export/shield/attack 连线、newPresets transient announce/轮播、loadout 确认后的普通 core launch cutscene 入口、pending destination 延迟提交、资源扣除、`SectorLaunchLoadoutEvent`、`Layer.space` 数据化 launch pass、clouds UV/scroll、final team sprite、coreLandDust 与 launch foreground fade；仍需 OpenGL backend 将 scene step / space pass 的 landing fade-out 等剩余细节真实落成 draw。
 3. 对 `desktop/src/lib.rs` 中已有的菜单/HUD/对话框集中实现继续拆分映射，避免重复实现但保留逐文件 Rust 对应。
 4. 跑桌面端最小启动/渲染路径验证，并继续保持 `cargo check --workspace --all-targets` 通过。
