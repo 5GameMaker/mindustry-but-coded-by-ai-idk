@@ -10,13 +10,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.985%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.986%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 最新闭环：量化 OpenGL 前端 UI 微层降低碎批 draw call
+
+- 当前总体迁移完成度：约 **99.986%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 所有主菜单与子菜单继续还原 Java 原版，同时必须优化“帧数极其极其低下”的前端性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `opengl_backend_sprite_mesh_layer_batch_bits(...)`，仅对 `Layer::END_PIXELED..=Layer::MAX` 的前端 UI 层做 `0.001` 粒度量化；
+    - `opengl_backend_sprite_mesh_batch_key(...)` 改用量化后的 UI layer bits，合并 Settings/Join/Load/Mods 中大量 `+ index * 0.0001` 微层导致的碎批；
+    - `Layer::BLOCK`、`Layer::EFFECT` 等世界层仍走精确 `to_bits()`，保持大层 draw-call 排序与既有世界渲染语义；
+    - 新增 `desktop_graphics_opengl_backend_batches_ui_micro_layers_into_coarse_bins_for_stable_fps`，锁住前端微层合批与相邻 UI z-band 分离。
+- 已验证/本轮收口验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_batches_ --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_sprite_draw_call_plans_sort_batches_by_min_layer --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_sprite --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_ --lib -- --nocapture`
+- 下一步优先级：
+  1. FPS：route-page 主体缓存、Settings/Load/Join/Mods 事件驱动 projection 缓存；
+  2. UI：Join 服务器卡片 header/body、Mods Browser/详情弹窗、Settings/Load 子菜单细节继续对照 Java；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
 
 ## 最新闭环：缓存 Join/Mods 单行省略文本降低稳定帧开销
 

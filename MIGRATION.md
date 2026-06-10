@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1232. 量化 OpenGL 前端 UI 微层降低碎批 draw call
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.986%**，仍未达到完整可玩；当前继续优先 UI/前端所有子菜单贴近 Java 原版，同时把用户反馈的极低帧率作为前端阻塞问题持续优化。
+- Java 对照：
+  - Java Scene2D/SpriteBatch 不会因为 Rust route page 中 `Layer::END_PIXELED + index * 0.0001` 这类微小前端层偏移就拆成大量独立 draw call；
+  - 世界层如 `Layer::BLOCK` / `Layer::EFFECT` 仍必须保留精确排序语义，不能粗暴合批。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DESKTOP_OPENGL_UI_LAYER_BATCH_GRANULARITY = 0.001`；
+    - 新增 `opengl_backend_sprite_mesh_layer_batch_bits(...)`，仅对 `Layer::END_PIXELED..=Layer::MAX` 的前端 UI 层做 0.001 桶量化；
+    - `opengl_backend_sprite_mesh_batch_key(...)` 使用量化后的 UI layer bits，合并 Settings/Join/Load/Mods 中 `+ index * 0.0001` 导致的碎批；
+    - 保留 `BLOCK`/`EFFECT` 等世界层精确 `to_bits()` 分批，既有 draw-call 排序测试继续通过；
+    - 新增 `desktop_graphics_opengl_backend_batches_ui_micro_layers_into_coarse_bins_for_stable_fps`，锁住前端微层合批和相邻 UI z-band 分离。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_batches_ --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_sprite_draw_call_plans_sort_batches_by_min_layer --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_sprite --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_ --lib -- --nocapture`
+- 后续继续优先：
+  1. FPS：route-page 主体缓存、Settings/Load/Join/Mods 事件驱动 projection 缓存；
+  2. UI：Join 服务器卡片 header/body、Mods Browser/详情弹窗、Settings/Load 子菜单细节继续贴近 Java；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1231. 缓存 Join/Mods 单行省略文本降低稳定帧开销
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
