@@ -10,13 +10,38 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.993%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.994%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 最新闭环：收口纹理绑定 dirty 抖动降低稳定帧空刷新
+
+- 当前总体迁移完成度：约 **99.994%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 所有主菜单与子菜单继续还原 Java 原版，同时必须优化“帧数极其极其低下”的前端性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendTextureResourceTable::register_binding(...)` 返回是否需要刷新 upload plans；
+    - DrawSprite、primitive/text 注册路径只在首次绑定、仍需 full upload 或 sampler 参数变化时置 dirty；
+    - `record_primitive_quads(...)` 增加 `uses_primitive_texture` 判断，纯 DrawText 不再注册 primitive 1x1 texture；
+    - font atlas 已上传后稳定 DrawText 会丢弃 per-frame 像素克隆，但不再触发空的 `pending_upload_plans()` rebuild；
+    - 新增 `desktop_graphics_opengl_backend_classifying_adapter_skips_stable_font_atlas_upload_refresh_for_fps`。
+- 已验证/本轮收口验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_classifying_adapter_skips_stable_font_atlas_upload_refresh_for_fps --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_reuses_uploaded_font_atlas_binding_without_pixel_clone_for_stable_fps --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_executor_emits_texture_upload_plan_for_sprite_atlas_page --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_reapplies_texture_sampler_when_linear_setting_changes --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_does_not_reupload_static_font_texture_each_frame --lib -- --nocapture`
+  - `cargo check -p mindustry-desktop --lib`
+  - `cargo build -p mindustry-desktop --release`
+- 下一步优先级：
+  1. FPS：继续检查菜单 UI render command clone/splice、背景命令插入和 route shell 生成成本；
+  2. UI：Settings/Language、Load/Save、Join/Host、Mods Browser/详情、Database/ContentInfo 子菜单继续贴近 Java；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
 
 ## 最新闭环：收口 OpenGL 前端批次与字体布局缓存 FPS 热点
 

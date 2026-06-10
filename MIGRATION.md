@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1238. 收口纹理绑定 dirty 抖动降低稳定帧空刷新
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.994%**，仍未达到完整可玩；当前继续优先 UI/前端所有子菜单贴近 Java 原版，同时把用户反馈的极低帧率作为前端阻塞问题持续优化。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendTextureResourceTable::register_binding(...)` 返回是否需要刷新 upload plans；
+    - DrawSprite、primitive/text 两条路径只在首次注册、仍需 full upload 或 sampler 参数变化时置 `sprite_texture_upload_plans_dirty`；
+    - `record_primitive_quads(...)` 只在 quads 实际使用 `runtime-texture:primitive-white` 时注册 primitive 1x1 纹理，纯 DrawText 稳定帧不再无意义注册 primitive texture；
+    - font atlas 已上传后稳定 DrawText 会清掉 per-frame 像素克隆，但不再触发空的 texture upload-plan rebuild；
+    - 新增 `desktop_graphics_opengl_backend_classifying_adapter_skips_stable_font_atlas_upload_refresh_for_fps` 锁住稳定字体 atlas 不再空刷新。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_classifying_adapter_skips_stable_font_atlas_upload_refresh_for_fps --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_reuses_uploaded_font_atlas_binding_without_pixel_clone_for_stable_fps --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_executor_emits_texture_upload_plan_for_sprite_atlas_page --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_reapplies_texture_sampler_when_linear_setting_changes --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_renderer_does_not_reupload_static_font_texture_each_frame --lib -- --nocapture`
+  - `cargo check -p mindustry-desktop --lib`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. FPS：继续收口菜单 UI render command clone/splice、背景命令插入和 route shell 生成成本；
+  2. UI：Settings/Language、Load/Save、Join/Host、Mods Browser/详情、Database/ContentInfo 子菜单继续贴近 Java；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1237. 收口 OpenGL 前端批次与字体布局缓存 FPS 热点
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
