@@ -10,13 +10,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.989%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.990%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 最新闭环：缓存 LoadDialog 存档卡片文本 projection
+
+- 当前总体迁移完成度：约 **99.990%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 所有主菜单与子菜单继续还原 Java 原版，同时必须优化“帧数极其极其低下”的前端性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLoadGameSlotRenderLines` / `DesktopLoadGameSlotRenderLinesCacheKey` / `DesktopLoadGameSlotRenderLinesCacheEntry`；
+    - `DesktopLauncher` 增加 `load_game_slot_render_lines_cache` 与 rebuild 计数；
+    - cache key 覆盖 slot index/file/meta digest、display title、autosave state 和 locale；
+    - `push_load_game_route_page(...)` 改用 `load_game_slot_render_lines(...)`，命中时复用卡片标题、地图、模式/波次、autosave、playtime、date 文本和 autosave checked 状态；
+    - `refresh_load_game_slots()` 清理 per-slot 文本 cache，避免旧 slot 残留；
+    - 新增 `desktop_launcher_load_game_slot_render_lines_cache_reuses_stable_card_text`，锁住稳定复用、rename/autosave override 变化失效。
+- 已验证/本轮收口验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_slot_render_lines_cache_reuses_stable_card_text --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_reuses_filtered_slot_indices_when_query_unchanged --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib -- --nocapture`
+- 下一步优先级：
+  1. FPS：Join/Mods card projection cache、Settings row layout/text projection cache；
+  2. UI：Join 服务器卡片 header/body、Mods Browser/详情弹窗、Settings/Load 子菜单细节继续对照 Java；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
 
 ## 最新闭环：缓存 Settings pref specs runtime 投影
 

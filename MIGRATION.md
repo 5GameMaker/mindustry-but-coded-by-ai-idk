@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1236. 缓存 LoadDialog 存档卡片文本 projection
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.990%**，仍未达到完整可玩；当前继续优先 UI/前端所有子菜单贴近 Java 原版，同时把用户反馈的极低帧率作为前端阻塞问题持续优化。
+- Java 对照：
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java:84-178`：存档卡片的标题、地图、模式/波次、自动存档、游玩时间、日期行属于列表重建结果，稳定帧不应重复本地化和格式化每一行；
+  - autosave toggle 会改变可见行和图标 checked 状态，必须作为缓存失效条件。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLoadGameSlotRenderLines` / `DesktopLoadGameSlotRenderLinesCacheKey` / `DesktopLoadGameSlotRenderLinesCacheEntry`；
+    - `DesktopLauncher` 增加 `load_game_slot_render_lines_cache` 与 rebuild 计数；
+    - cache key 覆盖 slot index/file/meta digest、display title、autosave state 和 locale；
+    - `push_load_game_route_page(...)` 改用 `load_game_slot_render_lines(...)`，命中时复用卡片 6 行文本和 autosave checked 状态；
+    - `refresh_load_game_slots()` 清理 per-slot 文本 cache，避免旧 slot 残留；
+    - 新增 `desktop_launcher_load_game_slot_render_lines_cache_reuses_stable_card_text`，锁住稳定复用、rename/autosave override 变化失效。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_slot_render_lines_cache_reuses_stable_card_text --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_reuses_filtered_slot_indices_when_query_unchanged --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib -- --nocapture`
+- 后续继续优先：
+  1. FPS：Join/Mods card projection cache、Settings row layout/text projection cache；
+  2. UI：Join 服务器卡片 header/body、Mods Browser/详情弹窗、Settings/Load 子菜单细节继续贴近 Java；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1235. 缓存 Settings pref specs runtime 投影
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
