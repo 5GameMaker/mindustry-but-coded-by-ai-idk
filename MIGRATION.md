@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1235. 缓存 Settings pref specs runtime 投影
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.989%**，仍未达到完整可玩；当前继续优先 UI/前端所有子菜单贴近 Java 原版，同时把用户反馈的极低帧率作为前端阻塞问题持续优化。
+- Java 对照：
+  - `core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:398-583`：Settings 子页的 `SettingsTable` 在页面/条件变化时重建，稳定帧不应反复过滤同一组 pref spec；
+  - mobile/iOS/Steam/prerelease/shader 条件仍必须像 Java 一样控制行显隐。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopSettingsPrefWidgetSpecsCacheKey` / `DesktopSettingsPrefWidgetSpecsCache`；
+    - `DesktopLauncher` 增加 `settings_pref_widget_specs_cache` 与 rebuild 计数；
+    - `settings_pref_widget_specs_for_current_runtime(table)` 对静态表按 table、mobile、iOS、Steam、prerelease lobby gating、macOS、shader availability 做 key；
+    - 同一 Settings 子页稳定帧复用可见 spec 投影，减少每帧条件判断和 Vec 重建；
+    - 新增 `desktop_launcher_settings_pref_widget_specs_cache_reuses_runtime_projection`，锁住同表复用、换表/mobile/shader 条件变化失效。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_pref_widget_specs_cache_reuses_runtime_projection --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_scroll_wheel_offsets_table_hit_tests --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_pref_specs --lib -- --nocapture`
+- 后续继续优先：
+  1. FPS：Settings row layout/text projection cache、LoadGame per-slot 文本 projection cache、Join/Mods card projection cache；
+  2. UI：Join 服务器卡片 header/body、Mods Browser/详情弹窗、Settings/Load 子菜单细节继续贴近 Java；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1234. 缓存 Settings 主菜单 entries 降低前端稳定帧重建
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
