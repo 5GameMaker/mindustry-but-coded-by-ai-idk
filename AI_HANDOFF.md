@@ -17692,3 +17692,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. PlanetDialog 还没有真实 sector grid/hover/select/locked/canPlay；
   2. 真实 sector save/generator/loadout 仍未替换 smoke world；
   3. `newPresets` 自动轮播和 `SectorInfo.shown` 持久化还未接。
+
+### 2026-06-10：Join/Mods 前端 FPS 缓存闭环
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **99.991%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - JoinDialog 路由新增卡片级文本投影缓存，覆盖 local host、saved server snapshot、community host；
+    - ModsDialog 安装列表新增 mod 卡片投影缓存，覆盖 display-name ellipsis、short description、state text、icon/action 状态；
+    - ModsDialog 主列表新增 filtered-index 缓存，稳定 query 不再每帧扫描/小写化全部 mod；
+    - `push_join_route_page(...)` / `push_mods_route_page(...)` 已接入真实渲染链路，不是独立 helper。
+- 已验证：
+  - `cargo check -p mindustry-desktop --lib`
+  - `cargo test -p mindustry-desktop card_projection --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_reuses_filtered_indices_between_stable_queries --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_renders_java_like_card_icon_and_short_description --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_polls_local_discovery_hosts_like_java_refresh_local --lib -- --nocapture`
+  - `cargo fmt --all`
+- 下一步建议：
+  1. 继续按用户优先级处理前端 FPS：Map List / Editor / CustomGame 的过滤和搜索投影缓存；
+  2. 合并 Join/Mods/MapList 的 UI 微层级，降低 OpenGL batch 碎片；
+  3. 字体布局缓存从满 512 全清改为 LRU/局部淘汰；
+  4. 继续 UI 子菜单视觉与字体/语言还原，最终目标仍是完整可游玩的 Rust Mindustry/MDT。

@@ -38798,6 +38798,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Join、CustomGame、Database/ContentInfo 子菜单视觉和交互状态仍需继续逐项对照 Java；
   - 完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
 
+## 1065. Join/Mods 前端稳定帧缓存与 FPS 收口
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **99.991%**，仍未达到完整可玩；继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- 背景：用户反馈菜单/前端 FPS 极低；本轮优先处理稳定帧重复字符串投影、过滤与卡片文本生成，不改变 Java 原版 UI 视觉目标。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 Join 卡片文本投影缓存：本地 LAN host、保存服务器 snapshot、社区服务器 host 的标题/描述/players/map/mode/ping 预格式化结果在输入不变时复用；
+    - 新增 Mods 安装列表卡片投影缓存：display name ellipsis、short description、state text、图标符号、enabled/supported/steam action 状态稳定帧复用；
+    - 新增 Mods 主列表 filtered-index 缓存：搜索文本与 mod display-name 指纹不变时避免每帧全量 lowercase/filter；
+    - `push_join_route_page(...)` 与 `push_mods_route_page(...)` 改为消费上述缓存后的投影，保持原有 draw command、按钮、hover 与点击语义；
+    - 新增回归测试覆盖 Join/Mods 缓存命中与失效。
+  - `README.md`
+    - 迁移进度更新到 **99.991%**。
+- 已验证：
+  - `cargo check -p mindustry-desktop --lib`
+  - `cargo test -p mindustry-desktop card_projection --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_reuses_filtered_indices_between_stable_queries --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_renders_java_like_card_icon_and_short_description --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_polls_local_discovery_hosts_like_java_refresh_local --lib -- --nocapture`
+  - `cargo fmt --all`
+- 仍未完成：
+  - 还需要继续做 Map List / Editor / CustomGame 过滤结果缓存与 UI 微层级批量压缩；
+  - 字体布局缓存仍可能在大量唯一文本场景下抖动，后续可改成 LRU/分桶；
+  - UI 还原仍需继续对齐所有子菜单细节，完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1066. 收口 MapLocalesDialog 主弹窗字体节奏
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
