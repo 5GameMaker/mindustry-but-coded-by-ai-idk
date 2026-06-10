@@ -906,6 +906,7 @@ pub enum RenderPassKind {
     BlockOverdraw,
     Overlay,
     Fog,
+    Space,
     Minimap,
     Lighting,
     Darkness,
@@ -927,6 +928,7 @@ impl RenderPassKind {
             Self::BlockOverdraw => "block_overdraw",
             Self::Overlay => "overlay",
             Self::Fog => "fog",
+            Self::Space => "space",
             Self::Minimap => "minimap",
             Self::Lighting => "lighting",
             Self::Darkness => "darkness",
@@ -948,6 +950,7 @@ impl RenderPassKind {
             Self::BlockOverdraw => 100,
             Self::Overlay => 30,
             Self::Fog => 90,
+            Self::Space => 95,
             Self::Minimap => 40,
             Self::Lighting => 50,
             Self::Darkness => 70,
@@ -969,6 +972,7 @@ impl RenderPassKind {
             Self::BlockOverdraw => RendererDrawStage::BlockOverdraw,
             Self::Overlay => RendererDrawStage::Overlay,
             Self::Fog => RendererDrawStage::Fog,
+            Self::Space => RendererDrawStage::Space,
             Self::Minimap => RendererDrawStage::Debug,
             Self::Lighting => RendererDrawStage::Lighting,
             Self::Darkness => RendererDrawStage::Darkness,
@@ -995,13 +999,14 @@ pub enum RendererDrawStage {
     Darkness,
     Overlay,
     Fog,
+    Space,
     BlockOverdraw,
     Ui,
     Debug,
 }
 
 impl RendererDrawStage {
-    pub const ORDERED: [Self; 13] = [
+    pub const ORDERED: [Self; 14] = [
         Self::Background,
         Self::Floor,
         Self::BlockShadows,
@@ -1012,12 +1017,13 @@ impl RendererDrawStage {
         Self::Darkness,
         Self::Overlay,
         Self::Fog,
+        Self::Space,
         Self::BlockOverdraw,
         Self::Ui,
         Self::Debug,
     ];
 
-    pub const fn ordered() -> &'static [Self; 13] {
+    pub const fn ordered() -> &'static [Self; 14] {
         &Self::ORDERED
     }
 
@@ -1033,6 +1039,7 @@ impl RendererDrawStage {
             Self::Darkness => "darkness",
             Self::Overlay => "overlay",
             Self::Fog => "fog",
+            Self::Space => "space",
             Self::BlockOverdraw => "block_overdraw",
             Self::Ui => "ui",
             Self::Debug => "debug",
@@ -1051,6 +1058,7 @@ impl RendererDrawStage {
             Self::Darkness => 70,
             Self::Overlay => 80,
             Self::Fog => 90,
+            Self::Space => 95,
             Self::BlockOverdraw => 100,
             Self::Ui => 110,
             Self::Debug => 120,
@@ -1211,7 +1219,7 @@ impl RenderFramePlan {
         self.passes.iter().flat_map(|pass| pass.commands.iter())
     }
 
-    pub const fn java_renderer_draw_stages() -> &'static [RendererDrawStage; 13] {
+    pub const fn java_renderer_draw_stages() -> &'static [RendererDrawStage; 14] {
         RendererDrawStage::ordered()
     }
 
@@ -1397,6 +1405,7 @@ mod tests {
             RendererDrawStage::Darkness,
             RendererDrawStage::Overlay,
             RendererDrawStage::Fog,
+            RendererDrawStage::Space,
             RendererDrawStage::BlockOverdraw,
             RendererDrawStage::Ui,
             RendererDrawStage::Debug,
@@ -1420,6 +1429,7 @@ mod tests {
                 "darkness",
                 "overlay",
                 "fog",
+                "space",
                 "block_overdraw",
                 "ui",
                 "debug",
@@ -1508,6 +1518,7 @@ mod tests {
 
         plan.push_pass(RenderPass::new(RenderPassKind::Lighting).with_order(0));
         plan.push_pass(RenderPass::new(RenderPassKind::Block).with_order(0));
+        plan.push_pass(RenderPass::new(RenderPassKind::Space).with_order(0));
         plan.push_pass(RenderPass::new(RenderPassKind::Fog).with_order(0));
         plan.push_pass(RenderPass::new(RenderPassKind::Darkness).with_order(0));
         plan.push_pass(RenderPass::new(RenderPassKind::Environment).with_order(0));
@@ -1531,6 +1542,7 @@ mod tests {
                 RenderPassKind::Lighting,
                 RenderPassKind::Darkness,
                 RenderPassKind::Fog,
+                RenderPassKind::Space,
                 RenderPassKind::Block,
             ]
         );
@@ -1554,6 +1566,7 @@ mod tests {
             (RendererDrawStage::Darkness, "darkness", 70),
             (RendererDrawStage::Overlay, "overlay", 80),
             (RendererDrawStage::Fog, "fog", 90),
+            (RendererDrawStage::Space, "space", 95),
             (RendererDrawStage::BlockOverdraw, "block_overdraw", 100),
             (RendererDrawStage::Ui, "ui", 110),
             (RendererDrawStage::Debug, "debug", 120),
@@ -1620,6 +1633,7 @@ mod tests {
                 RendererDrawStage::Overlay,
             ),
             (RenderPassKind::Fog, "fog", 90, RendererDrawStage::Fog),
+            (RenderPassKind::Space, "space", 95, RendererDrawStage::Space),
             (
                 RenderPassKind::Minimap,
                 "minimap",
