@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1233. 缓存 LoadDialog 过滤结果降低存档列表稳定帧开销
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.987%**，仍未达到完整可玩；当前继续优先 UI/前端所有子菜单贴近 Java 原版，同时把用户反馈的极低帧率作为前端阻塞问题持续优化。
+- Java 对照：
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java:39-63, 84-178`：存档列表在 `shown()`、搜索输入和模式筛选变化时重建，稳定帧不应每帧对每个存档标题做搜索归一化；
+  - `LoadDialog` 模式筛选是集合语义，同一隐藏集合不应因点击顺序导致多余重建。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLoadGameFilteredSlotIndicesCacheKey` / `DesktopLoadGameFilteredSlotIndicesCache`；
+    - `DesktopLauncher` 增加 `load_game_filtered_slot_indices_cache` 与 rebuild 计数；
+    - cache key 覆盖 normalized query、按 `Gamemode::ALL` 归一化后的 hidden modes、存档列表签名和 slot name 签名；
+    - `filtered_load_game_slot_indices()` 命中时直接复用过滤结果，避免稳定帧反复 lower/markup-strip 每个存档显示名；
+    - 新增 `desktop_launcher_load_game_route_reuses_filtered_slot_indices_when_query_unchanged`，锁住 query 不变复用、query/hidden mode/rename 变化失效。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_reuses_filtered_slot_indices_when_query_unchanged --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib -- --nocapture`
+- 后续继续优先：
+  1. FPS：LoadGame per-slot 文本 projection cache、Join/Mods card projection cache、Settings pref layout cache；
+  2. UI：Join 服务器卡片 header/body、Mods Browser/详情弹窗、Settings/Load 子菜单细节继续贴近 Java；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1232. 量化 OpenGL 前端 UI 微层降低碎批 draw call
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。

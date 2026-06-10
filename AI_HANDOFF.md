@@ -10,13 +10,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.986%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.987%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 最新闭环：缓存 LoadDialog 过滤结果降低存档列表稳定帧开销
+
+- 当前总体迁移完成度：约 **99.987%**，仍未达到完整可玩。
+- 用户当前重点：前端/UI 所有主菜单与子菜单继续还原 Java 原版，同时必须优化“帧数极其极其低下”的前端性能问题。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLoadGameFilteredSlotIndicesCacheKey` / `DesktopLoadGameFilteredSlotIndicesCache`；
+    - `DesktopLauncher` 增加 `load_game_filtered_slot_indices_cache` 与 rebuild 计数；
+    - cache key 覆盖 normalized query、按 `Gamemode::ALL` 归一化后的 hidden mode 集合、存档列表签名和 slot name 签名；
+    - `filtered_load_game_slot_indices()` 命中时直接复用过滤结果，减少稳定帧对每个存档标题反复 markup-strip/lowercase；
+    - 新增 `desktop_launcher_load_game_route_reuses_filtered_slot_indices_when_query_unchanged`，锁住 query 不变复用、query/hidden mode/rename 变化失效。
+- 已验证/本轮收口验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_reuses_filtered_slot_indices_when_query_unchanged --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib -- --nocapture`
+- 下一步优先级：
+  1. FPS：LoadGame per-slot 文本 projection cache、Join/Mods card projection cache、Settings pref layout cache；
+  2. UI：Join 服务器卡片 header/body、Mods Browser/详情弹窗、Settings/Load 子菜单细节继续对照 Java；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
 
 ## 最新闭环：量化 OpenGL 前端 UI 微层降低碎批 draw call
 
