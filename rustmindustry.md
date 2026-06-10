@@ -232,6 +232,7 @@
 
 - `LaunchLoadoutDialog` / `LoadoutDialog` 资源编辑器：`desktop/src/lib.rs` 已按上游 `loadout.show(..., i -> i.unlocked() && i.isOnPlanet(sector.planet), ...)` 收敛资源候选项，使用出发 sector 的 planet 过滤可携带 item，避免全局 unlocked 的 Erekir 物品泄漏到 Serpulo 发射资源子弹窗；新增 `desktop_launcher_campaign_launch_resources_filters_items_to_source_planet_like_java` 覆盖手动解锁 `beryllium` 后仍被 Serpulo source planet 拒绝的路径。
 - `PlanetDialog` newPresets：`desktop/src/lib.rs` 已补上游 `presetShow/showed/showing()` 的时间推进语义，20 tick 后用 `Iconc.lockOpen + [accent]sectorName` 触发 transient announce，同一 preset 只 announce 一次，超过 `sectorShowDuration=60*2.4` 后 pop 当前新 preset 并重置计时；进入/切换 PlanetDialog 时重置计时，保留既有 planetLaunch 下 sector list 隐藏逻辑；新增 `desktop_launcher_campaign_route_new_presets_announce_and_rotate_like_java` 覆盖 announce 与轮播。
+- `PlanetDialog.updateSelected()` 选中 sector 面板：`core/src/mindustry/ui/dialogs/planet_dialog.rs` 已扩展 selected panel 纯模型，补 `underattack/vulnerable/enemybase` 的 Java else-if 顺序、locked objective/resource 字段与 `sectorInvasion` 上下文；`desktop/src/lib.rs` 已将 campaign sector 卡片从旧的 `showStats()` 汇总行切换到 `updateSelected()` 行，未受攻击有 base 的 sector 不再在卡片显示 threat/wave，受攻击 base 显示 `@sectors.underattack`，邻接敌方基地且开启 sector invasion 时显示 `@sectors.vulnerable`，无 base 敌方扇区显示 threat + `@sectors.enemybase`，资源与 stats 按钮仍按 Java 条件独立渲染；新增/更新 `selected_panel_detail_flags_follow_java_update_selected_else_if_order`、`desktop_launcher_campaign_route_selected_panel_status_rows_follow_update_selected_like_java`、`desktop_launcher_campaign_route_renders_planetdialog_like_sector_stats` 与 attack-arc 回归断言。
 
 ## 下一步
 

@@ -249,6 +249,11 @@ impl PlanetDialog {
 
         let locked = is_locked(sector);
         let no_candidate = has_no_candidate(self.mode, sector, self.launch_sector_id, sectors);
+        let show_under_attack = sector.is_attacked;
+        let show_vulnerable = !show_under_attack
+            && sector.has_base
+            && context.sector_invasion
+            && sector.near_enemy_base;
         let show_play = (sector.has_base && self.mode == PlanetDialogMode::Look)
             || can_select_sector(
                 self.mode,
@@ -266,7 +271,18 @@ impl PlanetDialog {
             title: selected_title(sector, context.debug_select),
             show_rename: sector.preset_name.is_none() || !sector.preset_require_unlock,
             show_threat: !locked && !sector.has_base,
-            show_enemy_base: !sector.has_base && sector.has_enemy_base,
+            show_under_attack,
+            show_vulnerable,
+            show_enemy_base: !show_under_attack
+                && !show_vulnerable
+                && !sector.has_base
+                && sector.has_enemy_base,
+            locked_objectives: if locked {
+                sector.locked_objectives.clone()
+            } else {
+                Vec::new()
+            },
+            resource_names: sector.resource_names.clone(),
             show_stats: sector.has_base,
             play_button: show_play.then(|| PlanetSelectedPlayButton {
                 text: selected_play_text(self.mode, sector, locked, no_candidate),
@@ -344,6 +360,7 @@ pub struct PlanetDialogContext {
     pub showing_preset: bool,
     pub has_current_save: bool,
     pub state_is_game: bool,
+    pub sector_invasion: bool,
 }
 
 impl Default for PlanetDialogContext {
@@ -359,6 +376,7 @@ impl Default for PlanetDialogContext {
             showing_preset: false,
             has_current_save: false,
             state_is_game: false,
+            sector_invasion: false,
         }
     }
 }
@@ -411,6 +429,9 @@ pub struct PlanetDialogSector {
     pub allow_landing: bool,
     pub allow_accelerator_landing: bool,
     pub launch_candidate_id: Option<i32>,
+    pub near_enemy_base: bool,
+    pub locked_objectives: Vec<String>,
+    pub resource_names: Vec<String>,
 }
 
 impl PlanetDialogSector {
@@ -436,6 +457,9 @@ impl PlanetDialogSector {
             allow_landing: false,
             allow_accelerator_landing: false,
             launch_candidate_id: None,
+            near_enemy_base: false,
+            locked_objectives: Vec::new(),
+            resource_names: Vec::new(),
         }
     }
 }
@@ -447,7 +471,11 @@ pub struct PlanetSelectedPanelModel {
     pub title: String,
     pub show_rename: bool,
     pub show_threat: bool,
+    pub show_under_attack: bool,
+    pub show_vulnerable: bool,
     pub show_enemy_base: bool,
+    pub locked_objectives: Vec<String>,
+    pub resource_names: Vec<String>,
     pub show_stats: bool,
     pub play_button: Option<PlanetSelectedPlayButton>,
 }
@@ -460,7 +488,11 @@ impl Default for PlanetSelectedPanelModel {
             title: String::new(),
             show_rename: false,
             show_threat: false,
+            show_under_attack: false,
+            show_vulnerable: false,
             show_enemy_base: false,
+            locked_objectives: Vec::new(),
+            resource_names: Vec::new(),
             show_stats: false,
             play_button: None,
         }
@@ -905,6 +937,9 @@ mod tests {
         );
         assert_eq!(base_panel.play_button.unwrap().text, "@sectors.go");
         assert!(base_panel.show_stats);
+        assert!(!base_panel.show_threat);
+        assert!(!base_panel.show_under_attack);
+        assert!(!base_panel.show_enemy_base);
 
         dialog.mode = PlanetDialogMode::Select;
         dialog.launch_sector_id = Some(1);
@@ -921,15 +956,70 @@ mod tests {
         locked.preset_locked = true;
         locked.preset_has_tech_node = true;
         locked.preset_always_unlocked = true;
+        locked.preset_name = Some("locked-sector".into());
+        locked.locked_objectives = vec!["Research launch pad".into()];
         let locked_panel = PlanetDialog::new().selected_panel_model(
             Some(&locked),
             &[locked.clone()],
             &PlanetDialogContext::default(),
         );
+        assert!(!locked_panel.show_rename);
+        assert!(!locked_panel.show_threat);
+        assert_eq!(locked_panel.locked_objectives, ["Research launch pad"]);
         let button = locked_panel.play_button.unwrap();
         assert_eq!(button.text, "@locked");
         assert_eq!(button.icon, "lock");
         assert!(button.disabled);
+    }
+
+    #[test]
+    fn selected_panel_detail_flags_follow_java_update_selected_else_if_order() {
+        let dialog = PlanetDialog::new();
+
+        let mut enemy_base = empty(20);
+        enemy_base.has_enemy_base = true;
+        enemy_base.resource_names = vec!["copper".into(), "lead".into()];
+        let panel = dialog.selected_panel_model(
+            Some(&enemy_base),
+            &[enemy_base.clone()],
+            &PlanetDialogContext::default(),
+        );
+        assert!(panel.show_threat);
+        assert!(!panel.show_under_attack);
+        assert!(!panel.show_vulnerable);
+        assert!(panel.show_enemy_base);
+        assert_eq!(panel.resource_names, ["copper", "lead"]);
+
+        let mut attacked_enemy_base = enemy_base.clone();
+        attacked_enemy_base.is_attacked = true;
+        let panel = dialog.selected_panel_model(
+            Some(&attacked_enemy_base),
+            &[attacked_enemy_base.clone()],
+            &PlanetDialogContext::default(),
+        );
+        assert!(panel.show_threat);
+        assert!(panel.show_under_attack);
+        assert!(!panel.show_vulnerable);
+        assert!(
+            !panel.show_enemy_base,
+            "Java updateSelected uses else-if: attacked sectors show underattack instead of enemybase"
+        );
+
+        let mut vulnerable_base = base(21);
+        vulnerable_base.near_enemy_base = true;
+        let panel = dialog.selected_panel_model(
+            Some(&vulnerable_base),
+            &[vulnerable_base.clone()],
+            &PlanetDialogContext {
+                sector_invasion: true,
+                ..PlanetDialogContext::default()
+            },
+        );
+        assert!(!panel.show_threat);
+        assert!(!panel.show_under_attack);
+        assert!(panel.show_vulnerable);
+        assert!(!panel.show_enemy_base);
+        assert!(panel.show_stats);
     }
 
     #[test]
