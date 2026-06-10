@@ -47,7 +47,8 @@
 - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_planet_surface_hover_ -- --nocapture`：通过，`2 passed; 0 failed`。
 - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_projection_layer_renders_all_visible_sectors_like_java -- --nocapture`：通过，`1 passed; 0 failed`。
 - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_overprojection_draws_launcher_arc_like_java -- --nocapture`：通过，`1 passed; 0 failed`。
-- `cargo test -p mindustry-desktop desktop_launcher_campaign_route_ -- --nocapture`：通过，`20 passed; 0 failed`。
+- `cargo test -p mindustry-desktop desktop_launcher_campaign_route_overprojection_draws_import_export_arcs_like_java -- --nocapture`：通过，`1 passed; 0 failed`。
+- `cargo test -p mindustry-desktop desktop_launcher_campaign_route_ -- --nocapture`：通过，`21 passed; 0 failed`。
 - Workspace crate：
   - `mindustry-core`
   - `mindustry-server`
@@ -92,7 +93,8 @@
 - `desktop/src/lib.rs` 已补 PlanetDialog hover label 投影：`campaign_hovered_sector_projected_label_like_java` 复用 `campaign_planet_surface_sector_preview_point` 将 `hoverLabel` 放到 hovered sector 的球面投影点，替代旧的 sector card 固定位置；`campaign_sector_hover_label_like_java` 的 selectable 名称优先走 runtime `Sector::name(...)`，覆盖 numbered sector 与 preset localized name；新增 `desktop_launcher_campaign_route_planet_surface_hover_label_projects_to_surface_like_java` 锁定投影位置。
 - `desktop/src/lib.rs` 已补 PlanetDialog projection 全量 sector 层：`campaign_planet_projection_sector_ids_like_java` 优先按 `PlanetGrid::create(sector_size).tiles` 保持 `planet.sectors` 顺序，并 union preset/runtime sector id；`DrawSectors` 与 `RenderProjections` 不再依赖最多 5 个 `campaign_route_sector_selector_ids`，而是遍历当前 planet 可见半球 sectors；projection 分支复用 `campaign_sector_large_icon_source_like_java` 处理 warning/terrain/lock/preficon，并以 `circle-shadow` 作为无图标 numbered sector 的 preview primitive；新增 `desktop_launcher_campaign_route_projection_layer_renders_all_visible_sectors_like_java` 覆盖非 selector numbered sector 也会被渲染。
 - `desktop/src/lib.rs` 已补 PlanetDialog over-projection 首段 sector-to-sector 连线：`campaign_find_launcher_sector_id_like_java` 按当前 runtime/game sector 查找有基地 launcher，`campaign_push_planet_projected_sector_line_like_java` 用两个 sector 的球面投影点画线；`RenderOverProjections` 不再使用旧的 preview center -> marker 简化线，新增 `desktop_launcher_campaign_route_overprojection_draws_launcher_arc_like_java` 覆盖 launcher sector 到目标 numbered sector 的投影连线。
-- 后续继续补真实 OpenGL 3D backend 执行、完整 numbered sector 选择/面板、renderOverProjections shield/attack/import/export 弧线、hovered projection 特例图标/debug numbers 与 launch cutscene。
+- `desktop/src/lib.rs` 已补 PlanetDialog over-projection import/export 连线：`campaign_sector_destination_matches_like_java` 按 runtime sector 与 preset sector id/original position 对齐 `SectorInfo.destination`，`RenderOverProjections` 在 selected 有基地时遍历当前 planet base entries，分别按 `sec.info.destination == selected && sec.info.anyExports()` 与 `selected.info.destination == sec && selected.info.anyExports()` 画 import/export sector-to-sector 投影线；新增 `desktop_launcher_campaign_route_overprojection_draws_import_export_arcs_like_java` 覆盖双向弧线。
+- 后续继续补真实 OpenGL 3D backend 执行、完整 numbered sector 选择/面板、renderOverProjections shield/attack 弧线、hovered projection 特例图标/debug numbers 与 launch cutscene。
 
 ## UI/图形缺口清单
 
@@ -197,17 +199,17 @@
 - `g3d/MatMesh`：已补 `core/src/mindustry/graphics/g3d/mat_mesh.rs`，覆盖 `transform * local mat` 包裹渲染与 dispose 转发。
 - `g3d/MultiMesh`：已补 `core/src/mindustry/graphics/g3d/multi_mesh.rs`，覆盖子 mesh 顺序 render/dispose fan-out。
 - `g3d/NoiseMesh`：已补 `core/src/mindustry/graphics/g3d/noise_mesh.rs`，覆盖单色/双色噪声 mesh、`7+seed` height、`8+seed` color、`5f` 坐标偏移与 `intensity=0.2`。
-- `g3d/PlanetRenderer`：已补最小场景壳 `core/src/mindustry/graphics/g3d/planet_renderer.rs`，覆盖上游 `fov=60`、`far=150`、`projector scaling=1/150`、skybox/bloom/depth/cull/planet/clouds/sectors/atmosphere/orbit/interface projection 的数据化阶段顺序；`desktop/src/lib.rs::push_campaign_route_page` 已开始消费该 plan，并用 `PlanetSceneStep` 驱动可见 preview primitives；`CursorMoved` 已能通过 `PlanetGrid` surface ray picking 更新 PlanetDialog hover，hover label 已随 hovered sector 投到 planet preview 表面，`RenderProjections` 已扩展到全 planet visible sector layer，`RenderOverProjections` 已开始使用 sector-to-sector 投影线；后续仍需接入完整扇区选择/launch cutscene 与 OpenGL 实绘。
+- `g3d/PlanetRenderer`：已补最小场景壳 `core/src/mindustry/graphics/g3d/planet_renderer.rs`，覆盖上游 `fov=60`、`far=150`、`projector scaling=1/150`、skybox/bloom/depth/cull/planet/clouds/sectors/atmosphere/orbit/interface projection 的数据化阶段顺序；`desktop/src/lib.rs::push_campaign_route_page` 已开始消费该 plan，并用 `PlanetSceneStep` 驱动可见 preview primitives；`CursorMoved` 已能通过 `PlanetGrid` surface ray picking 更新 PlanetDialog hover，hover label 已随 hovered sector 投到 planet preview 表面，`RenderProjections` 已扩展到全 planet visible sector layer，`RenderOverProjections` 已开始使用 sector-to-sector launcher/import/export 投影线；后续仍需接入完整扇区选择/launch cutscene 与 OpenGL 实绘。
 - `g3d/SunMesh`：已补 `core/src/mindustry/graphics/g3d/sun_mesh.rs`，覆盖 zero height、simplex/pow/mag 离散 palette clamp 与 `Shaders.unlit`。
 
 ## 下一步
 
 1. 继续补齐当前 UI 明确缺口：
    - dialogs 剩余 0 个明确类名文件；`desktop/src/lib.rs::push_campaign_route_page` 已接入 `g3d/PlanetRenderer` 场景壳；不要在 desktop 重写 `PlanetDialog` 状态机。
-   - 已补 planet surface hover 的首段 ray picking、hover label 投影、projection 全量可见 sector 层与 over-projection launcher 连线；后续继续补完整 numbered sector 选择/面板、sector 展开/选区实绘、launch cutscene。
+   - 已补 planet surface hover 的首段 ray picking、hover label 投影、projection 全量可见 sector 层与 over-projection launcher/import/export 连线；后续继续补完整 numbered sector 选择/面板、sector 展开/选区实绘、shield/attack arcs、launch cutscene。
    - 高频 UI 行为复核顺序：`HudFragment` → `ConsoleFragment` → `PlayerListFragment`。
 2. 继续复核 graphics/g3d 行为深度：
    - `simplex_noise3d` 当前是本地确定性入口，仍需后续与 Arc `Simplex.noise3d` 做数值级对照。
-   - `PlanetRenderer` 场景壳已完成，桌面 campaign route 已消费 `PlanetScenePlan` 并生成可见 preview primitives，且已补 surface hover ray picking、hover label 投影、projection 全量可见 sector 层与 over-projection launcher 连线；仍需 OpenGL backend 将 scene step 真实落成 3D draw。
+   - `PlanetRenderer` 场景壳已完成，桌面 campaign route 已消费 `PlanetScenePlan` 并生成可见 preview primitives，且已补 surface hover ray picking、hover label 投影、projection 全量可见 sector 层与 over-projection launcher/import/export 连线；仍需 OpenGL backend 将 scene step 真实落成 3D draw。
 3. 对 `desktop/src/lib.rs` 中已有的菜单/HUD/对话框集中实现继续拆分映射，避免重复实现但保留逐文件 Rust 对应。
 4. 跑桌面端最小启动/渲染路径验证，并继续保持 `cargo check --workspace --all-targets` 通过。
