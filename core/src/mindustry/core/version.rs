@@ -1,3 +1,10 @@
+pub const JAVA_V157_4_BUILD: i32 = 157;
+pub const JAVA_V157_4_REVISION: i32 = 4;
+pub const JAVA_V157_4_TYPE: &str = "official";
+
+pub const DEFAULT_HANDSHAKE_BUILD: i32 = JAVA_V157_4_BUILD;
+pub const DEFAULT_HANDSHAKE_TYPE: &str = JAVA_V157_4_TYPE;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VersionInfo {
     pub build_type: String,
@@ -171,6 +178,15 @@ mod tests {
         assert!(info.enabled);
         assert_eq!(info.build_string(), "157.4");
         assert_eq!(info.combined(), "release-steam build 157.4 (abc123)");
+    }
+
+    #[test]
+    fn connect_packet_default_handshake_baseline_matches_java_v157_4_build_type_revision() {
+        assert_eq!(JAVA_V157_4_BUILD, 157);
+        assert_eq!(JAVA_V157_4_REVISION, 4);
+        assert_eq!(JAVA_V157_4_TYPE, "official");
+        assert_eq!(DEFAULT_HANDSHAKE_BUILD, JAVA_V157_4_BUILD);
+        assert_eq!(DEFAULT_HANDSHAKE_TYPE, JAVA_V157_4_TYPE);
     }
 
     #[test]

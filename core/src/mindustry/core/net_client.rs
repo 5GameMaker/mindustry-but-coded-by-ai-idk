@@ -4,6 +4,7 @@ use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::mindustry::core::version::{DEFAULT_HANDSHAKE_BUILD, DEFAULT_HANDSHAKE_TYPE};
 use crate::mindustry::ctype::ContentId;
 use crate::mindustry::entities::comp::{PlayerComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
@@ -53,8 +54,8 @@ const PING_INTERVAL: Duration = Duration::from_secs(1);
 pub const CLIENT_PLAYER_SYNC_INTERVAL_MS: i64 = 66;
 pub const CLIENT_PLAN_SYNC_INTERVAL_MS: i64 = 500;
 pub const CLIENT_PLAN_PREVIEW_CHUNK_SIZE: usize = 900 / 12;
-pub const DEFAULT_CLIENT_VERSION: i32 = 158;
-pub const DEFAULT_CLIENT_VERSION_TYPE: &str = "official";
+pub const DEFAULT_CLIENT_VERSION: i32 = DEFAULT_HANDSHAKE_BUILD;
+pub const DEFAULT_CLIENT_VERSION_TYPE: &str = DEFAULT_HANDSHAKE_TYPE;
 
 pub type PacketHandler = Arc<dyn Fn(PacketKind) + Send + Sync + 'static>;
 pub type BinaryPacketHandler = Arc<dyn Fn(&[u8]) + Send + Sync + 'static>;
@@ -3672,6 +3673,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
+    use crate::mindustry::core::version::{
+        JAVA_V157_4_BUILD, JAVA_V157_4_REVISION, JAVA_V157_4_TYPE,
+    };
     use crate::mindustry::entities::comp::{PlayerComp, PlayerUnitState, UnitComp};
     use crate::mindustry::entities::units::BuildPlan;
     use crate::mindustry::io::type_io::RgbaColor;
@@ -3732,6 +3736,19 @@ mod tests {
     #[derive(Clone, Default)]
     struct CaptureProvider {
         sent: Arc<Mutex<Vec<(PacketKind, bool)>>>,
+    }
+
+    #[test]
+    fn connect_packet_default_config_matches_java_v157_4_handshake_baseline() {
+        let packet = ClientConnectConfig::default().to_connect_packet();
+
+        assert_eq!(JAVA_V157_4_BUILD, 157);
+        assert_eq!(JAVA_V157_4_REVISION, 4);
+        assert_eq!(JAVA_V157_4_TYPE, "official");
+        assert_eq!(super::DEFAULT_CLIENT_VERSION, JAVA_V157_4_BUILD);
+        assert_eq!(super::DEFAULT_CLIENT_VERSION_TYPE, JAVA_V157_4_TYPE);
+        assert_eq!(packet.version, JAVA_V157_4_BUILD);
+        assert_eq!(packet.version_type, JAVA_V157_4_TYPE);
     }
 
     impl NetProvider for CaptureProvider {

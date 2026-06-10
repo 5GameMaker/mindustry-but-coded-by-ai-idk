@@ -3,6 +3,7 @@ use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use crate::mindustry::core::version::{DEFAULT_HANDSHAKE_BUILD, DEFAULT_HANDSHAKE_TYPE};
 use crate::mindustry::entities::comp::building::{BuildingComp, BuildingConfigChange};
 use crate::mindustry::io::{BuildPlanWire, EntityRef, TeamId, TypeValue};
 use crate::mindustry::net::{
@@ -202,8 +203,8 @@ impl Default for ConnectPacketValidationContext {
             recent_kick_active: false,
             player_limit_reached: false,
             whitelisted: true,
-            server_version: 158,
-            server_version_type: "official".into(),
+            server_version: DEFAULT_HANDSHAKE_BUILD,
+            server_version_type: DEFAULT_HANDSHAKE_TYPE.into(),
             allows_custom_clients: false,
             prevent_duplicates: false,
             duplicate_name: false,
@@ -3546,6 +3547,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
+    use crate::mindustry::core::version::{
+        JAVA_V157_4_BUILD, JAVA_V157_4_REVISION, JAVA_V157_4_TYPE,
+    };
     use crate::mindustry::entities::comp::BuildingComp;
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue};
     use crate::mindustry::net::{
@@ -3649,7 +3653,7 @@ mod tests {
 
     fn connect_packet(name: &str) -> ConnectPacket {
         ConnectPacket {
-            version: 158,
+            version: JAVA_V157_4_BUILD,
             version_type: "official".into(),
             mods: vec!["mod-a".into(), "mod-b".into()],
             name: name.into(),
@@ -3722,6 +3726,17 @@ mod tests {
         assert!(plan.mark_begun_connecting);
         assert!(!plan.mod_client);
         assert_eq!(plan.kick_reason(), None);
+    }
+
+    #[test]
+    fn connect_packet_validation_default_context_matches_java_v157_4_handshake_baseline() {
+        let context = ConnectPacketValidationContext::default();
+
+        assert_eq!(JAVA_V157_4_BUILD, 157);
+        assert_eq!(JAVA_V157_4_REVISION, 4);
+        assert_eq!(JAVA_V157_4_TYPE, "official");
+        assert_eq!(context.server_version, JAVA_V157_4_BUILD);
+        assert_eq!(context.server_version_type, JAVA_V157_4_TYPE);
     }
 
     #[test]
@@ -3922,15 +3937,15 @@ mod tests {
         assert!(plan.accepted());
         assert!(plan.mod_client);
 
-        packet.version = 159;
+        packet.version = 158;
         let plan = NetServer::validate_connect_packet(&packet, &Default::default());
         assert_eq!(plan.kick_reason(), Some(KickReason::ServerOutdated));
 
-        packet.version = 157;
+        packet.version = 156;
         let plan = NetServer::validate_connect_packet(&packet, &Default::default());
         assert_eq!(plan.kick_reason(), Some(KickReason::ClientOutdated));
 
-        packet.version = 158;
+        packet.version = JAVA_V157_4_BUILD;
         packet.name = "[\n\t".into();
         let plan = NetServer::validate_connect_packet(&packet, &Default::default());
         assert_eq!(plan.kick_reason(), Some(KickReason::NameEmpty));

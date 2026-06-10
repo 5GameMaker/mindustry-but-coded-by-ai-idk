@@ -19,6 +19,45 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1239. 对齐基础内容注册顺序与 Java v157.4 联机握手基线
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.995%**，仍未达到完整可玩；当前继续优先 UI/前端所有子菜单贴近 Java 原版，同时把 Java↔Rust 联机兼容、world/save-load 与内容注册生命周期作为硬阻塞接入点持续补齐。
+- 并行审查接入点记录：
+  - UI/前端：`desktop/src/lib.rs` 的 `desktop_workshop_enabled` 启动态联动、`LoadDialog` 槽位装饰钩子、`Database/ContentInfo` 的 UI-stat-bar 语义仍需继续贴近 `MenuFragment.java`、`LoadDialog.java`、`DatabaseDialog.java`、`ContentInfoDialog.java`。
+  - Content：`core/src/mindustry/content/mod.rs` 已补 Java `ContentLoader.createBaseContent()` 调用顺序；后续继续补 `core/src/mindustry/world/block.rs` 与 `world/meta/stats.rs` / `ui/bar.rs` 的 Block 通用 `setStats()` / `setBars()` / bundle 生命周期桥接。
+  - World/save：`core/src/mindustry/io/save.rs`、`core/src/mindustry/core/game_state.rs`、`core/src/mindustry/core/game_runtime.rs` 仍需统一 `SaveSnapshot` 应用入口；`core/src/mindustry/game/rules.rs` 的 `RulesJsonPatch` 字段覆盖仍需按 Java `Rules.java` 继续补齐。
+  - Net：`core/src/mindustry/core/version.rs`、`net_client.rs`、`net_server.rs` 已把默认握手 build/type 接回 Java v157.4；后续需继续做真实 Java↔Rust 握手/世界流 smoke，并复核 `packets.rs` 协议表与 v157.4 的全量差异。
+- Java 对照：
+  - `core/src/mindustry/core/ContentLoader.java:58-74`：`UnitCommand.loadAll()` → `TeamEntries.load()` → `Items.load()` → `UnitStance.loadAll()` → `StatusEffects.load()` → `Liquids.load()` → `Bullets.load()` → `UnitTypes.load()` → `Blocks.load()` → `Loadouts.load()` → `Weathers.load()` → `Planets.load()` → `SectorPresets.load()` → `SerpuloTechTree.load()` → `ErekirTechTree.load()`。
+  - `core/src/mindustry/core/Version.java`：Java v157.4 的联机兼容 build 为 `157`，revision 为 `4`，默认 type 为 `official`；revision 不参与服务端兼容门槛。
+- 本轮主改动：
+  - `core/src/mindustry/content/mod.rs`
+    - `ContentCatalog::load_base_content()` 的实际 loader 调用顺序改为 Java `ContentLoader.createBaseContent()` 顺序；
+    - 保留 Rust 现有依赖注入：`unit_stances::load(&items)` 与 `blocks::load(&items, &liquids)`；
+    - 新增 `JAVA_BASE_CONTENT_LOAD_ORDER` 与 `java_base_content_loader_order_matches_content_loader_create_base_content`，把 Java 基线顺序固定在同文件测试中。
+  - `core/src/mindustry/core/version.rs`
+    - 新增 `JAVA_V157_4_BUILD = 157`、`JAVA_V157_4_REVISION = 4`、`JAVA_V157_4_TYPE = "official"`；
+    - 新增 `DEFAULT_HANDSHAKE_BUILD` / `DEFAULT_HANDSHAKE_TYPE`，作为 Rust 客户端与服务端默认握手基线。
+  - `core/src/mindustry/core/net_client.rs`
+    - `DEFAULT_CLIENT_VERSION` / `DEFAULT_CLIENT_VERSION_TYPE` 改为复用 v157.4 默认握手常量；
+    - 新增默认 `ClientConnectConfig` 生成 `ConnectPacket` 对齐 Java v157.4 的测试。
+  - `core/src/mindustry/core/net_server.rs`
+    - `ConnectPacketValidationContext::default()` 的 `server_version` / `server_version_type` 改为 v157.4 默认握手常量；
+    - 测试 helper 不再硬编码 `158`，并锁住默认上下文对齐 v157.4；
+    - 版本拒绝测试调整为：`158` 客户端触发 `ServerOutdated`，`156` 客户端触发 `ClientOutdated`。
+- 已验证：
+  - `cargo test -p mindustry-core catalog_ --lib -- --nocapture`
+  - `cargo test -p mindustry-core java_base_content_loader_order_matches_content_loader_create_base_content --lib -- --nocapture`
+  - `cargo test -p mindustry-core connect_packet --lib -- --nocapture`
+  - `cargo test -p mindustry-core net_server --lib -- --nocapture`
+  - `cargo check -p mindustry-core --lib`
+- 后续继续优先：
+  1. Net：补 Java↔Rust 握手/世界流 smoke，确认 Rust client ↔ Java server、Java client ↔ Rust server 的最小联机路径；
+  2. Content：补 Block/UnlockableContent 的 stats/bars/bundle/icon 生命周期桥接，避免 UI-stat-bar 与数据库详情继续散落；
+  3. World/save：补 `SaveSnapshot` 统一应用入口与 `RulesJsonPatch` Java 字段覆盖；
+  4. UI：补 `desktop_workshop_enabled` 启动态联动、Load slot decoration、Database/ContentInfo 详情统计显示。
+
 ## 1238. 收口纹理绑定 dirty 抖动降低稳定帧空刷新
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。

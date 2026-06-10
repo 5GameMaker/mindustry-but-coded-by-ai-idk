@@ -10,13 +10,42 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.994%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.995%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 最新闭环：对齐基础内容注册顺序与 Java v157.4 联机握手基线
+
+- 当前总体迁移完成度：约 **99.995%**，仍未达到完整可玩。
+- 本轮并行审查覆盖 UI、net、world/save、content 与文档进度；已将关键接入点写回 `MIGRATION.md`。
+- 本轮实现：
+  - `core/src/mindustry/content/mod.rs`
+    - `ContentCatalog::load_base_content()` 的 loader 调用顺序对齐 Java `ContentLoader.createBaseContent()`；
+    - 保留 `unit_stances::load(&items)` 与 `blocks::load(&items, &liquids)` 依赖注入；
+    - 新增 Java 基础内容加载顺序回归常量/测试。
+  - `core/src/mindustry/core/version.rs`
+    - 新增 Java v157.4 握手基线常量：build `157`、revision `4`、type `official`；
+    - 新增 `DEFAULT_HANDSHAKE_BUILD` / `DEFAULT_HANDSHAKE_TYPE`。
+  - `core/src/mindustry/core/net_client.rs`
+    - 默认 `ConnectPacket` 版本/type 改为 v157.4 基线。
+  - `core/src/mindustry/core/net_server.rs`
+    - 默认 `ConnectPacketValidationContext` 改为 v157.4 基线；
+    - 版本拒绝测试调整为 `158 => ServerOutdated`、`156 => ClientOutdated`。
+- 已验证/本轮收口验证：
+  - `cargo test -p mindustry-core catalog_ --lib -- --nocapture`
+  - `cargo test -p mindustry-core java_base_content_loader_order_matches_content_loader_create_base_content --lib -- --nocapture`
+  - `cargo test -p mindustry-core connect_packet --lib -- --nocapture`
+  - `cargo test -p mindustry-core net_server --lib -- --nocapture`
+  - `cargo check -p mindustry-core --lib`
+- 下一步优先：
+  1. Net：真实 Java↔Rust 握手/世界流 smoke，继续复核 `packets.rs` 与 v157.4 的全量协议差异；
+  2. Content：补 Block/UnlockableContent 的 stats/bars/bundle/icon 生命周期桥接；
+  3. World/save：补 `SaveSnapshot` 统一应用入口与 `RulesJsonPatch` 字段覆盖；
+  4. UI：补 `desktop_workshop_enabled` 启动态联动、Load slot decoration、Database/ContentInfo UI-stat-bar 细节。
 
 ## 最新闭环：收口纹理绑定 dirty 抖动降低稳定帧空刷新
 

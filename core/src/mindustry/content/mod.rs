@@ -43,26 +43,36 @@ pub struct ContentCatalog {
 
 impl ContentCatalog {
     pub fn load_base_content() -> Self {
-        let items = items::load();
-        let liquids = liquids::load();
-        let blocks = blocks::load(&items, &liquids);
         let unit_commands = unit_commands::load();
+        let team_entries = team_entries::load();
+        let items = items::load();
         let unit_stances = unit_stances::load(&items);
+        let status_effects = status_effects::load();
+        let liquids = liquids::load();
+        let bullets = bullets::load();
+        let units = unit_types::load();
+        let blocks = blocks::load(&items, &liquids);
+        let loadouts = loadouts::load_or_panic();
+        let weathers = weathers::load();
+        let planets = planets::load();
+        let sectors = sector_presets::load();
+        let serpulo_tech_tree = serpulo_tech_tree::load();
+        let erekir_tech_tree = erekir_tech_tree::load();
         let mut catalog = Self {
             blocks,
-            bullets: bullets::load(),
+            bullets,
             errors: Vec::new(),
             items,
             liquids,
-            status_effects: status_effects::load(),
-            units: unit_types::load(),
-            weathers: weathers::load(),
-            sectors: sector_presets::load(),
-            planets: planets::load(),
-            serpulo_tech_tree: serpulo_tech_tree::load(),
-            erekir_tech_tree: erekir_tech_tree::load(),
-            loadouts: loadouts::load_or_panic(),
-            team_entries: team_entries::load(),
+            status_effects,
+            units,
+            weathers,
+            sectors,
+            planets,
+            serpulo_tech_tree,
+            erekir_tech_tree,
+            loadouts,
+            team_entries,
             unit_commands,
             unit_stances,
         };
@@ -494,6 +504,48 @@ mod tests {
         ctype::{Content, ContentType},
         io::save::{read_content_header_snapshot, write_content_header_snapshot},
     };
+
+    const JAVA_BASE_CONTENT_LOAD_ORDER: [&str; 15] = [
+        "UnitCommand.loadAll",
+        "TeamEntries.load",
+        "Items.load",
+        "UnitStance.loadAll",
+        "StatusEffects.load",
+        "Liquids.load",
+        "Bullets.load",
+        "UnitTypes.load",
+        "Blocks.load",
+        "Loadouts.load",
+        "Weathers.load",
+        "Planets.load",
+        "SectorPresets.load",
+        "SerpuloTechTree.load",
+        "ErekirTechTree.load",
+    ];
+
+    #[test]
+    fn java_base_content_loader_order_matches_content_loader_create_base_content() {
+        assert_eq!(
+            JAVA_BASE_CONTENT_LOAD_ORDER,
+            [
+                "UnitCommand.loadAll",
+                "TeamEntries.load",
+                "Items.load",
+                "UnitStance.loadAll",
+                "StatusEffects.load",
+                "Liquids.load",
+                "Bullets.load",
+                "UnitTypes.load",
+                "Blocks.load",
+                "Loadouts.load",
+                "Weathers.load",
+                "Planets.load",
+                "SectorPresets.load",
+                "SerpuloTechTree.load",
+                "ErekirTechTree.load",
+            ]
+        );
+    }
 
     #[test]
     fn catalog_builds_content_header_snapshot_in_content_type_order() {
