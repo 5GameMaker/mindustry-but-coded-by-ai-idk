@@ -239,6 +239,11 @@ struct RulesJsonPatch {
     waves: Option<bool>,
     wave_timer: Option<bool>,
     wave_sending: Option<bool>,
+    show_spawns: Option<bool>,
+    wait_enemies: Option<bool>,
+    random_wave_ai: Option<bool>,
+    waves_spawn_at_cores: Option<bool>,
+    air_use_spawns: Option<bool>,
     attack_mode: Option<bool>,
     pvp: Option<bool>,
     editor: Option<bool>,
@@ -246,10 +251,16 @@ struct RulesJsonPatch {
     allow_edit_rules: Option<bool>,
     allow_edit_world_processors: Option<bool>,
     disable_world_processors: Option<bool>,
+    only_deposit_core: Option<bool>,
+    allow_core_unloaders: Option<bool>,
+    derelict_repair: Option<bool>,
+    reactor_explosions: Option<bool>,
+    cleanup_dead_teams: Option<bool>,
     fog: Option<bool>,
     static_fog: Option<bool>,
     lighting: Option<bool>,
     core_incinerates: Option<bool>,
+    core_destroy_clear: Option<bool>,
     border_darkness: Option<bool>,
     limit_map_area: Option<bool>,
     limit_x: Option<i32>,
@@ -268,22 +279,48 @@ struct RulesJsonPatch {
     hide_banned_blocks: Option<bool>,
     block_whitelist: Option<bool>,
     unit_whitelist: Option<bool>,
+    unit_payloads_explode: Option<bool>,
+    unit_cap_variable: Option<bool>,
+    logic_unit_control: Option<bool>,
+    logic_unit_build: Option<bool>,
+    logic_unit_deconstruct: Option<bool>,
+    core_capture: Option<bool>,
+    place_range_check: Option<bool>,
+    polygon_core_protection: Option<bool>,
+    pause_disabled: Option<bool>,
+    damage_explosions: Option<bool>,
+    fire: Option<bool>,
     banned_blocks: Option<BTreeSet<String>>,
     banned_units: Option<BTreeSet<String>>,
+    loadout: Option<Vec<ItemStack>>,
     weather: Option<Vec<WeatherEntry>>,
     ambient_light: Option<[f32; 4]>,
-    core_capture: Option<bool>,
     item_deposit_cooldown: Option<f32>,
     drag_multiplier: Option<f32>,
     wave_spacing: Option<f32>,
     initial_wave_spacing: Option<f32>,
     drop_zone_radius: Option<f32>,
     win_wave: Option<i32>,
+    unit_cap: Option<i32>,
+    enemy_core_build_radius: Option<f32>,
+    solar_multiplier: Option<f32>,
+    build_cost_multiplier: Option<f32>,
+    build_speed_multiplier: Option<f32>,
+    deconstruct_refund_multiplier: Option<f32>,
+    block_health_multiplier: Option<f32>,
+    block_damage_multiplier: Option<f32>,
+    unit_build_speed_multiplier: Option<f32>,
+    unit_cost_multiplier: Option<f32>,
+    unit_damage_multiplier: Option<f32>,
+    unit_health_multiplier: Option<f32>,
+    unit_crash_damage_multiplier: Option<f32>,
+    unit_mine_speed_multiplier: Option<f32>,
     default_team: Option<i32>,
     wave_team: Option<i32>,
     mode_name: Option<Option<String>>,
     planet: Option<String>,
     env: Option<u32>,
+    tags: Option<BTreeMap<String, String>>,
     teams: Option<Vec<(usize, TeamRuleJsonPatch)>>,
 }
 
@@ -415,6 +452,21 @@ impl RulesJsonPatch {
         if let Some(value) = self.wave_sending {
             rules.wave_sending = value;
         }
+        if let Some(value) = self.show_spawns {
+            rules.show_spawns = value;
+        }
+        if let Some(value) = self.wait_enemies {
+            rules.wait_enemies = value;
+        }
+        if let Some(value) = self.random_wave_ai {
+            rules.random_wave_ai = value;
+        }
+        if let Some(value) = self.waves_spawn_at_cores {
+            rules.waves_spawn_at_cores = value;
+        }
+        if let Some(value) = self.air_use_spawns {
+            rules.air_use_spawns = value;
+        }
         if let Some(value) = self.attack_mode {
             rules.attack_mode = value;
         }
@@ -436,6 +488,21 @@ impl RulesJsonPatch {
         if let Some(value) = self.disable_world_processors {
             rules.disable_world_processors = value;
         }
+        if let Some(value) = self.only_deposit_core {
+            rules.only_deposit_core = value;
+        }
+        if let Some(value) = self.allow_core_unloaders {
+            rules.allow_core_unloaders = value;
+        }
+        if let Some(value) = self.derelict_repair {
+            rules.derelict_repair = value;
+        }
+        if let Some(value) = self.reactor_explosions {
+            rules.reactor_explosions = value;
+        }
+        if let Some(value) = self.cleanup_dead_teams {
+            rules.cleanup_dead_teams = value;
+        }
         if let Some(value) = self.fog {
             rules.fog = value;
         }
@@ -447,6 +514,9 @@ impl RulesJsonPatch {
         }
         if let Some(value) = self.core_incinerates {
             rules.core_incinerates = value;
+        }
+        if let Some(value) = self.core_destroy_clear {
+            rules.core_destroy_clear = value;
         }
         if let Some(value) = self.border_darkness {
             rules.border_darkness = value;
@@ -502,20 +572,53 @@ impl RulesJsonPatch {
         if let Some(value) = self.unit_whitelist {
             rules.unit_whitelist = value;
         }
+        if let Some(value) = self.unit_payloads_explode {
+            rules.unit_payloads_explode = value;
+        }
+        if let Some(value) = self.unit_cap_variable {
+            rules.unit_cap_variable = value;
+        }
+        if let Some(value) = self.logic_unit_control {
+            rules.logic_unit_control = value;
+        }
+        if let Some(value) = self.logic_unit_build {
+            rules.logic_unit_build = value;
+        }
+        if let Some(value) = self.logic_unit_deconstruct {
+            rules.logic_unit_deconstruct = value;
+        }
+        if let Some(value) = self.core_capture {
+            rules.core_capture = value;
+        }
+        if let Some(value) = self.place_range_check {
+            rules.place_range_check = value;
+        }
+        if let Some(value) = self.polygon_core_protection {
+            rules.polygon_core_protection = value;
+        }
+        if let Some(value) = self.pause_disabled {
+            rules.pause_disabled = value;
+        }
+        if let Some(value) = self.damage_explosions {
+            rules.damage_explosions = value;
+        }
+        if let Some(value) = self.fire {
+            rules.fire = value;
+        }
         if let Some(value) = self.banned_blocks {
             rules.banned_blocks = value;
         }
         if let Some(value) = self.banned_units {
             rules.banned_units = value;
         }
+        if let Some(value) = self.loadout {
+            rules.loadout = value;
+        }
         if let Some(value) = self.weather {
             rules.weather = value;
         }
         if let Some(value) = self.ambient_light {
             rules.ambient_light = value;
-        }
-        if let Some(value) = self.core_capture {
-            rules.core_capture = value;
         }
         if let Some(value) = self.item_deposit_cooldown {
             rules.item_deposit_cooldown = value;
@@ -535,6 +638,48 @@ impl RulesJsonPatch {
         if let Some(value) = self.win_wave {
             rules.win_wave = value;
         }
+        if let Some(value) = self.unit_cap {
+            rules.unit_cap = value;
+        }
+        if let Some(value) = self.enemy_core_build_radius {
+            rules.enemy_core_build_radius = value;
+        }
+        if let Some(value) = self.solar_multiplier {
+            rules.solar_multiplier = value;
+        }
+        if let Some(value) = self.build_cost_multiplier {
+            rules.build_cost_multiplier = value;
+        }
+        if let Some(value) = self.build_speed_multiplier {
+            rules.build_speed_multiplier = value;
+        }
+        if let Some(value) = self.deconstruct_refund_multiplier {
+            rules.deconstruct_refund_multiplier = value;
+        }
+        if let Some(value) = self.block_health_multiplier {
+            rules.block_health_multiplier = value;
+        }
+        if let Some(value) = self.block_damage_multiplier {
+            rules.block_damage_multiplier = value;
+        }
+        if let Some(value) = self.unit_build_speed_multiplier {
+            rules.unit_build_speed_multiplier = value;
+        }
+        if let Some(value) = self.unit_cost_multiplier {
+            rules.unit_cost_multiplier = value;
+        }
+        if let Some(value) = self.unit_damage_multiplier {
+            rules.unit_damage_multiplier = value;
+        }
+        if let Some(value) = self.unit_health_multiplier {
+            rules.unit_health_multiplier = value;
+        }
+        if let Some(value) = self.unit_crash_damage_multiplier {
+            rules.unit_crash_damage_multiplier = value;
+        }
+        if let Some(value) = self.unit_mine_speed_multiplier {
+            rules.unit_mine_speed_multiplier = value;
+        }
         if let Some(value) = self.default_team {
             rules.default_team = value;
         }
@@ -549,6 +694,9 @@ impl RulesJsonPatch {
         }
         if let Some(value) = self.env {
             rules.env = value;
+        }
+        if let Some(value) = self.tags {
+            rules.tags = value;
         }
         if let Some(teams) = self.teams {
             for (team_id, patch) in teams {
@@ -591,6 +739,11 @@ impl<'a> RulesJsonParser<'a> {
                 "waves" => patch.waves = self.parse_optional_bool()?,
                 "waveTimer" => patch.wave_timer = self.parse_optional_bool()?,
                 "waveSending" => patch.wave_sending = self.parse_optional_bool()?,
+                "showSpawns" => patch.show_spawns = self.parse_optional_bool()?,
+                "waitEnemies" => patch.wait_enemies = self.parse_optional_bool()?,
+                "randomWaveAI" => patch.random_wave_ai = self.parse_optional_bool()?,
+                "wavesSpawnAtCores" => patch.waves_spawn_at_cores = self.parse_optional_bool()?,
+                "airUseSpawns" => patch.air_use_spawns = self.parse_optional_bool()?,
                 "attackMode" => patch.attack_mode = self.parse_optional_bool()?,
                 "pvp" => patch.pvp = self.parse_optional_bool()?,
                 "editor" => patch.editor = self.parse_optional_bool()?,
@@ -604,10 +757,16 @@ impl<'a> RulesJsonParser<'a> {
                 "disableWorldProcessors" => {
                     patch.disable_world_processors = self.parse_optional_bool()?
                 }
+                "onlyDepositCore" => patch.only_deposit_core = self.parse_optional_bool()?,
+                "allowCoreUnloaders" => patch.allow_core_unloaders = self.parse_optional_bool()?,
+                "derelictRepair" => patch.derelict_repair = self.parse_optional_bool()?,
+                "reactorExplosions" => patch.reactor_explosions = self.parse_optional_bool()?,
+                "cleanupDeadTeams" => patch.cleanup_dead_teams = self.parse_optional_bool()?,
                 "fog" => patch.fog = self.parse_optional_bool()?,
                 "staticFog" => patch.static_fog = self.parse_optional_bool()?,
                 "lighting" => patch.lighting = self.parse_optional_bool()?,
                 "coreIncinerates" => patch.core_incinerates = self.parse_optional_bool()?,
+                "coreDestroyClear" => patch.core_destroy_clear = self.parse_optional_bool()?,
                 "borderDarkness" => patch.border_darkness = self.parse_optional_bool()?,
                 "limitMapArea" => patch.limit_map_area = self.parse_optional_bool()?,
                 "limitX" => patch.limit_x = self.parse_optional_i32()?,
@@ -630,22 +789,74 @@ impl<'a> RulesJsonParser<'a> {
                 "hideBannedBlocks" => patch.hide_banned_blocks = self.parse_optional_bool()?,
                 "blockWhitelist" => patch.block_whitelist = self.parse_optional_bool()?,
                 "unitWhitelist" => patch.unit_whitelist = self.parse_optional_bool()?,
+                "unitPayloadsExplode" => {
+                    patch.unit_payloads_explode = self.parse_optional_bool()?
+                }
+                "unitCapVariable" => patch.unit_cap_variable = self.parse_optional_bool()?,
+                "logicUnitControl" => patch.logic_unit_control = self.parse_optional_bool()?,
+                "logicUnitBuild" => patch.logic_unit_build = self.parse_optional_bool()?,
+                "logicUnitDeconstruct" => {
+                    patch.logic_unit_deconstruct = self.parse_optional_bool()?
+                }
+                "coreCapture" => patch.core_capture = self.parse_optional_bool()?,
+                "placeRangeCheck" => patch.place_range_check = self.parse_optional_bool()?,
+                "polygonCoreProtection" => {
+                    patch.polygon_core_protection = self.parse_optional_bool()?
+                }
+                "pauseDisabled" => patch.pause_disabled = self.parse_optional_bool()?,
+                "damageExplosions" => patch.damage_explosions = self.parse_optional_bool()?,
+                "fire" => patch.fire = self.parse_optional_bool()?,
                 "bannedBlocks" => patch.banned_blocks = self.parse_optional_string_set()?,
                 "bannedUnits" => patch.banned_units = self.parse_optional_string_set()?,
+                "loadout" => patch.loadout = self.parse_optional_item_stacks()?,
                 "weather" => patch.weather = self.parse_optional_weather_entries()?,
                 "ambientLight" => patch.ambient_light = self.parse_optional_f32_array4()?,
-                "coreCapture" => patch.core_capture = self.parse_optional_bool()?,
                 "itemDepositCooldown" => patch.item_deposit_cooldown = self.parse_optional_f32()?,
                 "dragMultiplier" => patch.drag_multiplier = self.parse_optional_f32()?,
                 "waveSpacing" => patch.wave_spacing = self.parse_optional_f32()?,
                 "initialWaveSpacing" => patch.initial_wave_spacing = self.parse_optional_f32()?,
                 "dropZoneRadius" => patch.drop_zone_radius = self.parse_optional_f32()?,
                 "winWave" => patch.win_wave = self.parse_optional_i32()?,
+                "unitCap" => patch.unit_cap = self.parse_optional_i32()?,
+                "enemyCoreBuildRadius" => {
+                    patch.enemy_core_build_radius = self.parse_optional_f32()?
+                }
+                "solarMultiplier" => patch.solar_multiplier = self.parse_optional_f32()?,
+                "buildCostMultiplier" => patch.build_cost_multiplier = self.parse_optional_f32()?,
+                "buildSpeedMultiplier" => {
+                    patch.build_speed_multiplier = self.parse_optional_f32()?
+                }
+                "deconstructRefundMultiplier" => {
+                    patch.deconstruct_refund_multiplier = self.parse_optional_f32()?
+                }
+                "blockHealthMultiplier" => {
+                    patch.block_health_multiplier = self.parse_optional_f32()?
+                }
+                "blockDamageMultiplier" => {
+                    patch.block_damage_multiplier = self.parse_optional_f32()?
+                }
+                "unitBuildSpeedMultiplier" => {
+                    patch.unit_build_speed_multiplier = self.parse_optional_f32()?
+                }
+                "unitCostMultiplier" => patch.unit_cost_multiplier = self.parse_optional_f32()?,
+                "unitDamageMultiplier" => {
+                    patch.unit_damage_multiplier = self.parse_optional_f32()?
+                }
+                "unitHealthMultiplier" => {
+                    patch.unit_health_multiplier = self.parse_optional_f32()?
+                }
+                "unitCrashDamageMultiplier" => {
+                    patch.unit_crash_damage_multiplier = self.parse_optional_f32()?
+                }
+                "unitMineSpeedMultiplier" => {
+                    patch.unit_mine_speed_multiplier = self.parse_optional_f32()?
+                }
                 "defaultTeam" => patch.default_team = self.parse_optional_i32()?,
                 "waveTeam" => patch.wave_team = self.parse_optional_i32()?,
                 "modeName" => patch.mode_name = self.parse_optional_nullable_string()?,
                 "planet" => patch.planet = self.parse_optional_string_value()?,
                 "env" => patch.env = self.parse_optional_u32()?,
+                "tags" => patch.tags = self.parse_optional_string_map()?,
                 "teams" => patch.teams = self.parse_optional_team_rules()?,
                 _ => self.skip_value()?,
             }
@@ -842,6 +1053,137 @@ impl<'a> RulesJsonParser<'a> {
                 Some(']') => return Ok(Some(values)),
                 Some(ch) => return Err(format!("expected ',' or ']', found '{ch}'")),
                 None => return Err("unterminated json string array".into()),
+            }
+        }
+    }
+
+    fn parse_optional_string_map(&mut self) -> Result<Option<BTreeMap<String, String>>, String> {
+        self.skip_ws();
+        if self.peek() != Some('{') {
+            self.skip_value()?;
+            return Ok(None);
+        }
+        self.expect('{')?;
+        self.skip_ws();
+        let mut values = BTreeMap::new();
+        if self.peek() == Some('}') {
+            self.index += 1;
+            return Ok(Some(values));
+        }
+        loop {
+            let key = self.parse_string()?;
+            self.expect(':')?;
+            match self.peek_after_ws() {
+                Some('"') => {
+                    values.insert(key, self.parse_string()?);
+                }
+                _ => self.skip_value()?,
+            }
+            self.skip_ws();
+            match self.next() {
+                Some(',') => continue,
+                Some('}') => return Ok(Some(values)),
+                Some(ch) => return Err(format!("expected ',' or '}}', found '{ch}'")),
+                None => return Err("unterminated json string map".into()),
+            }
+        }
+    }
+
+    fn parse_optional_item_stacks(&mut self) -> Result<Option<Vec<ItemStack>>, String> {
+        self.skip_ws();
+        if self.peek() != Some('[') {
+            self.skip_value()?;
+            return Ok(None);
+        }
+        self.expect('[')?;
+        self.skip_ws();
+        let mut stacks = Vec::new();
+        if self.peek() == Some(']') {
+            self.index += 1;
+            return Ok(Some(stacks));
+        }
+        loop {
+            self.skip_ws();
+            match self.peek() {
+                Some('{') => {
+                    if let Some(stack) = self.parse_item_stack_object()? {
+                        stacks.push(stack);
+                    }
+                }
+                _ => self.skip_value()?,
+            }
+            self.skip_ws();
+            match self.next() {
+                Some(',') => continue,
+                Some(']') => return Ok(Some(stacks)),
+                Some(ch) => return Err(format!("expected ',' or ']', found '{ch}'")),
+                None => return Err("unterminated item stack array".into()),
+            }
+        }
+    }
+
+    fn parse_item_stack_object(&mut self) -> Result<Option<ItemStack>, String> {
+        self.expect('{')?;
+        self.skip_ws();
+        let mut item = None;
+        let mut amount = None;
+        if self.peek() == Some('}') {
+            self.index += 1;
+            return Ok(None);
+        }
+        loop {
+            let key = self.parse_string()?;
+            self.expect(':')?;
+            match key.as_str() {
+                "item" => item = self.parse_optional_item_name()?,
+                "amount" => amount = self.parse_optional_i32()?,
+                _ => self.skip_value()?,
+            }
+            self.skip_ws();
+            match self.next() {
+                Some(',') => continue,
+                Some('}') => {
+                    return Ok(item
+                        .zip(amount)
+                        .map(|(item, amount)| ItemStack::new(item, amount)))
+                }
+                Some(ch) => return Err(format!("expected ',' or '}}', found '{ch}'")),
+                None => return Err("unterminated item stack json object".into()),
+            }
+        }
+    }
+
+    fn parse_optional_item_name(&mut self) -> Result<Option<String>, String> {
+        self.skip_ws();
+        match self.peek() {
+            Some('"') => self.parse_string().map(Some),
+            Some('{') => {
+                self.expect('{')?;
+                self.skip_ws();
+                let mut name = None;
+                if self.peek() == Some('}') {
+                    self.index += 1;
+                    return Ok(None);
+                }
+                loop {
+                    let key = self.parse_string()?;
+                    self.expect(':')?;
+                    match key.as_str() {
+                        "name" => name = self.parse_optional_string_value()?,
+                        _ => self.skip_value()?,
+                    }
+                    self.skip_ws();
+                    match self.next() {
+                        Some(',') => continue,
+                        Some('}') => return Ok(name),
+                        Some(ch) => return Err(format!("expected ',' or '}}', found '{ch}'")),
+                        None => return Err("unterminated item json object".into()),
+                    }
+                }
+            }
+            _ => {
+                self.skip_value()?;
+                Ok(None)
             }
         }
     }

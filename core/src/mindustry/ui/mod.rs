@@ -1,10 +1,22 @@
 // Mirrors upstream core/src/mindustry/ui. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.
 
 pub mod bar;
+pub mod border_image;
+pub mod core_items_display;
 pub mod dialogs;
 pub mod displayable;
 pub mod fonts;
+pub mod fragments;
+pub mod grid_image;
+pub mod int_format;
+pub mod items_display;
+pub mod layout;
+pub mod links;
+pub mod menus;
+pub mod minimap;
 pub mod mobile_button;
+pub mod multi_req_image;
+pub mod req_image;
 pub mod styles;
 pub mod warning_bar;
 
@@ -1955,6 +1967,10 @@ pub use bar::{
     Bar, BarBackgroundDraw, BarDrawCommand, BarDrawPlan, BarFillDraw, BarFrameState, BarLayout,
     BarOutlineDraw, BarTextDraw,
 };
+pub use core_items_display::{
+    format_amount, CoreItemsDisplay, CoreItemsDisplayEntry, CoreItemsDisplayModel,
+    CoreItemsDisplayRow,
+};
 pub use dialogs::BaseDialog;
 pub use displayable::{DisplayTable, Displayable};
 pub use fonts::{
@@ -1975,7 +1991,33 @@ pub use fonts::{
     UPSTREAM_MONOSPACE_FONT_SOURCE_PATH, UPSTREAM_TECH_FONT_SOURCE_PATH,
     UPSTREAM_UI_ICON_FONTGEN_CONFIG_SOURCE_PATH, UPSTREAM_UI_ICON_GLYPHS,
 };
+pub use fragments::{
+    BlockConfigFragment, BlockConfigShowResult, BlockConfigTableAction, BlockInventoryAction,
+    BlockInventoryBuildingRef, BlockInventoryFragment, BlockInventoryItemCell, BlockInventoryModel,
+    BlockInventoryUpdateContext, BuildPlanUiRef, ConfigBuildingRef, FadeInDrawPlan, FadeInFragment,
+    HudContext, HudFragment, HudFragmentAction, HudObjective, HudOverlayModel, HudRulesSnapshot,
+    HudStatusModel, HudToastAction, HudUnlockAction, HudWaveSkipAction, MinimapAction,
+    MinimapConvertEnv, MinimapDrawPlan, MinimapFragment, MinimapGraphics, MinimapSceneMargins,
+    MinimapTexture, MinimapToggleFocus, MinimapUpdateContext, MinimapWorld, PlanConfigBlock,
+    PlanConfigFragment, PlanConfigShowResult, PlanConfigTableAction, PlanConfigTableModel,
+    PlayerListContext, PlayerListFragment, PlayerListModel, PlayerListPlayer, PlayerListRow,
+    BLOCK_INVENTORY_CELL_PAD, BLOCK_INVENTORY_CELL_SIZE, BLOCK_INVENTORY_COLUMNS,
+    BLOCK_INVENTORY_HOLD_SHRINK, BLOCK_INVENTORY_HOLD_WITHDRAW, BLOCK_INVENTORY_MARGIN, HUD_DSIZE,
+    HUD_PAUSE_DISABLED_DURATION, HUD_PAUSE_HEIGHT, HUD_STATUS_TABLE_WIDTH, HUD_TOAST_HOLD_DURATION,
+    HUD_TOAST_INTERVAL_MILLIS, HUD_TOAST_MARGIN, HUD_TOAST_TEXT_WIDTH,
+    HUD_TOAST_TRANSLATE_DURATION, HUD_UNLOCK_COLUMNS, HUD_UNLOCK_ICON_CAP,
+    PLAYER_LIST_CONTENT_MARGIN_HORIZONTAL, PLAYER_LIST_DIALOG_MIN_WIDTH, PLAYER_LIST_ICON_SIZE,
+    PLAYER_LIST_MENU_BUTTON_HEIGHT, PLAYER_LIST_ROW_HEIGHT, PLAYER_LIST_WIDTH,
+};
+pub use grid_image::{GridImage, GridImageDrawPlan, GridImageLayout, GridImageLineDraw};
+pub use int_format::IntFormat;
+pub use layout::{
+    BranchTreeLayout, RadialTreeLayout, RowTreeLayout, TreeAlignment, TreeArena, TreeLayout,
+    TreeLocation, TreeNode,
+};
 pub use mobile_button::{MobileButton, MobileButtonLayout};
+pub use multi_req_image::MultiReqImage;
+pub use req_image::{ReqImage, ReqImageDrawPlan, ReqImageInvalidLineDraw, ReqImageLayout};
 pub use styles::{
     upstream_button_style_skin, upstream_check_box_style_skin, upstream_dialog_style_skin,
     upstream_image_button_style_skin, upstream_label_style_skin, upstream_scroll_pane_style_skin,
