@@ -19,6 +19,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1241. 补齐 ArcNetProvider 真 socket 初始 join smoke
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.997%**，仍未达到完整可玩；当前继续优先 UI/前端所有子菜单贴近 Java 原版，同时继续推进 Java↔Rust 真联机 smoke、world/save-load 与 Rules JSON 应用闭环。
+- Java 对照与接入点：
+  - Net：对齐 Java v157.4 初始 join 链路：连接建立后客户端发送 `ConnectPacket`，服务端接受并排队 world stream，随后客户端完成 `Streamable` 重组并发送 `ConnectConfirmCallPacket`。
+  - Rust 接入点：`core/src/mindustry/net/arc_net_provider.rs` 的真 TCP/UDP provider、`core/src/mindustry/core/net_client.rs` 的自动 `ConnectPacket`/confirm 路径、`core/src/mindustry/core/net_server.rs` 的 pending world data 与 join flag 更新路径。
+- 本轮主改动：
+  - `core/src/mindustry/net/arc_net_provider.rs`
+    - 新增 `arc_net_provider_smoke_java_join_flow_roundtrips_connect_packet_world_stream_and_confirm`；
+    - 使用 `NetClient + NetServer + ArcNetProvider` 真实 socket 串起 v157.4 默认 `ClientConnectConfig` → `ConnectPacket` → `send_pending_world_data()` → `StreamBegin`/`StreamChunk` → 客户端 `Streamable` → `ConnectConfirmCallPacket`；
+    - 断言服务端 `pending_world_data_connections`、`last_world_data_connection_id`、`world_streams_sent`、`last_connect_confirm_connection_id`，以及连接上的 `has_begun_connecting`、`has_connected`、`player_added`；
+    - 断言客户端 `last_sent_connect_packet`、`last_world_stream`、`connect_confirm_sent`、`connected` 与 confirm 错误状态。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core arc_net_provider_smoke_java_join_flow_roundtrips_connect_packet_world_stream_and_confirm --lib -- --nocapture`
+  - `cargo test -p mindustry-core arc_net_provider_registers_tcp_udp_and_exchanges_packets --lib -- --nocapture`
+  - `cargo check -p mindustry-core --lib`
+  - `cargo check -p mindustry-desktop --lib`
+- 后续继续优先：
+  1. Net：继续补更高层 `ServerLauncher + DesktopLauncher` 真实 join smoke，并继续推进 Java client ↔ Rust server / Rust client ↔ Java server 最小兼容验证；
+  2. Rules：补 `RulesJsonPatch` 区域限制组 `limitMapArea/limitX/limitY/limitWidth/limitHeight/disableOutsideArea` 与背景字段组 `customBackgroundCallback/backgroundTexture/backgroundSpeed/backgroundScl/backgroundOffsetX/backgroundOffsetY`；
+  3. UI：继续核对 Load slot decoration、Database/ContentInfo UI-stat-bar 与 Java 对象生命周期差异；
+  4. World/save：补 `SaveSnapshot` 统一应用入口与更完整的 save-load 运行时接入。
+
 ## 1240. 接上 Workshop 菜单启动态联动并扩展 RulesJsonPatch 标量字段
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。

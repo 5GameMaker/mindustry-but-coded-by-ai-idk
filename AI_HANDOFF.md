@@ -10,13 +10,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.996%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.997%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 最新闭环：补齐 ArcNetProvider 真 socket 初始 join smoke
+
+- 当前总体迁移完成度：约 **99.997%**，仍未达到完整可玩。
+- 本轮实现：
+  - `core/src/mindustry/net/arc_net_provider.rs`
+    - 新增 `arc_net_provider_smoke_java_join_flow_roundtrips_connect_packet_world_stream_and_confirm`；
+    - 使用 `NetClient + NetServer + ArcNetProvider` 真 socket 串起 v157.4 默认 `ConnectPacket`、服务端 pending world data、`StreamBegin`/`StreamChunk`、客户端 `Streamable` 重组与自动 `ConnectConfirmCallPacket`；
+    - 锁住服务端 `last_connect_confirm_connection_id`、`world_streams_sent`、连接 `has_begun_connecting/has_connected/player_added`，以及客户端 `last_sent_connect_packet`、`last_world_stream`、`connect_confirm_sent/connected`。
+- 已验证/本轮收口验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core arc_net_provider_smoke_java_join_flow_roundtrips_connect_packet_world_stream_and_confirm --lib -- --nocapture`
+  - `cargo test -p mindustry-core arc_net_provider_registers_tcp_udp_and_exchanges_packets --lib -- --nocapture`
+  - `cargo check -p mindustry-core --lib`
+  - `cargo check -p mindustry-desktop --lib`
+- 下一步优先：
+  1. Net：补更高层 `ServerLauncher + DesktopLauncher` 真实 join smoke，并继续推进 Java client ↔ Rust server / Rust client ↔ Java server 最小兼容验证；
+  2. Rules：补区域限制组与背景字段组；
+  3. UI：继续核对 Load slot decoration、Database/ContentInfo UI-stat-bar；
+  4. World/save：补 `SaveSnapshot` 统一应用入口。
 
 ## 最新闭环：接上 Workshop 菜单启动态联动并扩展 RulesJsonPatch 标量字段
 

@@ -2787,7 +2787,7 @@ mod tests {
     use std::{net::UdpSocket, thread, time::Duration};
 
     use crate::mindustry::{
-        core::content_loader::ContentLoader,
+        core::{content_loader::ContentLoader, ClientConnectConfig, NetClient, NetServer},
         ctype::ContentType,
         game::Gamemode,
         io::{BuildPlanWire, BuildingRef, ContentRef, EntityRef, TeamId, TypeValue, UnitRef},
@@ -2797,7 +2797,9 @@ mod tests {
             ConstructFinishCallPacket, DeconstructFinishCallPacket, DeletePlansCallPacket,
             DestroyPayloadCallPacket,
         },
-        net::{network_io::ServerData, write_server_data},
+        net::{
+            network_io::ServerData, write_minimal_world_data, write_server_data, Net, SentPacket,
+        },
     };
 
     #[test]
@@ -3081,6 +3083,132 @@ mod tests {
     }
 
     #[test]
+    fn arc_net_provider_smoke_java_join_flow_roundtrips_connect_packet_world_stream_and_confirm() {
+        let port = free_local_port();
+        let server = NetServer::new(Net::new(Box::new(ArcNetProvider::new())));
+        server.open(port).unwrap();
+
+        let client = NetClient::with_net(Net::new(Box::new(ArcNetProvider::new())));
+        let connect_config = ClientConnectConfig {
+            name: "java-smoke".into(),
+            usid: "java-smoke-usid".into(),
+            color: 0x336699,
+            ..ClientConnectConfig::default()
+        };
+        let expected_connect_packet = connect_config.to_connect_packet();
+        client.set_connect_config(Some(connect_config));
+        client.begin_connecting();
+        {
+            let mut net = client.net_mut();
+            net.connect("127.0.0.1", port, Box::new(|| {})).unwrap();
+        }
+
+        wait_until(
+            "server accepts v157.4 ConnectPacket and queues world data",
+            || {
+                client.update();
+                server.update();
+                let state = server.state();
+                let state = state.lock().unwrap();
+                state.connect_packets_accepted == 1
+                    && !state.pending_world_data_connections.is_empty()
+            },
+        );
+
+        let connection_id = {
+            let state = server.state();
+            let state = state.lock().unwrap();
+            assert_eq!(state.connect_packets_rejected, 0);
+            assert_eq!(state.pending_world_data_connections.len(), 1);
+            let handshake = state.last_handshake.as_ref().unwrap();
+            assert_eq!(handshake.version, expected_connect_packet.version);
+            assert_eq!(handshake.version_type, expected_connect_packet.version_type);
+            assert_eq!(handshake.mods, expected_connect_packet.mods);
+            assert_eq!(handshake.name, expected_connect_packet.name);
+            assert_eq!(handshake.locale, expected_connect_packet.locale);
+            assert_eq!(handshake.usid, expected_connect_packet.usid);
+            assert_eq!(handshake.mobile, expected_connect_packet.mobile);
+            assert_eq!(handshake.color, expected_connect_packet.color);
+            let connection_id = state.pending_world_data_connections[0];
+            let connection = state.connection_states.get(&connection_id).unwrap();
+            assert_eq!(connection.name, "java-smoke");
+            assert_eq!(connection.locale, "en_US");
+            assert!(connection.has_begun_connecting);
+            assert!(!connection.has_connected);
+            assert!(!connection.player_added);
+            connection_id
+        };
+
+        let world_data = write_minimal_world_data(connection_id).unwrap();
+        assert_eq!(
+            server
+                .send_pending_world_data(|id| write_minimal_world_data(id).unwrap())
+                .unwrap(),
+            1
+        );
+
+        {
+            let state = server.state();
+            let state = state.lock().unwrap();
+            let connection = state.connection_states.get(&connection_id).unwrap();
+            assert_eq!(state.last_world_data_connection_id, Some(connection_id));
+            assert_eq!(state.last_world_data_bytes, Some(world_data.len()));
+            assert_eq!(state.world_streams_sent, 1);
+            assert_eq!(connection.sent.len(), 2);
+            assert!(matches!(connection.sent[0].0, SentPacket::StreamBegin(_)));
+            assert!(matches!(connection.sent[1].0, SentPacket::StreamChunk(_)));
+        }
+
+        wait_until(
+            "client reassembles world stream and server receives ConnectConfirm",
+            || {
+                client.update();
+                server.update();
+                let state = server.state();
+                let state = state.lock().unwrap();
+                state.last_connect_confirm_connection_id == Some(connection_id)
+            },
+        );
+
+        {
+            let state = client.state();
+            let state = state.lock().unwrap();
+            assert_eq!(
+                state.last_sent_connect_packet.as_ref(),
+                Some(&expected_connect_packet)
+            );
+            assert!(state.connect_packet_sent);
+            assert_eq!(
+                state
+                    .last_world_stream
+                    .as_ref()
+                    .map(|stream| stream.stream.as_slice()),
+                Some(world_data.as_slice())
+            );
+            assert!(state.connect_confirm_sent);
+            assert!(state.last_connect_confirm_error.is_none());
+            assert!(state.connected);
+        }
+
+        {
+            let state = server.state();
+            let state = state.lock().unwrap();
+            assert!(state.pending_world_data_connections.is_empty());
+            assert_eq!(
+                state.last_connect_confirm_connection_id,
+                Some(connection_id)
+            );
+            let connection = state.connection_states.get(&connection_id).unwrap();
+            assert!(connection.has_begun_connecting);
+            assert!(connection.has_connected);
+            assert!(connection.player_added);
+        }
+
+        client.disconnect_no_reset();
+        server.close();
+    }
+
+    #[test]
     fn arc_net_provider_updates_connection_snapshots_after_disconnect() {
         let port = free_local_port();
         let mut server = ArcNetProvider::new();
@@ -3167,6 +3295,16 @@ mod tests {
             ProviderEvent::ClientPacket(packet) => packet,
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    fn wait_until(description: &str, mut predicate: impl FnMut() -> bool) {
+        for _ in 0..150 {
+            if predicate() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        panic!("timed out waiting for {description}");
     }
 
     #[test]
