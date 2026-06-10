@@ -10,13 +10,40 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.995%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.996%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
 - 迁移实现必须继续接入 runtime/render/backend 主链路，不能把过渡 helper/plan 做成孤立模块。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
+
+## 最新闭环：接上 Workshop 菜单启动态联动并扩展 RulesJsonPatch 标量字段
+
+- 当前总体迁移完成度：约 **99.996%**，仍未达到完整可玩。
+- 本轮实现：
+  - `desktop/src/lib.rs`
+    - `platform/steam` setting side-effect 现在会同步 `menu_renderer_state.config.desktop_workshop_enabled`；
+    - 新增 `settings_platform_steam_from_storage_value(...)`，统一 Steam 标记解析；
+    - `clear_snapshot_apply_cursors()` 重建菜单状态后保留 Workshop 可用状态；
+    - 新增 `desktop_launcher_steam_platform_flag_enables_workshop_menu_button_like_java`。
+  - `core/src/mindustry/game/rules.rs`
+    - `RulesJsonPatch` 增加 10 个 Java 顶层纯标量字段：`allowEditWorldProcessors`、`disableWorldProcessors`、`fog`、`staticFog`、`lighting`、`coreIncinerates`、`borderDarkness`、`allowLogicData`、`itemDepositCooldown`、`dragMultiplier`；
+    - 新增 world processor/visibility flags 与 scalar multipliers 两个 JSON 应用测试。
+- 已验证/本轮收口验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_ui_plan_desktop_inserts_workshop_before_mods_when_enabled_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_steam_platform_flag_enables_workshop_menu_button_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_dispatches_workshop_button_to_platform_without_route_shell --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematics_workshop_buttons_follow_java_steam_flag --lib -- --nocapture`
+  - `cargo test -p mindustry-core rules_apply_json_str --lib -- --nocapture`
+  - `cargo check -p mindustry-core --lib`
+  - `cargo check -p mindustry-desktop --lib`
+- 下一步优先：
+  1. Net：在 `core/src/mindustry/net/arc_net_provider.rs` 补真 socket Java join smoke，串起 `NetClient`、`NetServer`、`ArcNetProvider`、world stream 与 confirm；
+  2. Rules：继续补区域限制组与背景字段组；
+  3. UI：继续核对 Load slot decoration、Database/ContentInfo UI-stat-bar；
+  4. World/save：补 `SaveSnapshot` 统一应用入口。
 
 ## 最新闭环：对齐基础内容注册顺序与 Java v157.4 联机握手基线
 

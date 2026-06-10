@@ -19,6 +19,41 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1240. 接上 Workshop 菜单启动态联动并扩展 RulesJsonPatch 标量字段
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.996%**，仍未达到完整可玩；当前继续优先 UI/前端所有子菜单贴近 Java 原版，同时继续推进 Java↔Rust 联机 smoke、world/save-load 与 Rules JSON 应用闭环。
+- Java 对照与接入点：
+  - UI：`core/src/mindustry/ui/fragments/MenuFragment.java` 的桌面主菜单在 Steam 可用时插入 `@workshop`；Rust 接入点为 `desktop/src/lib.rs` 的 platform setting side-effect 与 `core/src/mindustry/graphics/menu_renderer.rs` 已有的 `desktop_workshop_enabled`。
+  - Rules：`core/src/mindustry/game/Rules.java:22-226` 的顶层规则字段；Rust 接入点为 `core/src/mindustry/game/rules.rs::RulesJsonPatch`、`RulesJsonParser::parse_patch()` 与 `RulesJsonPatch::apply()`。
+  - Net：本轮只读审查确认下一条独立闭环应落在 `core/src/mindustry/net/arc_net_provider.rs`，补 `NetClient + NetServer + ArcNetProvider` 真 socket 初始 join smoke：`ConnectPacket` → world stream → `ConnectConfirmCallPacket`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `apply_setting_override_side_effect("platform", "steam", ...)` 同步 `menu_renderer_state.config.desktop_workshop_enabled`；
+    - 新增 `settings_platform_steam_from_storage_value(...)`，统一 `"true"` / `"1"` / `"steam"` 的 Steam 标记解析；
+    - `host_steam_enabled()` 复用同一解析逻辑；
+    - `clear_snapshot_apply_cursors()` 重建 `MenuRendererState` 后重新写回 Workshop 可用状态，避免快照清理丢失菜单根按钮；
+    - 新增 `desktop_launcher_steam_platform_flag_enables_workshop_menu_button_like_java`。
+  - `core/src/mindustry/game/rules.rs`
+    - `RulesJsonPatch` 增加并应用 10 个 Java 顶层纯标量字段：`allowEditWorldProcessors`、`disableWorldProcessors`、`fog`、`staticFog`、`lighting`、`coreIncinerates`、`borderDarkness`、`allowLogicData`、`itemDepositCooldown`、`dragMultiplier`；
+    - 新增 `rules_apply_json_str_supports_world_processor_and_visibility_flags`；
+    - 新增 `rules_apply_json_str_supports_simple_scalar_multipliers`；
+    - 保持未知字段和不支持 value shape 的跳过语义不变。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_ui_plan_desktop_inserts_workshop_before_mods_when_enabled_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_steam_platform_flag_enables_workshop_menu_button_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_dispatches_workshop_button_to_platform_without_route_shell --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematics_workshop_buttons_follow_java_steam_flag --lib -- --nocapture`
+  - `cargo test -p mindustry-core rules_apply_json_str --lib -- --nocapture`
+  - `cargo check -p mindustry-core --lib`
+  - `cargo check -p mindustry-desktop --lib`
+- 后续继续优先：
+  1. Net：在 `core/src/mindustry/net/arc_net_provider.rs` 补真 socket Java join smoke，串起 `NetClient`、`NetServer`、`ArcNetProvider`、world stream 与 confirm；
+  2. Rules：继续补区域限制组 `limitMapArea/limitX/limitY/limitWidth/limitHeight/disableOutsideArea`，再补背景字符串/浮点组；
+  3. UI：继续核对 Load slot decoration、Database/ContentInfo UI-stat-bar 与 Java 对象生命周期差异；
+  4. World/save：补 `SaveSnapshot` 统一应用入口与更完整的 save-load 运行时接入。
+
 ## 1239. 对齐基础内容注册顺序与 Java v157.4 联机握手基线
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。

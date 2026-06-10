@@ -244,6 +244,14 @@ struct RulesJsonPatch {
     editor: Option<bool>,
     infinite_resources: Option<bool>,
     allow_edit_rules: Option<bool>,
+    allow_edit_world_processors: Option<bool>,
+    disable_world_processors: Option<bool>,
+    fog: Option<bool>,
+    static_fog: Option<bool>,
+    lighting: Option<bool>,
+    core_incinerates: Option<bool>,
+    border_darkness: Option<bool>,
+    allow_logic_data: Option<bool>,
     schematics_allowed: Option<bool>,
     hide_banned_blocks: Option<bool>,
     block_whitelist: Option<bool>,
@@ -253,6 +261,8 @@ struct RulesJsonPatch {
     weather: Option<Vec<WeatherEntry>>,
     ambient_light: Option<[f32; 4]>,
     core_capture: Option<bool>,
+    item_deposit_cooldown: Option<f32>,
+    drag_multiplier: Option<f32>,
     wave_spacing: Option<f32>,
     initial_wave_spacing: Option<f32>,
     drop_zone_radius: Option<f32>,
@@ -408,6 +418,30 @@ impl RulesJsonPatch {
         if let Some(value) = self.allow_edit_rules {
             rules.allow_edit_rules = value;
         }
+        if let Some(value) = self.allow_edit_world_processors {
+            rules.allow_edit_world_processors = value;
+        }
+        if let Some(value) = self.disable_world_processors {
+            rules.disable_world_processors = value;
+        }
+        if let Some(value) = self.fog {
+            rules.fog = value;
+        }
+        if let Some(value) = self.static_fog {
+            rules.static_fog = value;
+        }
+        if let Some(value) = self.lighting {
+            rules.lighting = value;
+        }
+        if let Some(value) = self.core_incinerates {
+            rules.core_incinerates = value;
+        }
+        if let Some(value) = self.border_darkness {
+            rules.border_darkness = value;
+        }
+        if let Some(value) = self.allow_logic_data {
+            rules.allow_logic_data = value;
+        }
         if let Some(value) = self.schematics_allowed {
             rules.schematics_allowed = value;
         }
@@ -434,6 +468,12 @@ impl RulesJsonPatch {
         }
         if let Some(value) = self.core_capture {
             rules.core_capture = value;
+        }
+        if let Some(value) = self.item_deposit_cooldown {
+            rules.item_deposit_cooldown = value;
+        }
+        if let Some(value) = self.drag_multiplier {
+            rules.drag_multiplier = value;
         }
         if let Some(value) = self.wave_spacing {
             rules.wave_spacing = value;
@@ -510,6 +550,18 @@ impl<'a> RulesJsonParser<'a> {
                     patch.infinite_resources = self.parse_optional_bool()?;
                 }
                 "allowEditRules" => patch.allow_edit_rules = self.parse_optional_bool()?,
+                "allowEditWorldProcessors" => {
+                    patch.allow_edit_world_processors = self.parse_optional_bool()?
+                }
+                "disableWorldProcessors" => {
+                    patch.disable_world_processors = self.parse_optional_bool()?
+                }
+                "fog" => patch.fog = self.parse_optional_bool()?,
+                "staticFog" => patch.static_fog = self.parse_optional_bool()?,
+                "lighting" => patch.lighting = self.parse_optional_bool()?,
+                "coreIncinerates" => patch.core_incinerates = self.parse_optional_bool()?,
+                "borderDarkness" => patch.border_darkness = self.parse_optional_bool()?,
+                "allowLogicData" => patch.allow_logic_data = self.parse_optional_bool()?,
                 "schematicsAllowed" => patch.schematics_allowed = self.parse_optional_bool()?,
                 "hideBannedBlocks" => patch.hide_banned_blocks = self.parse_optional_bool()?,
                 "blockWhitelist" => patch.block_whitelist = self.parse_optional_bool()?,
@@ -519,6 +571,8 @@ impl<'a> RulesJsonParser<'a> {
                 "weather" => patch.weather = self.parse_optional_weather_entries()?,
                 "ambientLight" => patch.ambient_light = self.parse_optional_f32_array4()?,
                 "coreCapture" => patch.core_capture = self.parse_optional_bool()?,
+                "itemDepositCooldown" => patch.item_deposit_cooldown = self.parse_optional_f32()?,
+                "dragMultiplier" => patch.drag_multiplier = self.parse_optional_f32()?,
                 "waveSpacing" => patch.wave_spacing = self.parse_optional_f32()?,
                 "initialWaveSpacing" => patch.initial_wave_spacing = self.parse_optional_f32()?,
                 "dropZoneRadius" => patch.drop_zone_radius = self.parse_optional_f32()?,
@@ -1755,6 +1809,62 @@ mod tests {
         assert_eq!(team.unit_cost_multiplier, 2.5);
         assert_eq!(team.unit_health_multiplier, 2.6);
         assert_eq!(team.extra_core_build_radius, 64.0);
+    }
+
+    #[test]
+    fn rules_apply_json_str_supports_world_processor_and_visibility_flags() {
+        let mut rules = Rules::default();
+        rules.allow_edit_world_processors = false;
+        rules.disable_world_processors = false;
+        rules.fog = false;
+        rules.static_fog = true;
+        rules.lighting = false;
+        rules.core_incinerates = true;
+        rules.border_darkness = true;
+        rules.allow_logic_data = false;
+
+        rules
+            .apply_json_str(
+                r#"{
+                    "allowEditWorldProcessors": true,
+                    "disableWorldProcessors": true,
+                    "fog": true,
+                    "staticFog": false,
+                    "lighting": true,
+                    "coreIncinerates": false,
+                    "borderDarkness": false,
+                    "allowLogicData": true
+                }"#,
+            )
+            .unwrap();
+
+        assert!(rules.allow_edit_world_processors);
+        assert!(rules.disable_world_processors);
+        assert!(rules.fog);
+        assert!(!rules.static_fog);
+        assert!(rules.lighting);
+        assert!(!rules.core_incinerates);
+        assert!(!rules.border_darkness);
+        assert!(rules.allow_logic_data);
+    }
+
+    #[test]
+    fn rules_apply_json_str_supports_simple_scalar_multipliers() {
+        let mut rules = Rules::default();
+        rules.item_deposit_cooldown = 0.5;
+        rules.drag_multiplier = 1.0;
+
+        rules
+            .apply_json_str(
+                r#"{
+                    "itemDepositCooldown": 1.25,
+                    "dragMultiplier": 0.75
+                }"#,
+            )
+            .unwrap();
+
+        assert_eq!(rules.item_deposit_cooldown, 1.25);
+        assert_eq!(rules.drag_multiplier, 0.75);
     }
 
     #[test]
