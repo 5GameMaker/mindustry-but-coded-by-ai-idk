@@ -446,6 +446,9 @@ fn menu_render_command_with_alpha_scale(
         }
         RenderCommand::DrawSprite {
             tint, mix_color, ..
+        }
+        | RenderCommand::DrawTextureRegion {
+            tint, mix_color, ..
         } => {
             tint[3] = (tint[3] * scale).clamp(0.0, 1.0);
             mix_color[3] = (mix_color[3] * scale).clamp(0.0, 1.0);
@@ -1691,7 +1694,8 @@ fn menu_render_command_visible_in_viewport(
     match command {
         RenderCommand::FillRect { rect, .. }
         | RenderCommand::StrokeRect { rect, .. }
-        | RenderCommand::DrawSprite { rect, .. } => rect.intersects(viewport_rect),
+        | RenderCommand::DrawSprite { rect, .. }
+        | RenderCommand::DrawTextureRegion { rect, .. } => rect.intersects(viewport_rect),
         RenderCommand::DrawCircle { center, radius, .. } => {
             RenderRect::from_center(*center, radius.max(0.0) * 2.0, radius.max(0.0) * 2.0)
                 .intersects(viewport_rect)

@@ -1,6 +1,6 @@
 # rust-mindustry 逐文件还原账本
 
-更新日期：2026-06-10
+更新日期：2026-06-11
 
 ## 约束
 
@@ -14,6 +14,7 @@
 ## 当前验证基线
 
 - `cargo metadata --no-deps --format-version 1`：通过。
+- `cargo fmt --all`：通过。
 - `cargo check --workspace --all-targets`：通过。
 - `git diff --check`：通过。
 - `cargo test -p mindustry-core about_dialog -- --nocapture`：通过，`4 passed; 0 failed`。
@@ -57,6 +58,7 @@
 - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_confirm_ -- --nocapture`：通过，`4 passed; 0 failed`。
 - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_loadout_ -- --nocapture`：通过，`12 passed; 0 failed`。
 - `cargo test -p mindustry-core render_engine -- --nocapture`：通过，`13 passed; 0 failed`。
+- `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_texture_region_uses_explicit_uv_like_java_clouds -- --nocapture`：通过，`1 passed; 0 failed`。
 - `cargo test -p mindustry-desktop desktop_launcher_campaign_core_launch_cutscene_emits_space_pass_like_java -- --nocapture`：通过，`1 passed; 0 failed`。
 - `cargo test -p mindustry-desktop desktop_launcher_ticks_accelerator_launch_time_from_land_time_state -- --nocapture`：通过，`1 passed; 0 failed`。
 - Workspace crate：
@@ -111,7 +113,8 @@
 - `desktop/src/lib.rs` 已继续补 PlanetDialog loadout 确认后的 pending launch 语义：有 source/core 且未跳过动画时，先用 source sector 启动 playable smoke world 并把 destination sector 存入 `campaign_launch_pending_destination_sector`，`LaunchAnimationState` 结束时再消费 pending destination 切到目标 sector；`skipcoreanimation`/无 core 路径保持立即提交目标；新增 `desktop_launcher_campaign_launch_loadout_confirm_defers_destination_like_java` 覆盖 source=`groundZero`、destination=`saltFlats` 的延迟 commit。
 - `core/src/mindustry/game/event_type.rs` 与 `desktop/src/lib.rs` 已补 PlanetDialog loadout 确认后的资源扣除/事件副作用：`SectorLaunchLoadoutEvent` 保留上游 `sector/from/loadout` 字段；`ConfirmCampaignLaunchLoadout` 在切入 `skipcoreanimation`/核心起飞动画分支前，按 `campaign_launch_loadout_stacks()` 从 source sector 扣除 schematic requirements + launch resources，并记录发射事件；动画分支传入已扣资源 source 快照，新增 `desktop_launcher_campaign_launch_loadout_confirm_deducts_source_items_and_fires_event_like_java`。
 - `core/src/mindustry/graphics/render_engine.rs` 与 `desktop/src/lib.rs` 已补普通 `CoreBuild` launch 过场的 `Layer.space` 数据化渲染闭环：新增 `RenderPassKind::Space` / `RendererDrawStage::Space`，排序在 `Fog(90)` 与 `BlockOverdraw(100)` 之间；`CampaignCore` cutscene active 时按上游 `Renderer.draw(Layer.space)` / `CoreBlock.drawLaunch()` 生成 space pass，包含 100 条 `Pal.lightTrail` `DrawLine` 粒子、4 组队伍色/白色 `DrawCircle` 推进火焰、16 个 `core-*-thruster1/2` thruster region `DrawSprite`、`circle-shadow`、core `fullIcon` 旋转+white/accent mix，并按 `CoreBlock.lightRadius = 30 + 20 * size` 与 render-time `absin` 注入 lighting primitive；测试已断言不再依赖 `campaign-core-launch-*` custom marker。
-- 后续继续补真实 OpenGL 3D backend 执行、完整 numbered sector 选择/面板、sector 展开/选区实绘，以及 `CoreBlock.drawLaunch()` 的 clouds UV/scroll typed primitive、dust/fade overlay 细化。
+- `core/src/mindustry/graphics/render_engine.rs`、`core/src/mindustry/graphics/menu_renderer.rs` 与 `desktop/src/lib.rs` 已补 `DrawTextureRegion` typed primitive：payload 包含 symbol/rect/uv/origin/tint/mix/rotation/layer，按 sprite 类命令进入 screen-visible、menu alpha/viewport filter、atlas resolver、OpenGL backend action、texture binding、sprite quad、execution trace 与 `DrawTextureRegion` trace kind；`CampaignCore` launch pass 已按上游 `cloudScaling=1700`、`cfinScl=-2`、`cfinOffset=0.3`、`calphaFinOffset=0.25`、`cloudAlpha=0.81`、`cloudAlphas=[0,0.5,1,0.1,0,0]` 接入 `sprites/clouds.png` UV/scroll clouds，并在 begin core launch 时初始化稳定 `cloudSeed`。
+- 后续继续补真实 OpenGL 3D backend 执行、完整 numbered sector 选择/面板、sector 展开/选区实绘，以及 `CoreBlock.drawLaunch()` 的 dust/fade overlay 细化。
 
 ## UI/图形缺口清单
 
@@ -216,7 +219,7 @@
 - `g3d/MatMesh`：已补 `core/src/mindustry/graphics/g3d/mat_mesh.rs`，覆盖 `transform * local mat` 包裹渲染与 dispose 转发。
 - `g3d/MultiMesh`：已补 `core/src/mindustry/graphics/g3d/multi_mesh.rs`，覆盖子 mesh 顺序 render/dispose fan-out。
 - `g3d/NoiseMesh`：已补 `core/src/mindustry/graphics/g3d/noise_mesh.rs`，覆盖单色/双色噪声 mesh、`7+seed` height、`8+seed` color、`5f` 坐标偏移与 `intensity=0.2`。
-- `g3d/PlanetRenderer`：已补最小场景壳 `core/src/mindustry/graphics/g3d/planet_renderer.rs`，覆盖上游 `fov=60`、`far=150`、`projector scaling=1/150`、skybox/bloom/depth/cull/planet/clouds/sectors/atmosphere/orbit/interface projection 的数据化阶段顺序；`desktop/src/lib.rs::push_campaign_route_page` 已开始消费该 plan，并用 `PlanetSceneStep` 驱动可见 preview primitives；`CursorMoved` 已能通过 `PlanetGrid` surface ray picking 更新 PlanetDialog hover，hover label 已随 hovered sector 投到 planet preview 表面，`RenderProjections` 已扩展到全 planet visible sector layer、hovered special icon branch 与 debugShowNumbers 编号层，`RenderOverProjections` 已开始使用 sector-to-sector launcher/import/export/shield/attack 投影线；loadout 确认后的普通 core launch cutscene 已接入共享 `LaunchAnimationState`，并补 pending destination 延迟提交、资源扣除、`SectorLaunchLoadoutEvent` 与 `Layer.space` 数据化 launch pass，且粒子线、推进火焰、thruster region sprite 已落成可见 primitive；后续仍需接入完整扇区选择、`CoreBlock.drawLaunch()` clouds UV/scroll、dust/fade 细化与 OpenGL 实绘。
+- `g3d/PlanetRenderer`：已补最小场景壳 `core/src/mindustry/graphics/g3d/planet_renderer.rs`，覆盖上游 `fov=60`、`far=150`、`projector scaling=1/150`、skybox/bloom/depth/cull/planet/clouds/sectors/atmosphere/orbit/interface projection 的数据化阶段顺序；`desktop/src/lib.rs::push_campaign_route_page` 已开始消费该 plan，并用 `PlanetSceneStep` 驱动可见 preview primitives；`CursorMoved` 已能通过 `PlanetGrid` surface ray picking 更新 PlanetDialog hover，hover label 已随 hovered sector 投到 planet preview 表面，`RenderProjections` 已扩展到全 planet visible sector layer、hovered special icon branch 与 debugShowNumbers 编号层，`RenderOverProjections` 已开始使用 sector-to-sector launcher/import/export/shield/attack 投影线；loadout 确认后的普通 core launch cutscene 已接入共享 `LaunchAnimationState`，并补 pending destination 延迟提交、资源扣除、`SectorLaunchLoadoutEvent` 与 `Layer.space` 数据化 launch pass，且粒子线、推进火焰、thruster region sprite、clouds UV/scroll 已落成可见 primitive；后续仍需接入完整扇区选择、`CoreBlock.drawLaunch()` dust/fade 细化与 OpenGL 实绘。
 - `g3d/SunMesh`：已补 `core/src/mindustry/graphics/g3d/sun_mesh.rs`，覆盖 zero height、simplex/pow/mag 离散 palette clamp 与 `Shaders.unlit`。
 
 ## 下一步

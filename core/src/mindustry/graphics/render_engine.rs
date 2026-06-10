@@ -525,6 +525,16 @@ pub enum RenderCommand {
         rotation: f32,
         layer: f32,
     },
+    DrawTextureRegion {
+        symbol: String,
+        rect: RenderRect,
+        uv: RenderUvRect,
+        origin: RenderPoint,
+        tint: [f32; 4],
+        mix_color: [f32; 4],
+        rotation: f32,
+        layer: f32,
+    },
     DrawLine {
         from: RenderPoint,
         to: RenderPoint,
@@ -676,6 +686,49 @@ impl RenderCommand {
         }
     }
 
+    pub fn draw_texture_region(
+        symbol: impl Into<String>,
+        rect: RenderRect,
+        uv: RenderUvRect,
+        tint: [f32; 4],
+        mix_color: [f32; 4],
+        rotation: f32,
+        layer: f32,
+    ) -> Self {
+        Self::draw_texture_region_with_origin(
+            symbol,
+            rect,
+            uv,
+            rect.center_origin(),
+            tint,
+            mix_color,
+            rotation,
+            layer,
+        )
+    }
+
+    pub fn draw_texture_region_with_origin(
+        symbol: impl Into<String>,
+        rect: RenderRect,
+        uv: RenderUvRect,
+        origin: RenderPoint,
+        tint: [f32; 4],
+        mix_color: [f32; 4],
+        rotation: f32,
+        layer: f32,
+    ) -> Self {
+        Self::DrawTextureRegion {
+            symbol: symbol.into(),
+            rect,
+            uv,
+            origin,
+            tint,
+            mix_color,
+            rotation,
+            layer,
+        }
+    }
+
     pub fn draw_line(
         from: RenderPoint,
         to: RenderPoint,
@@ -808,6 +861,7 @@ impl RenderCommand {
             Self::FillRect { .. }
             | Self::StrokeRect { .. }
             | Self::DrawSprite { .. }
+            | Self::DrawTextureRegion { .. }
             | Self::DrawLine { .. }
             | Self::DrawCircle { .. }
             | Self::DrawPolygon { .. }
@@ -1786,6 +1840,47 @@ mod tests {
                 assert_eq!(origin, RenderPoint::new(1.0, 2.0));
             }
             other => panic!("unexpected pivoted sprite command: {other:?}"),
+        }
+
+        let uv = RenderUvRect::new(0.125, 0.25, 0.75, 0.875);
+        let texture_region = RenderCommand::draw_texture_region_with_origin(
+            "clouds",
+            rect,
+            uv,
+            RenderPoint::new(3.0, 4.0),
+            [0.9, 0.8, 0.7, 0.6],
+            [0.1, 0.2, 0.3, 0.4],
+            12.5,
+            33.0,
+        );
+        match texture_region {
+            RenderCommand::DrawTextureRegion {
+                symbol,
+                rect: texture_rect,
+                uv: texture_uv,
+                origin,
+                tint,
+                mix_color,
+                rotation,
+                layer,
+            } => {
+                assert_eq!(symbol, "clouds");
+                assert_eq!(texture_rect, rect);
+                assert_eq!(texture_uv, uv);
+                assert_eq!(origin, RenderPoint::new(3.0, 4.0));
+                assert_eq!(tint, [0.9, 0.8, 0.7, 0.6]);
+                assert_eq!(mix_color, [0.1, 0.2, 0.3, 0.4]);
+                assert_eq!(rotation, 12.5);
+                assert_eq!(layer, 33.0);
+                assert_eq!(
+                    RenderCommand::draw_texture_region(
+                        "clouds", rect, uv, tint, mix_color, rotation, layer,
+                    )
+                    .backend_flush_boundary(),
+                    None
+                );
+            }
+            other => panic!("unexpected texture region command: {other:?}"),
         }
 
         match text {
