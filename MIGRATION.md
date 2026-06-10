@@ -19,6 +19,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1237. 收口 OpenGL 前端批次与字体布局缓存 FPS 热点
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.993%**，仍未达到完整可玩；当前继续优先 UI/前端所有子菜单贴近 Java 原版，同时把用户反馈的极低帧率作为前端阻塞问题持续优化。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DESKTOP_OPENGL_UI_LAYER_BATCH_GRANULARITY` 从 `0.001` 调整为 `0.004`，只作用于 `Layer::END_PIXELED..=Layer::MAX` 的 UI 层，世界层仍按原始 layer 精确分批；
+    - `opengl_backend_sprite_draw_call_plans_from_batches(...)` 增加空批次早退、预分配 batch order，并改用 `sort_unstable_by` 保持按 `min_layer` + batch index 排序；
+    - `DesktopGraphicsOpenGlBackendSpriteMeshBatch::new(...)` 与 batch Vec 增加最小容量预留，减少前端稳定帧重复分配；
+    - 真实字体布局缓存从 “达到 512 项直接 `clear()`” 改为带 `last_used` 的冷项淘汰，稳定菜单文本在高压列表/子菜单中不再因冷文本进入而被整表清空；
+    - 新增 `desktop_graphics_opengl_backend_real_font_layout_cache_evicts_cold_entries_without_full_clear`，锁住热文本保留与缓存上限。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_batches_ui_micro_layers_into_coarse_bins_for_stable_fps --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_real_font_layout_cache_evicts_cold_entries_without_full_clear --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_sprite_draw_call_plans_sort_batches_by_min_layer --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_batches_split_shared_texture_by_layer --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_real_font_layout_cache_reuses_stable_text_like_java --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_reuses_finalized_menu_ui_render_command_cache_when_unchanged --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_keeps_finalized_menu_ui_render_command_cache_during_submenu_fade --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_synthetic_menu_background_quantizes_animation_for_stable_fps --lib -- --nocapture`
+  - `cargo check -p mindustry-desktop --lib`
+  - `cargo build -p mindustry-desktop --release`
+- 后续继续优先：
+  1. FPS：继续收口 `record_primitive_quads` / texture upload dirty 抖动、菜单 UI command clone/splice 成本；
+  2. UI：Settings/Language、Load/Save、Join/Host、Mods Browser/详情、Database/ContentInfo 子菜单继续贴近 Java；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1236. 缓存 LoadDialog 存档卡片文本 projection
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
