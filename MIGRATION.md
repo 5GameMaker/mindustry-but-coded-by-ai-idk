@@ -19,6 +19,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1234. 缓存 Settings 主菜单 entries 降低前端稳定帧重建
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.988%**，仍未达到完整可玩；当前继续优先 UI/前端所有子菜单贴近 Java 原版，同时把用户反馈的极低帧率作为前端阻塞问题持续优化。
+- Java 对照：
+  - `core/src/mindustry/ui/dialogs/SettingsMenuDialog.java:362-386`：Settings 主菜单按钮在 `rebuildMenu()` 中按平台/条件构建，稳定帧不应每帧重新投影可见 entry 列表；
+  - Controls 入口受 mobile/keyboard 条件控制，动态 settings 分类会追加到主菜单。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopSettingsVisibleMainMenuEntriesCacheKey` / `DesktopSettingsVisibleMainMenuEntriesCache`；
+    - `DesktopLauncher` 增加 `settings_visible_main_menu_entries_cache` 与 rebuild 计数；
+    - cache key 覆盖 mobile、controls 可见性和动态分类主菜单签名；
+    - `settings_visible_main_menu_entries()` 命中时直接复用 entry 投影，减少 Settings 主页面稳定帧重复扫描/克隆；
+    - 新增 `desktop_launcher_settings_main_menu_entries_cache_reuses_stable_runtime_projection`，锁住稳定复用，以及 mobile/dynamic category rename 变化时失效。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_main_menu_entries_cache_reuses_stable_runtime_projection --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_main_page_renders_upstream_menu_buttons --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_main_page_buttons_render_pressed_state_like_java --lib -- --nocapture`
+- 后续继续优先：
+  1. FPS：Settings pref specs/layout cache、LoadGame per-slot 文本 projection cache、Join/Mods card projection cache；
+  2. UI：Join 服务器卡片 header/body、Mods Browser/详情弹窗、Settings/Load 子菜单细节继续贴近 Java；
+  3. 可玩性：继续把 UI 与 world/runtime/net 联动补齐，不能做成孤立模块。
+
 ## 1233. 缓存 LoadDialog 过滤结果降低存档列表稳定帧开销
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
