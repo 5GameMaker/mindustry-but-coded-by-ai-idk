@@ -38824,6 +38824,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 字体布局缓存仍可能在大量唯一文本场景下抖动，后续可改成 LRU/分桶；
   - UI 还原仍需继续对齐所有子菜单细节，完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
 
+## 1066. MapList 过滤结果缓存与前端 FPS 收口
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **99.992%**，仍未达到完整可玩；继续优先前端/UI、字体、语言、本地化和所有子菜单贴近 Java 原版。
+- 背景：MapList / Editor / CustomGame 共享 `filtered_map_card_indices()`，此前稳定帧会反复 lowercase、全量过滤、构造 planet filter 集合并排序，影响菜单 FPS。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopMapListFilteredIndicesCacheKey` / `DesktopMapListFilteredIndicesCache`；
+    - key 覆盖搜索串、类型过滤、搜索范围、排序优先级、模式过滤、有效 planet 过滤、地图卡片数量与内容 digest；
+    - `filtered_map_card_indices()` 改为缓存命中时直接复用 indices，失效时保持原 Java-like 过滤/排序语义重建；
+    - 重建时复用已计算 active planet filters，避免每张地图重复构造可用 planet set；
+    - 删除不再需要的逐地图 planet helper；
+    - 新增稳定过滤缓存测试，并保留原 MapList 搜索/滚动可见卡片回归。
+  - `README.md`
+    - 迁移进度更新到 **99.992%**。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_map_list_reuses_filtered_indices_between_stable_filters --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_list_search_and_scroll_filter_visible_cards --lib -- --nocapture`
+  - `cargo fmt --all`
+- 仍未完成：
+  - Join/Mods/MapList 的 UI 微层级仍需继续合并，降低 OpenGL batch 碎片；
+  - 字体布局缓存仍需从全清策略改为 LRU/局部淘汰；
+  - UI 还原仍需继续对齐所有子菜单细节，完整可玩与 Java↔Rust 联机兼容仍需继续推进，不能宣告目标完成。
+
 ## 1066. 收口 MapLocalesDialog 主弹窗字体节奏
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

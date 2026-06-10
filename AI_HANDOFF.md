@@ -17718,3 +17718,25 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 合并 Join/Mods/MapList 的 UI 微层级，降低 OpenGL batch 碎片；
   3. 字体布局缓存从满 512 全清改为 LRU/局部淘汰；
   4. 继续 UI 子菜单视觉与字体/语言还原，最终目标仍是完整可游玩的 Rust Mindustry/MDT。
+
+### 2026-06-10：MapList 过滤缓存闭环
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **99.992%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - `filtered_map_card_indices()` 新增缓存，真实接入 CustomGame / Editor / MapList 点击命中与渲染路径；
+    - 缓存 key 覆盖 search、show builtin/custom/modded、search scope、prioritize flags、mode filters、active planets、map card digest；
+    - rebuild 时保留 Java plain lowercase contains 和原排序语义，不做 Rust-only 模糊匹配；
+    - 新增 `desktop_launcher_map_list_reuses_filtered_indices_between_stable_filters`。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_map_list_reuses_filtered_indices_between_stable_filters --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_list_search_and_scroll_filter_visible_cards --lib -- --nocapture`
+  - `cargo fmt --all`
+- 下一步建议：
+  1. OpenGL/UI 微层级压缩：先 Join / Mods / MapList，减少 batch 碎片；
+  2. 字体布局缓存改 LRU，避免大量唯一文本导致 512 满后全清；
+  3. 继续 UI 子菜单视觉还原，尤其 Settings/Language、Load/Save、Join community、Mods browser/detail。
