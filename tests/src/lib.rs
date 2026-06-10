@@ -110,6 +110,82 @@ fn pump_real_server_desktop_until(
 }
 
 #[test]
+fn real_server_desktop_playable_smoke_true_join_round_trip() {
+    use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
+    use mindustry_core::mindustry::io::TeamId;
+
+    let port = free_local_port();
+    let mut server = mindustry_server::run(vec![
+        "mindustry-server".into(),
+        "--port".into(),
+        port.to_string(),
+        "--playable-smoke".into(),
+    ]);
+    let mut desktop = mindustry_desktop::run(vec![
+        "mindustry-desktop".into(),
+        "--connect".into(),
+        format!("127.0.0.1:{port}"),
+    ]);
+
+    pump_real_server_desktop_until(&mut server, &mut desktop, |desktop| {
+        desktop.playable_smoke_ready()
+    });
+
+    let status = desktop.playable_smoke_status();
+    assert!(status.ready(), "{status:?}");
+    assert!(desktop.playable_smoke_ready());
+    assert!(status.client_ready);
+    assert!(status.connected);
+    assert!(status.world_loaded);
+    assert!(status.confirmed);
+    assert!(status.game_playing);
+    assert!(status.runtime_client);
+    assert_eq!(status.world_width, 16);
+    assert_eq!(status.world_height, 16);
+    assert_eq!(status.buildings, 1);
+    assert!(status.player_on_default_team);
+    assert_eq!(
+        desktop.runtime.network_context,
+        GameRuntimeNetworkContext::client()
+    );
+    assert!(desktop.game_state.is_playing());
+    assert!(server.runtime.state.is_playing());
+    assert_eq!(server.runtime.state.world.width(), 16);
+    assert_eq!(server.runtime.state.world.height(), 16);
+    assert_eq!(server.network_error, None);
+    assert_eq!(
+        desktop.player.team,
+        TeamId(desktop.game_state.rules.default_team as u8)
+    );
+
+    {
+        let state = desktop.net_client.state();
+        let state = state.lock().unwrap();
+        assert!(state.connected);
+        assert!(state.connect_confirm_sent);
+        assert_eq!(state.world_stream_events, 1);
+        assert!(state.last_world_stream.is_some());
+        assert!(state.last_loaded_world_data.is_some());
+        assert!(state.last_world_data_error.is_none());
+        assert!(state.last_sent_connect_packet.is_some());
+    }
+    {
+        let state = server.net_server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.connect_packets_accepted, 1);
+        assert_eq!(state.connect_packets_rejected, 0);
+        assert!(state.pending_world_data_connections.is_empty());
+        assert_eq!(state.world_streams_sent, 1);
+        assert!(state.last_world_data_connection_id.is_some());
+        assert!(state.last_connect_confirm_connection_id.is_some());
+        assert!(state.last_world_data_error.is_none());
+    }
+
+    desktop.net_client.net_mut().disconnect();
+    server.close_network();
+}
+
+#[test]
 fn real_server_desktop_preview_snapshot_forwarding_updates_remote_player_cache_after_world_stream()
 {
     use mindustry_core::mindustry::io::{BuildPlanWire, Vec2};

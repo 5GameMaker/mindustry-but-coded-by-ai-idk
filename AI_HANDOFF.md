@@ -9,8 +9,29 @@ CONTEXT_BOOTSTRAP_FORBIDDEN_OLD_RUST_DIR=D:/MDT/mindustry-rust
 CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
+## 最新闭环：ServerLauncher + DesktopLauncher 真 socket join smoke
+
+- 当前总体完成度：约 **99.999%**，仍未达到完整可玩。
+- 本轮已确认的关键进展：
+  - `tests/src/lib.rs` 新增 `real_server_desktop_playable_smoke_true_join_round_trip`
+  - 覆盖 `server --playable-smoke` 与 `desktop --connect 127.0.0.1:port`
+  - 断言 `client_ready / connected / world_loaded / confirmed / game_playing / runtime_client`
+  - 断言 `16x16` 世界、`1` 个建筑、默认队伍
+  - 断言 server 侧 `accepted=1 / rejected=0 / pending empty / stream+confirm / world conn`
+- 验证命令：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-tests --lib real_server_desktop_playable_smoke_true_join_round_trip -- --exact --nocapture --test-threads=1`
+  - `cargo test -p mindustry-tests --lib --no-run`
+  - `cargo check -p mindustry-core --lib`
+  - `cargo check -p mindustry-server --lib`
+  - `cargo check -p mindustry-desktop --lib`
+- 后续优先项：
+  1. 继续把 Net 闭环向更高层推进，优先补 Java client ↔ Rust server / Rust client ↔ Java server 的最小可复现路径；
+  2. 然后回收 Rules `planetBackground: PlanetParams` 等未对齐字段；
+  3. 最后再细化 UI / world-save 的运行时接入口。
+
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **99.998%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **99.999%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端视觉还原优先，字体、语言/本地化与所有子菜单继续优先对齐 Java 原版，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。

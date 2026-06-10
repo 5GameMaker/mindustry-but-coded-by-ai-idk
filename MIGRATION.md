@@ -19,6 +19,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 1243. 补齐 ServerLauncher + DesktopLauncher 真 socket join smoke
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
+- 本轮总体进度更新：约 **99.999%**，仍未达到完整可玩；当前继续优先 Net 高层真 socket join smoke，把 `server --playable-smoke` 与 `desktop --connect 127.0.0.1:port` 的真实回路热化为可回归的用例。
+- Java 对照与接入点：
+  - `tests/src/lib.rs` 新增高层 `ServerLauncher + DesktopLauncher` 真 socket join smoke：
+    - `real_server_desktop_playable_smoke_true_join_round_trip`
+    - 覆盖 `server --playable-smoke` 与 `desktop --connect 127.0.0.1:port`
+    - 断言 `client_ready / connected / world_loaded / confirmed / game_playing / runtime_client`
+    - 断言 `16x16` 世界、`1` 个建筑、默认队伍
+    - 断言 server 侧 `accepted=1 / rejected=0 / pending empty / stream+confirm / world conn`
+- 本轮验证命令：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-tests --lib real_server_desktop_playable_smoke_true_join_round_trip -- --exact --nocapture --test-threads=1`
+  - `cargo test -p mindustry-tests --lib --no-run`
+  - `cargo check -p mindustry-core --lib`
+  - `cargo check -p mindustry-server --lib`
+  - `cargo check -p mindustry-desktop --lib`
+- 后续优先：
+  1. 继续把 Net 闭环向更高层推进，优先覆盖 Java client ↔ Rust server / Rust client ↔ Java server 的最小可复现路径；
+  2. 然后回收 Rules `planetBackground: PlanetParams` 等未对齐字段；
+  3. 最后再细化 UI / world-save 的运行时接入口，避免再分叉成独立模块。
+
 ## 1242. 补齐 RulesJsonPatch 区域限制与背景字段组
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用。遇到文字乱码优先 UTF-8 读取/保存，确认失败后再尝试其它编码。
