@@ -43,7 +43,9 @@
 - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_builds_planet_renderer_params_from_dialog_state -- --nocapture`：通过，`1 passed; 0 failed`。
 - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_cursor_move_updates_hovered_sector_like_java -- --nocapture`：通过，`1 passed; 0 failed`。
 - `cargo test -p mindustry-desktop desktop_launcher_campaign_route_planet_surface_hover_uses_ray_picking_like_java -- --nocapture`：通过，`1 passed; 0 failed`。
-- `cargo test -p mindustry-desktop desktop_launcher_campaign_route_ -- --nocapture`：通过，`17 passed; 0 failed`。
+- `cargo test -p mindustry-desktop desktop_launcher_campaign_route_planet_surface_hover_label_projects_to_surface_like_java -- --nocapture`：通过，`1 passed; 0 failed`。
+- `cargo test -p mindustry-desktop desktop_launcher_campaign_route_planet_surface_hover_ -- --nocapture`：通过，`2 passed; 0 failed`。
+- `cargo test -p mindustry-desktop desktop_launcher_campaign_route_ -- --nocapture`：通过，`18 passed; 0 failed`。
 - Workspace crate：
   - `mindustry-core`
   - `mindustry-server`
@@ -85,7 +87,8 @@
 - `core/src/mindustry/graphics` 已覆盖多数基础渲染模块，`g3d/PlanetRenderer` 已提供后端无关 `PlanetScenePlan`。
 - `desktop/src/lib.rs::push_campaign_route_page` 已将 campaign planet card 的视觉核接入 `PlanetRendererParams -> PlanetScenePlan`，并以 `planet-renderer-scene-plan` / `planet-renderer-scene-step` 自定义渲染命令保留 trace；`push_campaign_planet_scene_preview` 已按 `PlanetSceneStep` 生成可见 `DrawPixel` / `DrawCircle` / `DrawPolygon` / `DrawLine` / `DrawSprite` 投影 primitive；`CursorMoved` 已同步当前桌面可命中的 sector selector / sector list hover 到 `CampaignPlanetDialogState.hovered_sector_id`。
 - `desktop/src/lib.rs` 已补 PlanetDialog 地表 hover 首段：`campaign_route_planet_scene_plan` 的 `cam_pos` 跟随 `selected_sector_id` 对应的 `PlanetGrid` tile，新增 `campaign_planet_surface_sector_id_at_surface_point` 用预览相机基向量把 surface point 还原为球面 ray pick，并接入 `campaign_hovered_sector_id_at_surface_point`；新增 `desktop_launcher_campaign_route_planet_surface_hover_uses_ray_picking_like_java` 覆盖中心 ray 命中 selected sector 且 `CursorMoved` 只更新 hover。
-- 后续继续补真实 OpenGL 3D backend 执行、完整 numbered sector 选择/面板、projection 图标/弧线、hover label 投影位置与 launch cutscene。
+- `desktop/src/lib.rs` 已补 PlanetDialog hover label 投影：`campaign_hovered_sector_projected_label_like_java` 复用 `campaign_planet_surface_sector_preview_point` 将 `hoverLabel` 放到 hovered sector 的球面投影点，替代旧的 sector card 固定位置；`campaign_sector_hover_label_like_java` 的 selectable 名称优先走 runtime `Sector::name(...)`，覆盖 numbered sector 与 preset localized name；新增 `desktop_launcher_campaign_route_planet_surface_hover_label_projects_to_surface_like_java` 锁定投影位置。
+- 后续继续补真实 OpenGL 3D backend 执行、完整 numbered sector 选择/面板、projection 图标/弧线与 launch cutscene。
 
 ## UI/图形缺口清单
 
@@ -190,17 +193,17 @@
 - `g3d/MatMesh`：已补 `core/src/mindustry/graphics/g3d/mat_mesh.rs`，覆盖 `transform * local mat` 包裹渲染与 dispose 转发。
 - `g3d/MultiMesh`：已补 `core/src/mindustry/graphics/g3d/multi_mesh.rs`，覆盖子 mesh 顺序 render/dispose fan-out。
 - `g3d/NoiseMesh`：已补 `core/src/mindustry/graphics/g3d/noise_mesh.rs`，覆盖单色/双色噪声 mesh、`7+seed` height、`8+seed` color、`5f` 坐标偏移与 `intensity=0.2`。
-- `g3d/PlanetRenderer`：已补最小场景壳 `core/src/mindustry/graphics/g3d/planet_renderer.rs`，覆盖上游 `fov=60`、`far=150`、`projector scaling=1/150`、skybox/bloom/depth/cull/planet/clouds/sectors/atmosphere/orbit/interface projection 的数据化阶段顺序；`desktop/src/lib.rs::push_campaign_route_page` 已开始消费该 plan，并用 `PlanetSceneStep` 驱动可见 preview primitives；`CursorMoved` 已能通过 `PlanetGrid` surface ray picking 更新 PlanetDialog hover；后续仍需接入完整扇区选择/launch cutscene 与 OpenGL 实绘。
+- `g3d/PlanetRenderer`：已补最小场景壳 `core/src/mindustry/graphics/g3d/planet_renderer.rs`，覆盖上游 `fov=60`、`far=150`、`projector scaling=1/150`、skybox/bloom/depth/cull/planet/clouds/sectors/atmosphere/orbit/interface projection 的数据化阶段顺序；`desktop/src/lib.rs::push_campaign_route_page` 已开始消费该 plan，并用 `PlanetSceneStep` 驱动可见 preview primitives；`CursorMoved` 已能通过 `PlanetGrid` surface ray picking 更新 PlanetDialog hover，hover label 已随 hovered sector 投到 planet preview 表面；后续仍需接入完整扇区选择/launch cutscene 与 OpenGL 实绘。
 - `g3d/SunMesh`：已补 `core/src/mindustry/graphics/g3d/sun_mesh.rs`，覆盖 zero height、simplex/pow/mag 离散 palette clamp 与 `Shaders.unlit`。
 
 ## 下一步
 
 1. 继续补齐当前 UI 明确缺口：
    - dialogs 剩余 0 个明确类名文件；`desktop/src/lib.rs::push_campaign_route_page` 已接入 `g3d/PlanetRenderer` 场景壳；不要在 desktop 重写 `PlanetDialog` 状态机。
-   - 已补 planet surface hover 的首段 ray picking；后续继续补完整 numbered sector 选择/面板、sector 展开/选区实绘、launch cutscene。
+   - 已补 planet surface hover 的首段 ray picking 与 hover label 投影；后续继续补完整 numbered sector 选择/面板、sector 展开/选区实绘、launch cutscene。
    - 高频 UI 行为复核顺序：`HudFragment` → `ConsoleFragment` → `PlayerListFragment`。
 2. 继续复核 graphics/g3d 行为深度：
    - `simplex_noise3d` 当前是本地确定性入口，仍需后续与 Arc `Simplex.noise3d` 做数值级对照。
-   - `PlanetRenderer` 场景壳已完成，桌面 campaign route 已消费 `PlanetScenePlan` 并生成可见 preview primitives，且已补 surface hover ray picking；仍需 OpenGL backend 将 scene step 真实落成 3D draw。
+   - `PlanetRenderer` 场景壳已完成，桌面 campaign route 已消费 `PlanetScenePlan` 并生成可见 preview primitives，且已补 surface hover ray picking 与 hover label 投影；仍需 OpenGL backend 将 scene step 真实落成 3D draw。
 3. 对 `desktop/src/lib.rs` 中已有的菜单/HUD/对话框集中实现继续拆分映射，避免重复实现但保留逐文件 Rust 对应。
 4. 跑桌面端最小启动/渲染路径验证，并继续保持 `cargo check --workspace --all-targets` 通过。
