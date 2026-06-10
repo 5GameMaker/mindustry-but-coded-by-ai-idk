@@ -1,3 +1,6 @@
+use super::schematic::Schematic;
+use crate::mindustry::r#type::Sector;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Trigger {
     Shock,
@@ -157,6 +160,23 @@ impl SaveLoadEvent {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct SectorLaunchLoadoutEvent {
+    pub sector: Sector,
+    pub from: Sector,
+    pub loadout: Schematic,
+}
+
+impl SectorLaunchLoadoutEvent {
+    pub fn new(sector: Sector, from: Sector, loadout: Schematic) -> Self {
+        Self {
+            sector,
+            from,
+            loadout,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientServerConnectEvent {
     pub ip: String,
@@ -207,6 +227,22 @@ mod tests {
         let mut event = ContentPatchLoadEvent::new(vec!["base".into()]);
         event.patches.push("modded".into());
         assert_eq!(event.patches, vec!["base", "modded"]);
+    }
+
+    #[test]
+    fn sector_launch_loadout_event_keeps_java_sector_from_loadout_fields() {
+        let mut sector = Sector::new(101);
+        sector.save_exists = true;
+        let mut from = Sector::new(15);
+        from.save_exists = true;
+        from.add_stored_item("copper", 123);
+        let loadout = Schematic::new(Vec::new(), Default::default(), 4, 4);
+
+        let event = SectorLaunchLoadoutEvent::new(sector.clone(), from.clone(), loadout.clone());
+
+        assert_eq!(event.sector, sector);
+        assert_eq!(event.from, from);
+        assert_eq!(event.loadout, loadout);
     }
 
     #[test]
