@@ -109,8 +109,10 @@ impl PlayerListFragment {
         }
 
         let mut rows = Vec::new();
+        let mut stopped_for_missing_server_connection = false;
         for user in &sorted {
             if !user.has_connection && context.net_server && !user.local {
+                stopped_for_missing_server_connection = true;
                 break;
             }
 
@@ -142,7 +144,7 @@ impl PlayerListFragment {
             visible: self.visible,
             title: format_players_title(players.len()),
             search_text: self.search_text.clone(),
-            not_found: rows.is_empty(),
+            not_found: rows.is_empty() && !stopped_for_missing_server_connection,
             rows,
             show_bans_button: !context.net_client,
             show_admins_button: !context.net_client,
@@ -250,6 +252,20 @@ mod tests {
         let model = fragment.rebuild(&players, &context());
 
         assert_eq!(model.rows.len(), 1);
+    }
+
+    #[test]
+    fn server_missing_connection_returns_without_not_found_like_java() {
+        let mut disconnected = PlayerListPlayer::new(2, "remote", 1);
+        disconnected.local = false;
+        disconnected.has_connection = false;
+        let mut context = context();
+        context.net_server = true;
+
+        let model = PlayerListFragment::new().rebuild(&[disconnected], &context);
+
+        assert!(model.rows.is_empty());
+        assert!(!model.not_found);
     }
 
     #[test]
