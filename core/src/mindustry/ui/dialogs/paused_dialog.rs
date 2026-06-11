@@ -110,6 +110,7 @@ pub enum PausedDialogAction {
     SaveCurrentThenReset {
         loading_text: &'static str,
     },
+    SaveCampaignStats,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -129,6 +130,14 @@ impl PausedDialog {
             self.rebuild_mobile(context)
         } else {
             self.rebuild_desktop(context)
+        }
+    }
+
+    pub fn shown_effects(context: &PauseContext) -> Vec<PausedDialogAction> {
+        if context.state_is_campaign {
+            vec![PausedDialogAction::SaveCampaignStats]
+        } else {
+            Vec::new()
         }
     }
 
@@ -443,6 +452,20 @@ mod tests {
         assert_eq!(model.rows[2][1].text, "@loadgame");
         assert!(!model.rows[2][1].disabled);
         assert_eq!(model.rows.last().unwrap()[0].text, "@save.quit");
+    }
+
+    #[test]
+    fn shown_effects_save_campaign_stats_only_in_campaign_like_java() {
+        let campaign = PauseContext {
+            state_is_campaign: true,
+            ..PauseContext::default()
+        };
+        assert_eq!(
+            PausedDialog::shown_effects(&campaign),
+            vec![PausedDialogAction::SaveCampaignStats]
+        );
+
+        assert!(PausedDialog::shown_effects(&PauseContext::default()).is_empty());
     }
 
     #[test]
