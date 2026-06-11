@@ -1,6 +1,8 @@
 //! Developer console HUD state model mirroring upstream `mindustry.ui.fragments.ConsoleFragment`.
 
 pub const CONSOLE_MESSAGES_SHOWN: usize = 30;
+pub const CONSOLE_MOBILE_BUTTON_SIZE: f32 = 58.0;
+pub const CONSOLE_MOBILE_BUTTON_PAD_LEFT: f32 = 4.0;
 pub const CONSOLE_INJECT_VARIABLES: &str =
     "var unit = Vars.player.unit();var player = Vars.player;var team = Vars.player.team();var core = Vars.player.core();var items = Vars.player.team().items();var build = Vars.world.buildWorld(Core.input.mouseWorldX(), Core.input.mouseWorldY());var cursor = Vars.world.tileWorld(Core.input.mouseWorldX(), Core.input.mouseWorldY());var cursorUnit = Units.closestEnemy(null, Core.input.mouseWorldX(), Core.input.mouseWorldY(), 70, u => true);\n";
 
@@ -10,8 +12,124 @@ pub enum ConsoleAction {
     RequestKeyboard,
     ClearKeyboardFocus,
     ClearScrollFocus,
+    OpenMobileTextInput,
+    HideOnscreenKeyboard,
+    OpenScriptFileChooser,
     ExecuteConsole(String),
     Hide,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsoleMobileButtonKind {
+    Chat,
+    ScrollUp,
+    ScrollDown,
+    File,
+    Cancel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsoleMobileButtonAction {
+    OpenTextInput,
+    ScrollUp,
+    ScrollDown,
+    OpenScriptFileChooser,
+    Hide,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConsoleMobileButtonModel {
+    pub kind: ConsoleMobileButtonKind,
+    pub icon: &'static str,
+    pub style: &'static str,
+    pub action: ConsoleMobileButtonAction,
+    pub disabled: bool,
+    pub size: f32,
+    pub pad_left: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConsoleMobileToolbarModel {
+    pub open: bool,
+    pub field_label: &'static str,
+    pub messages_shown: usize,
+    pub buttons: Vec<ConsoleMobileButtonModel>,
+}
+
+impl ConsoleMobileToolbarModel {
+    pub fn like_java(
+        shown: bool,
+        open: bool,
+        scroll_pos: usize,
+        message_count: usize,
+    ) -> Option<Self> {
+        if !shown {
+            return None;
+        }
+
+        Some(Self {
+            open,
+            field_label: ">",
+            messages_shown: CONSOLE_MESSAGES_SHOWN,
+            buttons: vec![
+                ConsoleMobileButtonModel::new(
+                    ConsoleMobileButtonKind::Chat,
+                    "chat",
+                    ConsoleMobileButtonAction::OpenTextInput,
+                    false,
+                    0.0,
+                ),
+                ConsoleMobileButtonModel::new(
+                    ConsoleMobileButtonKind::ScrollUp,
+                    "upOpen",
+                    ConsoleMobileButtonAction::ScrollUp,
+                    scroll_pos >= message_count,
+                    CONSOLE_MOBILE_BUTTON_PAD_LEFT,
+                ),
+                ConsoleMobileButtonModel::new(
+                    ConsoleMobileButtonKind::ScrollDown,
+                    "downOpen",
+                    ConsoleMobileButtonAction::ScrollDown,
+                    scroll_pos <= 0,
+                    CONSOLE_MOBILE_BUTTON_PAD_LEFT,
+                ),
+                ConsoleMobileButtonModel::new(
+                    ConsoleMobileButtonKind::File,
+                    "fileText",
+                    ConsoleMobileButtonAction::OpenScriptFileChooser,
+                    false,
+                    CONSOLE_MOBILE_BUTTON_PAD_LEFT,
+                ),
+                ConsoleMobileButtonModel::new(
+                    ConsoleMobileButtonKind::Cancel,
+                    "cancel",
+                    ConsoleMobileButtonAction::Hide,
+                    false,
+                    CONSOLE_MOBILE_BUTTON_PAD_LEFT,
+                ),
+            ],
+        })
+    }
+}
+
+impl ConsoleMobileButtonModel {
+    fn new(
+        kind: ConsoleMobileButtonKind,
+        icon: &'static str,
+        action: ConsoleMobileButtonAction,
+        disabled: bool,
+        pad_left: f32,
+    ) -> Self {
+        Self {
+            kind,
+            icon,
+            style: "cleari",
+            action,
+            disabled,
+            size: CONSOLE_MOBILE_BUTTON_SIZE,
+            pad_left,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,6 +265,51 @@ impl ConsoleFragment {
         self.scroll(-1);
     }
 
+    pub fn mobile_toolbar_model(&self, mobile: bool) -> Option<ConsoleMobileToolbarModel> {
+        if !mobile {
+            return None;
+        }
+
+        ConsoleMobileToolbarModel::like_java(
+            self.shown,
+            self.open,
+            self.scroll_pos,
+            self.messages.len(),
+        )
+    }
+
+    pub fn dispatch_mobile_toolbar_action(
+        &mut self,
+        action: ConsoleMobileButtonAction,
+    ) -> Vec<ConsoleAction> {
+        match action {
+            ConsoleMobileButtonAction::OpenTextInput => vec![ConsoleAction::OpenMobileTextInput],
+            ConsoleMobileButtonAction::ScrollUp => {
+                self.mobile_scroll_up();
+                Vec::new()
+            }
+            ConsoleMobileButtonAction::ScrollDown => {
+                self.mobile_scroll_down();
+                Vec::new()
+            }
+            ConsoleMobileButtonAction::OpenScriptFileChooser => {
+                vec![ConsoleAction::OpenScriptFileChooser]
+            }
+            ConsoleMobileButtonAction::Hide => {
+                self.shown = false;
+                vec![ConsoleAction::Hide]
+            }
+        }
+    }
+
+    pub fn accept_mobile_text_input(&mut self, text: impl Into<String>) -> Vec<ConsoleAction> {
+        self.set_input(text);
+        let mut actions = self.send_message();
+        self.clear_chat_input();
+        actions.push(ConsoleAction::HideOnscreenKeyboard);
+        actions
+    }
+
     pub fn add_message(&mut self, message: impl Into<String>) {
         self.messages.insert(0, message.into());
     }
@@ -254,5 +417,135 @@ mod tests {
         console.toggle_mobile();
         assert!(!console.shown());
         assert!(!console.open());
+    }
+
+    #[test]
+    fn mobile_toolbar_model_matches_java_icons_actions_and_disabled_state() {
+        let mut console = ConsoleFragment::new();
+        assert!(console.mobile_toolbar_model(false).is_none());
+        assert!(console.mobile_toolbar_model(true).is_none());
+
+        console.toggle_mobile();
+        let model = console
+            .mobile_toolbar_model(true)
+            .expect("shown mobile console should expose toolbar model");
+        assert!(!model.open);
+        assert_eq!(model.field_label, ">");
+        assert_eq!(model.messages_shown, CONSOLE_MESSAGES_SHOWN);
+        assert_eq!(
+            model
+                .buttons
+                .iter()
+                .map(|button| (
+                    button.kind,
+                    button.icon,
+                    button.style,
+                    button.action,
+                    button.disabled,
+                    button.size,
+                    button.pad_left,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    ConsoleMobileButtonKind::Chat,
+                    "chat",
+                    "cleari",
+                    ConsoleMobileButtonAction::OpenTextInput,
+                    false,
+                    CONSOLE_MOBILE_BUTTON_SIZE,
+                    0.0,
+                ),
+                (
+                    ConsoleMobileButtonKind::ScrollUp,
+                    "upOpen",
+                    "cleari",
+                    ConsoleMobileButtonAction::ScrollUp,
+                    true,
+                    CONSOLE_MOBILE_BUTTON_SIZE,
+                    CONSOLE_MOBILE_BUTTON_PAD_LEFT,
+                ),
+                (
+                    ConsoleMobileButtonKind::ScrollDown,
+                    "downOpen",
+                    "cleari",
+                    ConsoleMobileButtonAction::ScrollDown,
+                    true,
+                    CONSOLE_MOBILE_BUTTON_SIZE,
+                    CONSOLE_MOBILE_BUTTON_PAD_LEFT,
+                ),
+                (
+                    ConsoleMobileButtonKind::File,
+                    "fileText",
+                    "cleari",
+                    ConsoleMobileButtonAction::OpenScriptFileChooser,
+                    false,
+                    CONSOLE_MOBILE_BUTTON_SIZE,
+                    CONSOLE_MOBILE_BUTTON_PAD_LEFT,
+                ),
+                (
+                    ConsoleMobileButtonKind::Cancel,
+                    "cancel",
+                    "cleari",
+                    ConsoleMobileButtonAction::Hide,
+                    false,
+                    CONSOLE_MOBILE_BUTTON_SIZE,
+                    CONSOLE_MOBILE_BUTTON_PAD_LEFT,
+                ),
+            ]
+        );
+
+        console.add_message("one");
+        let model = console.mobile_toolbar_model(true).unwrap();
+        assert!(!model.buttons[1].disabled);
+        assert!(model.buttons[2].disabled);
+
+        console.mobile_scroll_up();
+        let model = console.mobile_toolbar_model(true).unwrap();
+        assert!(model.buttons[1].disabled);
+        assert!(!model.buttons[2].disabled);
+    }
+
+    #[test]
+    fn mobile_toolbar_actions_scroll_file_and_cancel_like_java() {
+        let mut console = ConsoleFragment::new();
+        console.toggle_mobile();
+        console.add_message("newest");
+        console.add_message("older");
+
+        assert!(console
+            .dispatch_mobile_toolbar_action(ConsoleMobileButtonAction::ScrollUp)
+            .is_empty());
+        assert_eq!(console.scroll_pos(), 1);
+        assert!(console
+            .dispatch_mobile_toolbar_action(ConsoleMobileButtonAction::ScrollDown)
+            .is_empty());
+        assert_eq!(console.scroll_pos(), 0);
+        assert_eq!(
+            console
+                .dispatch_mobile_toolbar_action(ConsoleMobileButtonAction::OpenScriptFileChooser),
+            vec![ConsoleAction::OpenScriptFileChooser]
+        );
+        assert_eq!(
+            console.dispatch_mobile_toolbar_action(ConsoleMobileButtonAction::Hide),
+            vec![ConsoleAction::Hide]
+        );
+        assert!(!console.shown());
+        assert_eq!(console.messages().len(), 2);
+    }
+
+    #[test]
+    fn mobile_text_input_accept_sends_and_hides_keyboard_like_java() {
+        let mut console = ConsoleFragment::new();
+        let actions = console.accept_mobile_text_input("print('[x]')");
+
+        let ConsoleAction::ExecuteConsole(source) = &actions[0] else {
+            panic!("expected execute action");
+        };
+        assert!(source.ends_with("print('[x]')"));
+        assert_eq!(actions[1], ConsoleAction::HideOnscreenKeyboard);
+        assert_eq!(console.messages()[0], "[lightgray]> print('[[x]')");
+        assert_eq!(console.history()[1], "print('[x]')");
+        assert_eq!(console.field_text(), "");
     }
 }

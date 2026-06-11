@@ -25,7 +25,9 @@ pub use block_inventory_fragment::{
 };
 pub use chat_fragment::{ChatAction, ChatDrawMessage, ChatFragment, ChatMode, CHAT_MESSAGES_SHOWN};
 pub use console_fragment::{
-    ConsoleAction, ConsoleFragment, CONSOLE_INJECT_VARIABLES, CONSOLE_MESSAGES_SHOWN,
+    ConsoleAction, ConsoleFragment, ConsoleMobileButtonAction, ConsoleMobileButtonKind,
+    ConsoleMobileButtonModel, ConsoleMobileToolbarModel, CONSOLE_INJECT_VARIABLES,
+    CONSOLE_MESSAGES_SHOWN, CONSOLE_MOBILE_BUTTON_PAD_LEFT, CONSOLE_MOBILE_BUTTON_SIZE,
 };
 pub use fade_in_fragment::{FadeInDrawPlan, FadeInFragment};
 pub use hints_fragment::{
