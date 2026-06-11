@@ -24,7 +24,8 @@ pub use block_inventory_fragment::{
     BLOCK_INVENTORY_HOLD_SHRINK, BLOCK_INVENTORY_HOLD_WITHDRAW, BLOCK_INVENTORY_MARGIN,
 };
 pub use chat_fragment::{
-    ChatAction, ChatDrawMessage, ChatFragment, ChatMode, ChatUpdateFrame, CHAT_MESSAGES_SHOWN,
+    ChatAction, ChatDrawMessage, ChatFragment, ChatMode, ChatUpdateFrame, ChatVisibilityUpdate,
+    CHAT_MESSAGES_SHOWN,
 };
 pub use console_fragment::{
     ConsoleAction, ConsoleFragment, ConsoleMobileButtonAction, ConsoleMobileButtonKind,

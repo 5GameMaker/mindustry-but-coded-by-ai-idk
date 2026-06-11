@@ -91,6 +91,12 @@ impl Default for ChatUpdateFrame {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ChatVisibilityUpdate {
+    pub visible: bool,
+    pub actions: Vec<ChatAction>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChatDrawMessage {
     pub text: String,
     pub fading_alpha: f32,
@@ -154,11 +160,34 @@ impl ChatFragment {
         self.scroll_pos
     }
 
+    pub fn fadetime(&self) -> f32 {
+        self.fadetime
+    }
+
     pub fn clear_messages(&mut self) {
         self.messages.clear();
         self.history.clear();
         self.history.push(String::new());
         self.history_pos = 0;
+    }
+
+    pub fn update_visibility_like_java(
+        &mut self,
+        net_active: bool,
+        hud_shown: bool,
+    ) -> ChatVisibilityUpdate {
+        let mut actions = Vec::new();
+        if !net_active && !self.messages.is_empty() {
+            self.clear_messages();
+            if self.shown {
+                actions.extend(self.hide());
+            }
+        }
+
+        ChatVisibilityUpdate {
+            visible: net_active && hud_shown,
+            actions,
+        }
     }
 
     pub fn update_like_java(&mut self, frame: &ChatUpdateFrame) -> Vec<ChatAction> {
@@ -187,6 +216,12 @@ impl ChatFragment {
 
         self.last_frame_had_focus = frame.has_other_focus;
         actions
+    }
+
+    pub fn tick_fade_like_java(&mut self, delta: f32) {
+        if self.fadetime > 0.0 && !self.shown {
+            self.fadetime -= delta / 180.0;
+        }
     }
 
     pub fn toggle(&mut self, mobile: bool, max_text_length: usize) -> Vec<ChatAction> {
@@ -528,5 +563,40 @@ mod tests {
         assert_eq!(chat.field_text(), "draft");
         assert_eq!(chat.mode(), ChatMode::Normal);
         assert_eq!(chat.scroll_pos(), 0);
+    }
+
+    #[test]
+    fn visibility_update_clears_messages_and_hides_on_disconnect_like_java() {
+        let mut chat = ChatFragment::new();
+        chat.add_message(Some("connected"));
+        chat.toggle(false, 150);
+        chat.set_input("draft");
+
+        let update = chat.update_visibility_like_java(false, true);
+
+        assert!(!update.visible);
+        assert_eq!(
+            update.actions,
+            vec![ChatAction::ClearKeyboardFocus, ChatAction::Hide]
+        );
+        assert!(!chat.shown());
+        assert!(chat.messages().is_empty());
+        assert_eq!(chat.history(), &[String::new()]);
+        assert_eq!(chat.field_text(), "");
+    }
+
+    #[test]
+    fn fade_time_decays_only_when_hidden_like_java_draw() {
+        let mut chat = ChatFragment::new();
+        chat.add_message(Some("one"));
+        let initial = chat.fadetime();
+
+        chat.tick_fade_like_java(18.0);
+        assert!((chat.fadetime() - (initial - 0.1)).abs() < f32::EPSILON);
+
+        chat.toggle(false, 150);
+        let shown_fade = chat.fadetime();
+        chat.tick_fade_like_java(180.0);
+        assert_eq!(chat.fadetime(), shown_fade);
     }
 }
