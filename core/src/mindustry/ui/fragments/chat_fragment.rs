@@ -57,6 +57,39 @@ pub enum ChatAction {
     ScheduleSend { delay_frames: f32 },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChatUpdateFrame {
+    pub net_active: bool,
+    pub chat_key_tap: bool,
+    pub has_other_focus: bool,
+    pub console_shown: bool,
+    pub mobile: bool,
+    pub max_text_length: usize,
+    pub chat_history_prev_key_tap: bool,
+    pub chat_history_next_key_tap: bool,
+    pub chat_mode_key_tap: bool,
+    pub chat_scroll_axis: i32,
+    pub player_admin: bool,
+}
+
+impl Default for ChatUpdateFrame {
+    fn default() -> Self {
+        Self {
+            net_active: true,
+            chat_key_tap: false,
+            has_other_focus: false,
+            console_shown: false,
+            mobile: false,
+            max_text_length: 150,
+            chat_history_prev_key_tap: false,
+            chat_history_next_key_tap: false,
+            chat_mode_key_tap: false,
+            chat_scroll_axis: 0,
+            player_admin: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatDrawMessage {
     pub text: String,
@@ -126,6 +159,34 @@ impl ChatFragment {
         self.history.clear();
         self.history.push(String::new());
         self.history_pos = 0;
+    }
+
+    pub fn update_like_java(&mut self, frame: &ChatUpdateFrame) -> Vec<ChatAction> {
+        let mut actions = Vec::new();
+        if frame.net_active
+            && frame.chat_key_tap
+            && !frame.has_other_focus
+            && !self.last_frame_had_focus
+            && !frame.console_shown
+        {
+            actions.extend(self.toggle(frame.mobile, frame.max_text_length));
+        }
+
+        if self.shown {
+            if frame.chat_history_prev_key_tap {
+                self.history_prev();
+            }
+            if frame.chat_history_next_key_tap {
+                self.history_next();
+            }
+            if frame.chat_mode_key_tap {
+                self.next_mode(frame.player_admin);
+            }
+            self.scroll(frame.chat_scroll_axis);
+        }
+
+        self.last_frame_had_focus = frame.has_other_focus;
+        actions
     }
 
     pub fn toggle(&mut self, mobile: bool, max_text_length: usize) -> Vec<ChatAction> {
@@ -278,6 +339,10 @@ impl ChatFragment {
     pub fn set_last_frame_had_focus(&mut self, value: bool) {
         self.last_frame_had_focus = value;
     }
+
+    pub fn last_frame_had_focus(&self) -> bool {
+        self.last_frame_had_focus
+    }
 }
 
 fn format_icons(message: &str) -> String {
@@ -394,5 +459,74 @@ mod tests {
         assert_eq!(chat.field_text(), "first");
         chat.history_next();
         assert_eq!(chat.field_text(), "draft");
+    }
+
+    #[test]
+    fn update_opens_only_when_net_active_no_focus_and_console_closed_like_java() {
+        let mut chat = ChatFragment::new();
+        let mut frame = ChatUpdateFrame {
+            chat_key_tap: true,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            chat.update_like_java(&frame),
+            vec![ChatAction::RequestKeyboard]
+        );
+        assert!(chat.shown());
+
+        chat.hide();
+        frame.console_shown = true;
+        assert!(chat.update_like_java(&frame).is_empty());
+        assert!(!chat.shown());
+
+        frame.console_shown = false;
+        frame.has_other_focus = true;
+        assert!(chat.update_like_java(&frame).is_empty());
+        assert!(chat.last_frame_had_focus());
+
+        frame.has_other_focus = false;
+        assert!(chat.update_like_java(&frame).is_empty());
+        assert!(!chat.shown());
+
+        assert_eq!(
+            chat.update_like_java(&frame),
+            vec![ChatAction::RequestKeyboard]
+        );
+        assert!(chat.shown());
+    }
+
+    #[test]
+    fn update_navigates_history_mode_and_scroll_when_shown_like_java() {
+        let mut chat = ChatFragment::new();
+        chat.set_input("first");
+        chat.send_message(|_, _| false);
+        chat.set_input("draft");
+        chat.toggle(false, 150);
+        for index in 0..14 {
+            chat.add_message(Some(&format!("message-{index}")));
+        }
+
+        chat.update_like_java(&ChatUpdateFrame {
+            chat_history_prev_key_tap: true,
+            chat_mode_key_tap: true,
+            chat_scroll_axis: 8,
+            player_admin: false,
+            ..Default::default()
+        });
+        assert_eq!(chat.field_text(), "/t first");
+        assert_eq!(chat.mode(), ChatMode::Team);
+        assert_eq!(chat.scroll_pos(), 4);
+
+        chat.update_like_java(&ChatUpdateFrame {
+            chat_history_next_key_tap: true,
+            chat_mode_key_tap: true,
+            chat_scroll_axis: -99,
+            player_admin: false,
+            ..Default::default()
+        });
+        assert_eq!(chat.field_text(), "draft");
+        assert_eq!(chat.mode(), ChatMode::Normal);
+        assert_eq!(chat.scroll_pos(), 0);
     }
 }
