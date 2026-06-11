@@ -8,6 +8,9 @@ pub const PLAYER_LIST_ICON_SIZE: f32 = 50.0;
 pub const PLAYER_LIST_WIDTH: f32 = 350.0;
 pub const PLAYER_LIST_MENU_BUTTON_HEIGHT: f32 = 50.0;
 pub const PLAYER_LIST_DIALOG_MIN_WIDTH: f32 = 360.0;
+pub const PLAYER_LIST_MENU_DIALOG_BUTTON_WIDTH: f32 = 220.0;
+pub const PLAYER_LIST_MENU_DIALOG_BUTTON_HEIGHT: f32 = 55.0;
+pub const PLAYER_LIST_TEAM_BUTTON_SIZE: f32 = 50.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlayerListPlayer {
@@ -62,10 +65,73 @@ pub struct PlayerListRow {
     pub label: String,
     pub admin_icon_visible: bool,
     pub clickable: bool,
+    pub spectate_action: Option<PlayerListRowAction>,
     pub menu_button_visible: bool,
+    pub menu_action: Option<PlayerListRowAction>,
+    pub menu_model: Option<PlayerListPlayerMenuModel>,
     pub votekick_button_visible: bool,
+    pub votekick_action: Option<PlayerListRowAction>,
     pub can_switch_team: bool,
     pub can_admin_toggle: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerListFooterButtonAction {
+    ShowBans,
+    ShowAdmins,
+    Close,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerListFooterButtonModel {
+    pub text: &'static str,
+    pub action: PlayerListFooterButtonAction,
+    pub disabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerListRowAction {
+    Spectate { player_id: i32 },
+    OpenMenu { player_id: i32 },
+    StartVoteKick { player_id: i32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlayerListPlayerMenuAction {
+    Ban {
+        player_id: i32,
+    },
+    Kick {
+        player_id: i32,
+    },
+    Trace {
+        player_id: i32,
+    },
+    OpenTeamSelect {
+        player_id: i32,
+    },
+    ToggleAdmin {
+        player_id: i32,
+        uuid: String,
+        currently_admin: bool,
+    },
+    Back,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerListPlayerMenuButtonModel {
+    pub text: &'static str,
+    pub icon: &'static str,
+    pub action: PlayerListPlayerMenuAction,
+    pub checked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerListPlayerMenuModel {
+    pub player_id: i32,
+    pub title: String,
+    pub buttons: Vec<PlayerListPlayerMenuButtonModel>,
+    pub back_button: PlayerListPlayerMenuButtonModel,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +141,7 @@ pub struct PlayerListModel {
     pub search_text: String,
     pub rows: Vec<PlayerListRow>,
     pub not_found: bool,
+    pub footer_buttons: Vec<PlayerListFooterButtonModel>,
     pub show_bans_button: bool,
     pub show_admins_button: bool,
     pub close_button_text: &'static str,
@@ -127,14 +194,27 @@ impl PlayerListFragment {
                 && players.len() >= 3
                 && context.local_player_team == user.team;
             let can_admin_toggle = !context.net_client && !user.local;
+            let spectate_action = (!user.dead && clickable)
+                .then_some(PlayerListRowAction::Spectate { player_id: user.id });
+            let menu_action =
+                menu_button_visible.then_some(PlayerListRowAction::OpenMenu { player_id: user.id });
+            let votekick_action = votekick_button_visible
+                .then_some(PlayerListRowAction::StartVoteKick { player_id: user.id });
+            let menu_model = menu_button_visible.then(|| {
+                PlayerListPlayerMenuModel::like_java(user, context, allow_team_switch, is_local)
+            });
 
             rows.push(PlayerListRow {
                 player_id: user.id,
                 label: format!("[#{}]{}", user.color.to_uppercase(), user.name),
                 admin_icon_visible: user.admin && !(!user.local && context.net_server),
                 clickable,
+                spectate_action,
                 menu_button_visible,
+                menu_action,
+                menu_model,
                 votekick_button_visible,
+                votekick_action,
                 can_switch_team: allow_team_switch,
                 can_admin_toggle,
             });
@@ -146,6 +226,7 @@ impl PlayerListFragment {
             search_text: self.search_text.clone(),
             not_found: rows.is_empty() && !stopped_for_missing_server_connection,
             rows,
+            footer_buttons: PlayerListFooterButtonModel::like_java(context),
             show_bans_button: !context.net_client,
             show_admins_button: !context.net_client,
             close_button_text: "@close",
@@ -178,6 +259,94 @@ impl PlayerListFragment {
 
     pub fn visible(&self) -> bool {
         self.visible
+    }
+}
+
+impl PlayerListFooterButtonModel {
+    fn like_java(context: &PlayerListContext) -> Vec<Self> {
+        vec![
+            Self {
+                text: "@server.bans",
+                action: PlayerListFooterButtonAction::ShowBans,
+                disabled: context.net_client,
+            },
+            Self {
+                text: "@server.admins",
+                action: PlayerListFooterButtonAction::ShowAdmins,
+                disabled: context.net_client,
+            },
+            Self {
+                text: "@close",
+                action: PlayerListFooterButtonAction::Close,
+                disabled: false,
+            },
+        ]
+    }
+}
+
+impl PlayerListPlayerMenuModel {
+    fn like_java(
+        user: &PlayerListPlayer,
+        context: &PlayerListContext,
+        allow_team_switch: bool,
+        is_local: bool,
+    ) -> Self {
+        let mut buttons = Vec::new();
+
+        if !is_local {
+            buttons.push(PlayerListPlayerMenuButtonModel {
+                text: "@player.ban",
+                icon: "hammer",
+                action: PlayerListPlayerMenuAction::Ban { player_id: user.id },
+                checked: false,
+            });
+            buttons.push(PlayerListPlayerMenuButtonModel {
+                text: "@player.kick",
+                icon: "cancel",
+                action: PlayerListPlayerMenuAction::Kick { player_id: user.id },
+                checked: false,
+            });
+            buttons.push(PlayerListPlayerMenuButtonModel {
+                text: "@player.trace",
+                icon: "zoom",
+                action: PlayerListPlayerMenuAction::Trace { player_id: user.id },
+                checked: false,
+            });
+        }
+
+        if allow_team_switch {
+            buttons.push(PlayerListPlayerMenuButtonModel {
+                text: "@player.team",
+                icon: "redo",
+                action: PlayerListPlayerMenuAction::OpenTeamSelect { player_id: user.id },
+                checked: false,
+            });
+        }
+
+        if !context.net_client && !user.local {
+            buttons.push(PlayerListPlayerMenuButtonModel {
+                text: "@player.admin",
+                icon: "admin",
+                action: PlayerListPlayerMenuAction::ToggleAdmin {
+                    player_id: user.id,
+                    uuid: user.uuid.clone(),
+                    currently_admin: user.admin,
+                },
+                checked: user.admin,
+            });
+        }
+
+        Self {
+            player_id: user.id,
+            title: user.name.clone(),
+            buttons,
+            back_button: PlayerListPlayerMenuButtonModel {
+                text: "@back",
+                icon: "left",
+                action: PlayerListPlayerMenuAction::Back,
+                checked: false,
+            },
+        }
     }
 }
 
@@ -277,5 +446,158 @@ mod tests {
         assert!(fragment.toggle(&[], &context()).is_none());
         assert!(!fragment.visible());
         assert!(fragment.rebuild(&[], &context()).search_text.is_empty());
+    }
+
+    #[test]
+    fn footer_buttons_match_java_menu_order_and_client_disabled_state() {
+        let players = vec![PlayerListPlayer::new(1, "local", 1)];
+        let server_model = PlayerListFragment::new().rebuild(&players, &context());
+        assert_eq!(
+            server_model
+                .footer_buttons
+                .iter()
+                .map(|button| (button.text, button.action, button.disabled))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "@server.bans",
+                    PlayerListFooterButtonAction::ShowBans,
+                    false
+                ),
+                (
+                    "@server.admins",
+                    PlayerListFooterButtonAction::ShowAdmins,
+                    false
+                ),
+                ("@close", PlayerListFooterButtonAction::Close, false),
+            ]
+        );
+
+        let mut client_context = context();
+        client_context.net_server = false;
+        client_context.net_client = true;
+        let client_model = PlayerListFragment::new().rebuild(&players, &client_context);
+        assert_eq!(
+            client_model
+                .footer_buttons
+                .iter()
+                .map(|button| (button.text, button.action, button.disabled))
+                .collect::<Vec<_>>(),
+            vec![
+                ("@server.bans", PlayerListFooterButtonAction::ShowBans, true),
+                (
+                    "@server.admins",
+                    PlayerListFooterButtonAction::ShowAdmins,
+                    true
+                ),
+                ("@close", PlayerListFooterButtonAction::Close, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn remote_player_menu_buttons_follow_java_order_and_conditions() {
+        let mut remote = PlayerListPlayer::new(2, "remote", 1);
+        remote.uuid = "remote-uuid".into();
+        let model = PlayerListFragment::new().rebuild(&[remote], &context());
+        let row = &model.rows[0];
+
+        assert_eq!(
+            row.spectate_action,
+            Some(PlayerListRowAction::Spectate { player_id: 2 })
+        );
+        assert_eq!(
+            row.menu_action,
+            Some(PlayerListRowAction::OpenMenu { player_id: 2 })
+        );
+        assert!(!row.votekick_button_visible);
+
+        let menu = row
+            .menu_model
+            .as_ref()
+            .expect("server/admin row should expose the Java menu dialog model");
+        assert_eq!(menu.title, "remote");
+        assert_eq!(
+            menu.buttons
+                .iter()
+                .map(|button| (
+                    button.text,
+                    button.icon,
+                    button.action.clone(),
+                    button.checked
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "@player.ban",
+                    "hammer",
+                    PlayerListPlayerMenuAction::Ban { player_id: 2 },
+                    false,
+                ),
+                (
+                    "@player.kick",
+                    "cancel",
+                    PlayerListPlayerMenuAction::Kick { player_id: 2 },
+                    false,
+                ),
+                (
+                    "@player.trace",
+                    "zoom",
+                    PlayerListPlayerMenuAction::Trace { player_id: 2 },
+                    false,
+                ),
+                (
+                    "@player.team",
+                    "redo",
+                    PlayerListPlayerMenuAction::OpenTeamSelect { player_id: 2 },
+                    false,
+                ),
+                (
+                    "@player.admin",
+                    "admin",
+                    PlayerListPlayerMenuAction::ToggleAdmin {
+                        player_id: 2,
+                        uuid: "remote-uuid".into(),
+                        currently_admin: false,
+                    },
+                    false,
+                ),
+            ]
+        );
+        assert_eq!(menu.back_button.text, "@back");
+        assert_eq!(menu.back_button.icon, "left");
+        assert_eq!(menu.back_button.action, PlayerListPlayerMenuAction::Back);
+    }
+
+    #[test]
+    fn client_same_team_non_admin_row_exposes_votekick_action_like_java() {
+        let local = {
+            let mut player = PlayerListPlayer::new(1, "local", 1);
+            player.local = true;
+            player
+        };
+        let mut same_team = PlayerListPlayer::new(2, "same", 1);
+        same_team.admin = false;
+        let other = PlayerListPlayer::new(3, "other", 2);
+        let mut context = context();
+        context.net_server = false;
+        context.net_client = true;
+        context.local_player_admin = false;
+        context.local_player_team = 1;
+
+        let model = PlayerListFragment::new().rebuild(&[local, same_team, other], &context);
+        let row = model
+            .rows
+            .iter()
+            .find(|row| row.player_id == 2)
+            .expect("same-team remote player should render");
+
+        assert!(!row.menu_button_visible);
+        assert_eq!(row.menu_model, None);
+        assert!(row.votekick_button_visible);
+        assert_eq!(
+            row.votekick_action,
+            Some(PlayerListRowAction::StartVoteKick { player_id: 2 })
+        );
     }
 }
