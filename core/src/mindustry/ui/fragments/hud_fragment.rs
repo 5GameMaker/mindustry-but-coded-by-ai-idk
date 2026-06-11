@@ -86,8 +86,10 @@ pub struct HudContext {
     pub net_server: bool,
     pub net_client: bool,
     pub net_waiting_for_players: bool,
+    pub console_enabled: bool,
     pub player_admin: bool,
     pub player_dead: bool,
+    pub rules_pause_disabled: bool,
     pub enemies: i32,
     pub enemy_core_count: i32,
     pub wave: i32,
@@ -113,8 +115,10 @@ impl Default for HudContext {
             net_server: false,
             net_client: false,
             net_waiting_for_players: false,
+            console_enabled: false,
             player_admin: false,
             player_dead: false,
+            rules_pause_disabled: false,
             enemies: 0,
             enemy_core_count: 0,
             wave: 1,
@@ -152,6 +156,46 @@ pub struct HudOverlayModel {
     pub hud_text: String,
     pub hud_text_requested_visible: bool,
     pub hud_text_alpha: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HudMobileButtonKind {
+    Menu,
+    Flip,
+    Schematics,
+    Pause,
+    Chat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HudMobileButtonAction {
+    OpenPauseDialog,
+    ToggleMenus,
+    ToggleConsoleMobile,
+    OpenSchematics,
+    TogglePlayerList,
+    TogglePause,
+    ToggleChat,
+    OpenResearch,
+    OpenDatabase,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HudMobileButtonModel {
+    pub kind: HudMobileButtonKind,
+    pub icon: &'static str,
+    pub action: Option<HudMobileButtonAction>,
+    pub disabled: bool,
+    pub force_hud_shown: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HudMobileButtonsModel {
+    pub visible: bool,
+    pub background: &'static str,
+    pub button_size: f32,
+    pub buttons: Vec<HudMobileButtonModel>,
+    pub divider_visible: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -451,6 +495,103 @@ impl HudFragment {
         }
     }
 
+    pub fn mobile_buttons_model(&self, context: &HudContext) -> HudMobileButtonsModel {
+        let flip = if context.console_enabled {
+            HudMobileButtonModel {
+                kind: HudMobileButtonKind::Flip,
+                icon: "terminal",
+                action: Some(HudMobileButtonAction::ToggleConsoleMobile),
+                disabled: false,
+                force_hud_shown: true,
+            }
+        } else {
+            HudMobileButtonModel {
+                kind: HudMobileButtonKind::Flip,
+                icon: if self.shown { "downOpen" } else { "upOpen" },
+                action: Some(HudMobileButtonAction::ToggleMenus),
+                disabled: false,
+                force_hud_shown: false,
+            }
+        };
+
+        let pause_disabled = !context.net_active
+            && (context.rules_pause_disabled
+                || (context.state_is_campaign && context.state_after_game_over));
+        let pause = if context.net_active {
+            HudMobileButtonModel {
+                kind: HudMobileButtonKind::Pause,
+                icon: "players",
+                action: Some(HudMobileButtonAction::TogglePlayerList),
+                disabled: false,
+                force_hud_shown: false,
+            }
+        } else {
+            HudMobileButtonModel {
+                kind: HudMobileButtonKind::Pause,
+                icon: if context.state_paused {
+                    "play"
+                } else {
+                    "pause"
+                },
+                action: (!pause_disabled).then_some(HudMobileButtonAction::TogglePause),
+                disabled: pause_disabled,
+                force_hud_shown: false,
+            }
+        };
+
+        let chat = if context.net_active && context.mobile {
+            HudMobileButtonModel {
+                kind: HudMobileButtonKind::Chat,
+                icon: "chat",
+                action: Some(HudMobileButtonAction::ToggleChat),
+                disabled: false,
+                force_hud_shown: false,
+            }
+        } else if context.state_is_campaign {
+            HudMobileButtonModel {
+                kind: HudMobileButtonKind::Chat,
+                icon: "tree",
+                action: Some(HudMobileButtonAction::OpenResearch),
+                disabled: false,
+                force_hud_shown: false,
+            }
+        } else {
+            HudMobileButtonModel {
+                kind: HudMobileButtonKind::Chat,
+                icon: "book",
+                action: Some(HudMobileButtonAction::OpenDatabase),
+                disabled: false,
+                force_hud_shown: false,
+            }
+        };
+
+        HudMobileButtonsModel {
+            visible: context.mobile,
+            background: "black6",
+            button_size: HUD_DSIZE,
+            buttons: vec![
+                HudMobileButtonModel {
+                    kind: HudMobileButtonKind::Menu,
+                    icon: "menu",
+                    action: Some(HudMobileButtonAction::OpenPauseDialog),
+                    disabled: false,
+                    force_hud_shown: false,
+                },
+                flip,
+                HudMobileButtonModel {
+                    kind: HudMobileButtonKind::Schematics,
+                    icon: "paste",
+                    action: Some(HudMobileButtonAction::OpenSchematics),
+                    disabled: false,
+                    force_hud_shown: false,
+                },
+                pause,
+                chat,
+            ],
+            divider_visible: true,
+        }
+    }
+
     pub fn skip_wave_action(
         &self,
         context: &HudContext,
@@ -625,6 +766,17 @@ mod tests {
         HudContext::default()
     }
 
+    fn mobile_button(
+        model: &HudMobileButtonsModel,
+        kind: HudMobileButtonKind,
+    ) -> &HudMobileButtonModel {
+        model
+            .buttons
+            .iter()
+            .find(|button| button.kind == kind)
+            .expect("mobile button should exist")
+    }
+
     #[test]
     fn can_skip_wave_matches_java_gates() {
         let mut ctx = context();
@@ -756,6 +908,116 @@ mod tests {
         ctx.state_paused = true;
         assert!(!hud.overlay_model(&ctx).pause_disabled_visible);
         assert!(hud.overlay_model(&ctx).paused_visible);
+    }
+
+    #[test]
+    fn mobile_buttons_pause_opens_player_list_when_network_active_like_java() {
+        let hud = HudFragment::new();
+        let mut ctx = context();
+        ctx.mobile = true;
+        ctx.net_active = true;
+        ctx.rules_pause_disabled = true;
+        ctx.state_is_campaign = true;
+        ctx.state_after_game_over = true;
+
+        let model = hud.mobile_buttons_model(&ctx);
+        assert!(model.visible);
+        assert_eq!(model.background, "black6");
+        assert_eq!(model.button_size, HUD_DSIZE);
+        assert!(model.divider_visible);
+        assert_eq!(
+            model
+                .buttons
+                .iter()
+                .map(|button| button.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                HudMobileButtonKind::Menu,
+                HudMobileButtonKind::Flip,
+                HudMobileButtonKind::Schematics,
+                HudMobileButtonKind::Pause,
+                HudMobileButtonKind::Chat,
+            ]
+        );
+
+        let pause = mobile_button(&model, HudMobileButtonKind::Pause);
+        assert_eq!(pause.icon, "players");
+        assert_eq!(pause.action, Some(HudMobileButtonAction::TogglePlayerList));
+        assert!(!pause.disabled);
+    }
+
+    #[test]
+    fn mobile_buttons_pause_toggles_game_pause_when_offline_like_java() {
+        let hud = HudFragment::new();
+        let mut ctx = context();
+        ctx.mobile = true;
+        ctx.state_paused = false;
+
+        let model = hud.mobile_buttons_model(&ctx);
+        let pause = mobile_button(&model, HudMobileButtonKind::Pause);
+        assert_eq!(pause.icon, "pause");
+        assert_eq!(pause.action, Some(HudMobileButtonAction::TogglePause));
+        assert!(!pause.disabled);
+
+        ctx.state_paused = true;
+        let model = hud.mobile_buttons_model(&ctx);
+        let pause = mobile_button(&model, HudMobileButtonKind::Pause);
+        assert_eq!(pause.icon, "play");
+        assert_eq!(pause.action, Some(HudMobileButtonAction::TogglePause));
+
+        ctx.state_paused = false;
+        ctx.rules_pause_disabled = true;
+        let model = hud.mobile_buttons_model(&ctx);
+        let pause = mobile_button(&model, HudMobileButtonKind::Pause);
+        assert_eq!(pause.icon, "pause");
+        assert_eq!(pause.action, None);
+        assert!(pause.disabled);
+    }
+
+    #[test]
+    fn mobile_buttons_flip_and_chat_icons_follow_java_update_branches() {
+        let mut hud = HudFragment::new();
+        let mut ctx = context();
+        ctx.mobile = true;
+
+        let model = hud.mobile_buttons_model(&ctx);
+        let flip = mobile_button(&model, HudMobileButtonKind::Flip);
+        assert_eq!(flip.icon, "downOpen");
+        assert_eq!(flip.action, Some(HudMobileButtonAction::ToggleMenus));
+        assert!(!flip.force_hud_shown);
+        let chat = mobile_button(&model, HudMobileButtonKind::Chat);
+        assert_eq!(chat.icon, "book");
+        assert_eq!(chat.action, Some(HudMobileButtonAction::OpenDatabase));
+
+        hud.toggle_menus();
+        let model = hud.mobile_buttons_model(&ctx);
+        assert_eq!(
+            mobile_button(&model, HudMobileButtonKind::Flip).icon,
+            "upOpen"
+        );
+
+        ctx.console_enabled = true;
+        let model = hud.mobile_buttons_model(&ctx);
+        let flip = mobile_button(&model, HudMobileButtonKind::Flip);
+        assert_eq!(flip.icon, "terminal");
+        assert_eq!(
+            flip.action,
+            Some(HudMobileButtonAction::ToggleConsoleMobile)
+        );
+        assert!(flip.force_hud_shown);
+
+        ctx.console_enabled = false;
+        ctx.state_is_campaign = true;
+        let model = hud.mobile_buttons_model(&ctx);
+        let chat = mobile_button(&model, HudMobileButtonKind::Chat);
+        assert_eq!(chat.icon, "tree");
+        assert_eq!(chat.action, Some(HudMobileButtonAction::OpenResearch));
+
+        ctx.net_active = true;
+        let model = hud.mobile_buttons_model(&ctx);
+        let chat = mobile_button(&model, HudMobileButtonKind::Chat);
+        assert_eq!(chat.icon, "chat");
+        assert_eq!(chat.action, Some(HudMobileButtonAction::ToggleChat));
     }
 
     #[test]

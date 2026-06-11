@@ -35,6 +35,7 @@ pub use hints_fragment::{
 };
 pub use hud_fragment::{
     can_skip_wave, format_waiting_seconds, status_text, HudContext, HudFragment, HudFragmentAction,
+    HudMobileButtonAction, HudMobileButtonKind, HudMobileButtonModel, HudMobileButtonsModel,
     HudObjective, HudOverlayModel, HudRulesSnapshot, HudStatusModel, HudToastAction,
     HudUnlockAction, HudWaveSkipAction, HUD_DSIZE, HUD_PAUSE_DISABLED_DURATION, HUD_PAUSE_HEIGHT,
     HUD_STATUS_TABLE_WIDTH, HUD_TOAST_HOLD_DURATION, HUD_TOAST_INTERVAL_MILLIS, HUD_TOAST_MARGIN,
